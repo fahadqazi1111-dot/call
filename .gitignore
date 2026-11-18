@@ -56,3 +56,5 @@ server.log
 db/custom.db
 db/uploads/
 db/*.db
+tool-results/
+agent-ctx/
