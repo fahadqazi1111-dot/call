@@ -6,7 +6,7 @@ import { Video, Mic, Lock, Users, Globe2, Zap } from 'lucide-react'
 /** Left branding pane of the desktop auth split (hidden on phones). */
 export function AuthBranding() {
   return (
-    <div className="bg-dark-grad relative hidden flex-col overflow-hidden text-white md:flex md:p-8 lg:p-12">
+    <div className="bg-dark-grad relative hidden flex-col overflow-hidden text-white md:flex md:min-h-0 md:overflow-y-auto md:p-8 lg:p-12 no-scrollbar">
       {/* soft glow accents */}
       <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-[#2F5BEA]/30 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-[#3EC0FF]/20 blur-3xl" />

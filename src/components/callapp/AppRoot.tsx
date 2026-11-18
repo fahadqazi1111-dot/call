@@ -81,7 +81,7 @@ export function AppRoot() {
   if (isDesktop) {
     return (
       <div className="relative h-[100dvh] w-full overflow-hidden">
-        <div className="grid h-full w-full grid-rows-[1fr] grid-cols-1 bg-white md:grid-cols-[minmax(300px,44%)_1fr] lg:grid-cols-[minmax(0,1fr)_minmax(500px,640px)]">
+        <div className="grid h-full w-full grid-rows-[minmax(0,1fr)] grid-cols-1 bg-white md:grid-cols-[minmax(300px,44%)_1fr] lg:grid-cols-[minmax(0,1fr)_minmax(500px,640px)]">
           <AuthBranding />
           <div className="relative h-full min-h-0">
             {phase === 'auth' ? <AuthScreen /> : <OnboardingScreen />}
