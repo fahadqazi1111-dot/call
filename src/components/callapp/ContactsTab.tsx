@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Avatar } from './Avatar'
+import { Avatar, OfficialAvatar } from './Avatar'
 import { StaffTick } from './StaffTick'
 import {
   Search,
@@ -219,7 +219,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   return (
     <div className="flex h-full flex-col">
       <header
-        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-4 pb-3 pt-5' : 'px-6 pt-14'}`}
       >
         <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
           Contacts
@@ -329,32 +329,38 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
         ) : (
           groups.map(([letter, arr]) => (
             <div key={letter}>
-              <div className={`pb-1 pt-3 text-xs font-bold text-cbrand ${desk ? 'px-5' : 'px-6'}`}>{letter}</div>
+              <div className={`pb-1 pt-3 text-xs font-bold text-cbrand ${desk ? 'px-4' : 'px-6'}`}>{letter}</div>
               {arr.map((c) => (
-                <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
-                  <Avatar
-                    name={c.name}
-                    avatarKey={c.user?.avatarKey ?? 0}
-                    size={desk ? 42 : 46}
-                    online={c.user ? online[c.user.id] : undefined}
-                    src={c.user?.avatarUrl ?? null}
-                  />
+                <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-4' : 'px-6'}`}>
+                  {c.user?.isOfficial ? (
+                    <OfficialAvatar size={desk ? 42 : 46} online={online[c.user.id]} />
+                  ) : (
+                    <Avatar
+                      name={c.name}
+                      avatarKey={c.user?.avatarKey ?? 0}
+                      size={desk ? 42 : 46}
+                      online={c.user ? online[c.user.id] : undefined}
+                      src={c.user?.avatarUrl ?? null}
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-[15px] font-bold text-cink">
+                    <div className="flex items-center gap-1.5 text-[15px] font-bold text-cink">
                       <span className="truncate">{c.name}</span>
                       {c.user && <StaffTick role={c.user.role} isOfficial={c.user.isOfficial} size={14} />}
+                    </div>
+                    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-[#4A5568]">
+                      <span className="truncate">
+                        {c.user
+                          ? online[c.user.id]
+                            ? 'Online now'
+                            : c.phone
+                          : `Not on CALL · ${c.phone}`}
+                      </span>
                       {c.user && (
                         <span className="flex-none rounded-full bg-[#E3EBFF] px-2 py-0.5 text-[10px] font-bold text-cbrand-deep">
                           ON CALL
                         </span>
                       )}
-                    </div>
-                    <div className="mt-0.5 truncate text-[13px] text-[#4A5568]">
-                      {c.user
-                        ? online[c.user.id]
-                          ? 'Online now'
-                          : c.phone
-                        : `Not on CALL · ${c.phone}`}
                     </div>
                   </div>
                   {c.user ? (
@@ -396,7 +402,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           ))
         )}
 
-        <p className={`pt-4 text-center text-xs text-[#9AA8C7] ${desk ? 'px-5' : 'px-6'}`}>
+        <p className={`pt-4 text-center text-xs text-[#9AA8C7] ${desk ? 'px-4' : 'px-6'}`}>
           {registeredCount} of {contacts.length} contacts are on CALL
         </p>
       </div>

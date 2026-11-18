@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Avatar } from './Avatar'
+import { Avatar, OfficialAvatar } from './Avatar'
 import { VoiceBubble } from './VoiceBubble'
 import { useRecorder } from './useRecorder'
 import { useApp } from '@/lib/callapp/store'
@@ -138,7 +138,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         >
           <ChevronLeft size={22} />
         </button>
-        <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />
+        {peer.isOfficial ? <OfficialAvatar size={42} /> : <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</span>
@@ -179,7 +179,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       >
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
-            <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} src={peer.avatarUrl} />
+            {peer.isOfficial ? <OfficialAvatar size={84} /> : <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} src={peer.avatarUrl} />}
             <p className="mt-4 flex items-center gap-1.5 text-lg font-bold text-cink">
               {peer.name}
               <StaffTick role={peer.role} isOfficial={peer.isOfficial} size={17} />

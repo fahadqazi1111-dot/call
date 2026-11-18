@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Avatar } from './Avatar'
+import { Avatar, OfficialAvatar } from './Avatar'
 import { StoriesTray } from './StoriesTray'
 import { StaffTick } from './StaffTick'
 import { Search, Plus, Mic, Video, Phone, Check, CheckCheck, MessageSquare, Camera } from 'lucide-react'
@@ -51,7 +51,7 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
   return (
     <div className="flex h-full flex-col">
       <header
-        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-4 pb-3 pt-5' : 'px-6 pt-14'}`}
       >
         <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
           Chats
@@ -140,8 +140,8 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
           list.map((c) => (
             <button
               key={c.conversationId}
-              className={`flex w-full items-center gap-3.5 text-left transition-colors ${
-                desk ? 'mx-2 rounded-xl px-3 py-2.5' : 'px-6 py-3'
+              className={`flex text-left transition-colors ${
+                desk ? 'mx-2 w-[calc(100%-16px)] items-center gap-3 rounded-xl px-2 py-2.5' : 'flex w-full items-center gap-3.5 px-6 py-3'
               } ${
                 openPeerId === c.peer.id
                   ? desk
@@ -151,7 +151,11 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
               }`}
               onClick={() => openChat(c.peer.id)}
             >
-              <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} src={c.peer.avatarUrl} />
+              {c.peer.isOfficial ? (
+                <OfficialAvatar size={desk ? 48 : 56} />
+              ) : (
+                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} src={c.peer.avatarUrl} />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-[16px] font-bold text-cink">
                   <span className="truncate">{c.peer.name}</span>

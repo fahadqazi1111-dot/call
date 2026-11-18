@@ -297,15 +297,17 @@ function ProfileListPanel() {
 
       <div className="desk-scroll flex flex-1 flex-col overflow-y-auto px-5 pb-4 pt-6">
         <div className="flex flex-col items-center text-center">
-          <Avatar name={me.name} avatarKey={me.avatarKey} size={88} src={me.avatarUrl} />
-          <div className="mt-3.5 text-lg font-extrabold text-cink">{me.name}</div>
-          <div className="mt-0.5 text-sm text-cmut">+{me.phone}</div>
-          <span className="mt-2.5 inline-block rounded-[20px] bg-[#E3EBFF] px-3.5 py-1.5 text-[12px] font-semibold text-cbrand-deep">
-            {me.about}
+          <span className="inline-flex rounded-full bg-csoft p-[4px] ring-1 ring-cline">
+            <Avatar name={me.name} avatarKey={me.avatarKey} size={88} src={me.avatarUrl} className="rounded-full ring-[3px] ring-white" />
           </span>
-          <button className="btn-p mt-4 w-full" onClick={() => setTab('profile')}>
-            <User size={18} /> Manage profile
-          </button>
+          <div className="mt-3.5 text-lg font-extrabold text-cink">{me.name}</div>
+          <div className="mt-0.5 text-sm font-semibold text-cbrand">@{me.username}</div>
+          <div className="mt-0.5 text-sm text-cmut">+{me.phone}</div>
+          {me.about && (
+            <span className="mt-2.5 inline-block max-w-[240px] truncate rounded-[20px] bg-csoft px-3.5 py-1.5 text-[12px] font-semibold text-cmut">
+              {me.about}
+            </span>
+          )}
           <button
             className="mt-2 flex h-[48px] w-full items-center justify-center gap-2 rounded-[16px] text-[15px] font-semibold text-cred transition hover:bg-[#FEF0EF]"
             onClick={() => {
@@ -339,7 +341,7 @@ function ProfileListPanel() {
                     setTab('chats')
                   }}
                 >
-                  <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={36} />
+                  <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={36} src={c.peer.avatarUrl} />
                   <span className="truncate text-[14px] font-semibold text-cink">{c.peer.name}</span>
                 </button>
               ))}

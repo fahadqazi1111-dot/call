@@ -39,37 +39,56 @@ export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   const mine = groups.find((g) => g.mine)
   const others = groups.filter((g) => !g.mine)
   const compact = variant === 'desktop'
+  const myHasStory = !!mine && mine.stories.length > 0
 
   return (
-    <div className={`flex gap-4 overflow-x-auto pb-1 pt-1 ${compact ? 'px-4' : 'px-5'} stories-scroll`}>
+    <div
+      className={`stories-scroll no-scrollbar flex gap-4 overflow-x-auto pb-1.5 pt-1 px-4 ${
+        compact ? 'pt-2' : ''
+      }`}
+    >
       {/* my status */}
       <button
-        className="relative flex flex-none flex-col items-center gap-1.5"
+        className="group relative flex flex-none flex-col items-center gap-1.5"
         onClick={() => {
-          if (mine && mine.stories.length > 0) {
-            setViewing({ groups: [mine], start: 0 })
+          if (myHasStory) {
+            setViewing({ groups: [mine!], start: 0 })
           } else {
             setOverlay('story-composer')
           }
         }}
-        aria-label={mine && mine.stories.length ? 'View my story' : 'Add to my story'}
+        aria-label={myHasStory ? 'View my story' : 'Add to my story'}
       >
-        <span className="relative inline-block">
-          <Avatar name={me?.name ?? 'Me'} avatarKey={me?.avatarKey ?? 0} size={compact ? 52 : 62} src={me?.avatarUrl} />
-          {(!mine || mine.stories.length === 0) && (
-            <span className="absolute -bottom-0.5 -right-0.5 flex h-[24px] w-[24px] items-center justify-center rounded-full bg-cbrand text-white ring-[3px] ring-white">
-              <Plus size={15} strokeWidth={2.6} />
+        <span className="relative inline-flex">
+          {myHasStory ? (
+            <span
+              className={`rounded-full p-[3px] ${
+                mine!.allSeen ? 'bg-[#C9D2E4]' : 'bg-gradient-to-tr from-[#2F5BE0] via-[#7B3FE4] to-[#E1306C]'
+              }`}
+            >
+              <Avatar name={me?.name ?? 'Me'} avatarKey={me?.avatarKey ?? 0} size={compact ? 50 : 58} src={me?.avatarUrl} className="ring-2 ring-white rounded-full" />
+            </span>
+          ) : (
+            <span className="rounded-full p-[3px] ring-[1.5px] ring-[#C9D2E4]">
+              <Avatar name={me?.name ?? 'Me'} avatarKey={me?.avatarKey ?? 0} size={compact ? 50 : 58} src={me?.avatarUrl} />
             </span>
           )}
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 flex h-[24px] w-[24px] items-center justify-center rounded-full text-white ring-[3px] ring-white transition group-hover:scale-105 ${
+              myHasStory ? 'bg-cink/80' : 'bg-cbrand'
+            }`}
+          >
+            <Plus size={15} strokeWidth={2.6} />
+          </span>
         </span>
-        <span className="max-w-[64px] truncate text-[11px] font-semibold text-cink">My status</span>
+        <span className="max-w-[66px] truncate text-[11px] font-semibold leading-4 text-cink">My status</span>
       </button>
 
       {/* friends */}
       {others.map((g) => (
         <button
           key={g.userId}
-          className="relative flex flex-none flex-col items-center gap-1.5"
+          className="group flex flex-none flex-col items-center gap-1.5"
           onClick={() => {
             const idx = groups.findIndex((x) => x.userId === g.userId)
             setViewing({ groups, start: idx })
@@ -77,13 +96,13 @@ export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           aria-label={`${g.name}'s story`}
         >
           <span
-            className={`rounded-full p-[2.5px] ${g.allSeen ? 'bg-[#D5DAE8]' : 'bg-gradient-to-tr from-[#2F5BE0] via-[#7B3FE4] to-[#E1306C]'}`}
+            className={`rounded-full p-[3px] transition group-hover:scale-[1.04] ${
+              g.allSeen ? 'bg-[#C9D2E4]' : 'bg-gradient-to-tr from-[#2F5BE0] via-[#7B3FE4] to-[#E1306C]'
+            }`}
           >
-            <span className="rounded-full bg-white p-[2px]">
-              <Avatar name={g.name} avatarKey={g.avatarKey} size={compact ? 48 : 58} src={g.avatarUrl} />
-            </span>
+            <Avatar name={g.name} avatarKey={g.avatarKey} size={compact ? 50 : 58} src={g.avatarUrl} className="rounded-full ring-2 ring-white" />
           </span>
-          <span className="max-w-[64px] truncate text-[11px] font-semibold text-cink">{g.name.split(' ')[0]}</span>
+          <span className="max-w-[66px] truncate text-[11px] font-semibold leading-4 text-cink">{g.name.split(' ')[0]}</span>
         </button>
       ))}
 

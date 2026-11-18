@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Avatar } from './Avatar'
 import { CallLogoMark } from './CallLogo'
+import { StaffTick } from './StaffTick'
 import { useApp } from '@/lib/callapp/store'
 import { api } from '@/lib/callapp/api'
 import { toast } from 'sonner'
@@ -15,7 +16,6 @@ import {
   Camera,
   Pencil,
   LogOut,
-  Zap,
   Globe2,
   Wifi,
   BadgeCheck,
@@ -27,6 +27,9 @@ import {
   CheckCircle2,
   XCircle,
   Clock3,
+  Gem,
+  Mail,
+  Infinity as InfinityIcon,
 } from 'lucide-react'
 
 const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
@@ -236,94 +239,161 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     setShowEdit(true)
   }
 
+  const isStaff = me.role === 'admin' || me.role === 'team'
+
   return (
     <div
-      className={`app-scroll h-full overflow-y-auto ${
-        desk ? 'desk-scroll mx-auto w-full max-w-xl pb-10 pt-10' : 'pb-[96px]'
-      }`}
+      className={`app-scroll h-full overflow-y-auto ${desk ? 'desk-scroll w-full pb-10' : 'pb-[100px]'}`}
     >
-      <div className={`flex flex-col items-center px-6 text-center ${desk ? 'pt-2' : 'pt-14'}`}>
-        <div className="relative">
-          <Avatar name={me.name} avatarKey={me.avatarKey} size={104} src={me.avatarUrl} />
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onPickFile(e)} />
-          <button
-            className="absolute -bottom-0 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-2 border-cbg bg-white text-cbrand shadow transition hover:bg-csoft disabled:opacity-60"
-            aria-label="Change profile photo"
-            title="Change profile photo"
-            disabled={photoBusy}
-            onClick={() => fileRef.current?.click()}
-          >
-            {photoBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-          </button>
-        </div>
-        <h1 className="mt-3.5 text-2xl font-extrabold text-cink">{me.name}</h1>
-        <button
-          className="mt-1 flex items-center gap-1 text-sm font-bold text-cbrand transition hover:opacity-80"
-          onClick={openUsername}
-          aria-label="Edit username"
-        >
-          <AtSign size={14} className="-ml-1" />
-          {me.username}
-          <Pencil size={11} className="opacity-60" />
-        </button>
-        <p className="mt-1 text-sm text-cmut">+{me.phone}</p>
-        <span className="mt-3 inline-block rounded-[20px] bg-[#E3EBFF] px-4 py-1.5 text-[13px] font-semibold text-cbrand-deep">
-          {me.about}
-        </span>
-        <div className="mt-3 flex items-center gap-4">
-          <button
-            className="flex items-center gap-1.5 text-sm font-semibold text-cbrand transition hover:opacity-80"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Camera size={14} /> Change photo
-          </button>
-          <button
-            className="flex items-center gap-1.5 text-sm font-semibold text-cbrand transition hover:opacity-80"
-            onClick={openEdit}
-          >
-            <Pencil size={14} /> Edit profile
-          </button>
-        </div>
-      </div>
-
-      <div className="mx-6 mt-6 overflow-hidden rounded-[20px] border border-cline bg-white">
-        <Row Icon={AtSign} label="Username" sub={`@${me.username} · unique handle`} onClick={openUsername} />
-        <Row Icon={Coins} label="Wallet & coins" sub={wallet ? `🪙 ${wallet.coins} coins · 💎 ${wallet.earnings} diamonds` : 'Coins, gifts & withdrawals'} onClick={() => setOverlay('wallet')} />
-        <Row Icon={Bot} label="CALL AI Assistant" sub="Chat, voice & image intelligence" onClick={() => setOverlay('ai')} />
-        <Row Icon={Bell} label="Notifications" sub="Messages, gifts & battles" onClick={() => setOverlay('notifications')} />
-        {(me.role === 'admin' || me.role === 'team') && <Row Icon={Shield} label="Admin panel" sub="Manage the CALL platform" onClick={() => setOverlay('admin')} />}
-      </div>
-
-      <div className="mx-6 mt-3 overflow-hidden rounded-[20px] border border-cline bg-white">
-        <Row Icon={User} label="Account" sub={me.email ? `${me.email}${me.emailVerified ? ' ✓ verified' : ''}` : me.phone} />
-        <Row Icon={Bell} label="Push notifications" sub="New messages & calls" onClick={enableNotifications} />
-        <Row Icon={ShieldCheck} label="Privacy & security" sub="Peer-to-peer encrypted calls" />
-        <Row Icon={Zap} label="Free & unlimited" sub="Zero budget app — no charges ever" />
-      </div>
-
-      <div className="mx-6 mt-3 overflow-hidden rounded-[20px] border border-cline bg-white">
-        <Row Icon={Wifi} label="Connection" sub="WebRTC + realtime socket" />
-        <Row Icon={Globe2} label="Language" sub="English" />
-        <Row Icon={Info} label="Help & support" sub="One World. One Call." />
-      </div>
-
-      <button
-        className="mx-6 mt-4 flex h-[52px] items-center justify-center gap-2 rounded-[16px] text-[15px] font-semibold text-cred hover:bg-[#FEF0EF]"
-        onClick={() => {
-          if (confirm('Log out of CALL?')) logout()
-        }}
+      {/* ============ hero banner ============ */}
+      <div
+        className={`relative overflow-hidden bg-dark-grad text-center text-white ${
+          desk ? 'mx-5 mt-6 rounded-[30px] pb-24 pt-10' : 'rounded-b-[34px] pb-24 pt-12'
+        }`}
       >
-        <LogOut size={19} /> Log out
-      </button>
+        {/* glow orbs */}
+        <div className="pointer-events-none absolute -left-12 -top-20 h-60 w-60 rounded-full bg-[#2F5BE0]/45 blur-3xl" />
+        <div className="pointer-events-none absolute -right-14 top-4 h-48 w-48 rounded-full bg-[#7B3FE4]/35 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 left-1/4 h-44 w-44 rounded-full bg-[#E1306C]/25 blur-3xl" />
 
-      <div className="mt-6 flex flex-col items-center gap-1.5 pb-4">
-        <div className="flex items-center gap-2 text-cmut">
-          <CallLogoMark size={26} />
-          <span className="text-sm font-extrabold tracking-tight text-cink">CALL</span>
-          <span className="text-xs text-cmut">· One World. One Call.</span>
+        <div className="relative flex flex-col items-center px-6">
+          <div className="relative">
+            <span className="inline-flex rounded-full bg-white/10 p-[4px] ring-1 ring-white/25">
+              <Avatar
+                name={me.name}
+                avatarKey={me.avatarKey}
+                size={desk ? 110 : 104}
+                src={me.avatarUrl}
+                className="rounded-full ring-[3.5px] ring-white/95"
+              />
+            </span>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onPickFile(e)} />
+            <button
+              className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#0B1B40] bg-white text-cbrand shadow-lg transition hover:scale-105 disabled:opacity-60"
+              aria-label="Change profile photo"
+              title="Change profile photo"
+              disabled={photoBusy}
+              onClick={() => fileRef.current?.click()}
+            >
+              {photoBusy ? <Loader2 size={17} className="animate-spin" /> : <Camera size={17} />}
+            </button>
+          </div>
+
+          <h1 className="mt-4 flex items-center gap-2 text-[24px] font-extrabold tracking-tight">
+            {me.name}
+            {isStaff && <StaffTick role={me.role} size={19} />}
+          </h1>
+
+          <button
+            className="mt-2 flex items-center gap-1 rounded-full bg-white/10 px-3.5 py-1.5 text-[13px] font-bold text-white/90 ring-1 ring-white/20 transition hover:bg-white/15"
+            onClick={openUsername}
+            aria-label="Edit username"
+          >
+            <AtSign size={13} />
+            {me.username}
+            <Pencil size={11} className="opacity-70" />
+          </button>
+
+          <p className="mt-1.5 text-[13px] font-medium text-white/55">+{me.phone}</p>
+
+          {me.about && (
+            <span className="mt-3 inline-block max-w-[300px] truncate rounded-[20px] bg-white/10 px-4 py-1.5 text-[13px] font-semibold text-white/85 ring-1 ring-white/15">
+              {me.about}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1 text-[11px] text-[#9AA8C7]">
-          <BadgeCheck size={12} className="text-cgreen" /> Free forever · v1.0
+      </div>
+
+      {/* ============ stats (overlap hero) ============ */}
+      <div className={`relative z-10 -mt-14 grid grid-cols-3 gap-3 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`}>
+        <button className="stat-tile group" onClick={() => setOverlay('wallet')}>
+          <span className="stat-ico bg-[#FFF6E6] text-[#B45309]"><Coins size={18} /></span>
+          <span className="stat-val">{wallet ? wallet.coins.toLocaleString() : '0'}</span>
+          <span className="stat-lbl">Coins</span>
+        </button>
+        <button className="stat-tile group" onClick={() => setOverlay('wallet')}>
+          <span className="stat-ico bg-[#E0F2FE] text-[#0369A1]"><Gem size={18} /></span>
+          <span className="stat-val">{wallet ? wallet.earnings.toLocaleString() : '0'}</span>
+          <span className="stat-lbl">Diamonds</span>
+        </button>
+        <div className="stat-tile">
+          <span className="stat-ico bg-[#DFF3E7] text-[#0B8A46]"><InfinityIcon size={18} /></span>
+          <span className="stat-val">100%</span>
+          <span className="stat-lbl">Free forever</span>
+        </div>
+      </div>
+
+      {/* ============ quick actions ============ */}
+      <section className={`mt-6 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Quick actions">
+        <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Explore</h2>
+        <div className={`grid gap-3 ${isStaff ? 'grid-cols-4' : 'grid-cols-3'}`}>
+          <button className="qa-tile" onClick={() => setOverlay('wallet')}>
+            <span className="qa-ico bg-[#FFF6E6] text-[#B45309]"><Coins size={20} /></span>
+            <span className="qa-lbl">Wallet</span>
+          </button>
+          <button className="qa-tile" onClick={() => setOverlay('ai')}>
+            <span className="qa-ico bg-[#F1ECFE] text-[#6D28D9]"><Bot size={20} /></span>
+            <span className="qa-lbl">CALL AI</span>
+          </button>
+          <button className="qa-tile" onClick={() => setOverlay('notifications')}>
+            <span className="qa-ico bg-[#E3EBFF] text-cbrand-deep"><Bell size={20} /></span>
+            <span className="qa-lbl">Alerts</span>
+          </button>
+          {isStaff && (
+            <button className="qa-tile" onClick={() => setOverlay('admin')}>
+              <span className="qa-ico bg-[#FEECEB] text-cred"><Shield size={20} /></span>
+              <span className="qa-lbl">Admin</span>
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* ============ account settings ============ */}
+      <section className={`mt-6 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Account settings">
+        <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Account</h2>
+        <div className="overflow-hidden rounded-[22px] border border-cline bg-white shadow-[0_1px_3px_rgba(16,32,72,0.04)]">
+          <Row Icon={AtSign} label="Username" sub={`@${me.username} · unique handle`} onClick={openUsername} />
+          <Row Icon={User} label="Edit profile" sub="Name, about & photo" onClick={openEdit} />
+          <Row
+            Icon={Mail}
+            label="Email"
+            sub={me.email ? `${me.email}${me.emailVerified ? ' · verified' : ''}` : 'Not linked yet'}
+          />
+          <Row Icon={Bell} label="Push notifications" sub="New messages & calls" onClick={enableNotifications} />
+        </div>
+      </section>
+
+      {/* ============ privacy & support ============ */}
+      <section className={`mt-5 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Privacy and support">
+        <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Privacy & support</h2>
+        <div className="overflow-hidden rounded-[22px] border border-cline bg-white shadow-[0_1px_3px_rgba(16,32,72,0.04)]">
+          <Row Icon={ShieldCheck} label="Privacy & security" sub="Peer-to-peer encrypted calls" />
+          <Row Icon={Wifi} label="Connection" sub="WebRTC + realtime socket" />
+          <Row Icon={Globe2} label="Language" sub="English" />
+          <Row Icon={Info} label="Help & support" sub="One World. One Call." />
+        </div>
+      </section>
+
+      {/* ============ logout ============ */}
+      <div className={`mt-6 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`}>
+        <button
+          className="flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] border border-[#FBC9C5] bg-white text-[15px] font-bold text-cred shadow-[0_1px_3px_rgba(16,32,72,0.04)] transition hover:bg-[#FEF0EF]"
+          onClick={() => {
+            if (confirm('Log out of CALL?')) logout()
+          }}
+        >
+          <LogOut size={18} /> Log out
+        </button>
+
+        <div className="mt-7 flex flex-col items-center gap-1.5 pb-2">
+          <div className="flex items-center gap-2 text-cmut">
+            <CallLogoMark size={24} />
+            <span className="text-sm font-extrabold tracking-tight text-cink">CALL</span>
+            <span className="text-xs text-cmut">· One World. One Call.</span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-[#9AA8C7]">
+            <BadgeCheck size={12} className="text-cgreen" /> Free forever · v1.0
+          </div>
         </div>
       </div>
 
