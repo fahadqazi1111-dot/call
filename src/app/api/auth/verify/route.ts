@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { signToken, normalizePhone, publicUser, ensureWallet } from '@/lib/callapp/server'
+import {
+  signToken,
+  normalizePhone,
+  publicUser,
+  ensureWallet,
+  normalizeUsername,
+  usernameError,
+  generateUniqueUsername,
+} from '@/lib/callapp/server'
 
 /**
  * Verify OTP. If the phone is not registered yet, respond { needName: true } so
- * the client collects the display name, then resend with { name } to finish signup.
+ * the client collects the display name + username, then resend with { name }
+ * (and optional { username }) to finish signup. When username is omitted on
+ * signup, one is auto-generated from the display name.
  */
 export async function POST(req: Request) {
   try {
@@ -32,11 +42,29 @@ export async function POST(req: Request) {
         // Do NOT consume the code yet - it will be used once the name arrives.
         return NextResponse.json({ needName: true, phone: normalized })
       }
+      // Resolve username: user's choice if provided and free, otherwise auto-generated.
+      const requested = normalizeUsername(body.username || '')
+      let username: string
+      if (requested) {
+        const unameErr = usernameError(requested)
+        if (unameErr) return NextResponse.json({ error: unameErr }, { status: 400 })
+        const taken = await db.user.findUnique({ where: { username: requested } })
+        if (taken) {
+          return NextResponse.json(
+            { error: `@${requested} is already taken — try another`, usernameTaken: true },
+            { status: 400 }
+          )
+        }
+        username = requested
+      } else {
+        username = await generateUniqueUsername(name)
+      }
       await db.otp.update({ where: { id: otp.id }, data: { consumed: true } })
       user = await db.user.create({
         data: {
           phone: normalized,
           name: name.slice(0, 40),
+          username,
           avatarKey: Math.floor(Math.random() * 8),
         },
       })

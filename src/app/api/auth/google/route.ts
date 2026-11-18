@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { signToken, getSetting, ensureWallet, publicUser, rateLimit } from '@/lib/callapp/server'
+import {
+  signToken,
+  getSetting,
+  ensureWallet,
+  publicUser,
+  rateLimit,
+  generateUniqueUsername,
+} from '@/lib/callapp/server'
 
 interface GoogleTokenInfo {
   aud?: string
@@ -56,12 +63,15 @@ export async function POST(req: Request) {
       while (await db.user.findUnique({ where: { phone } })) {
         phone = `0${String(Math.floor(100000000 + Math.random() * 899999999))}`
       }
+      // Google signups get an auto-generated unique username from their Google name.
+      const username = await generateUniqueUsername(info.name || email?.split('@')[0] || 'user')
       user = await db.user.create({
         data: {
           googleId: info.sub,
           email,
           emailVerified: email ? info.email_verified === 'true' || info.email_verified === true : false,
           name: (info.name || 'CALL user').slice(0, 40),
+          username,
           phone,
           avatarKey: Math.floor(Math.random() * 8),
         },

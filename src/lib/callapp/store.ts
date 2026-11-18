@@ -88,7 +88,7 @@ interface AppState {
   setOverlay: (o: AppOverlay) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null }) => Promise<void>
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string }) => Promise<void>
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
   logout: () => void
 

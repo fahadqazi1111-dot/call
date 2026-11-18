@@ -279,6 +279,8 @@ export async function matchRegisteredUsers(
 export function publicUser(u: {
   id: string
   name: string
+  username: string
+  usernameChangedAt?: Date | null
   phone: string
   about: string
   avatarKey: number
@@ -287,10 +289,13 @@ export function publicUser(u: {
   email?: string | null
   emailVerified?: boolean
   role?: string
+  createdAt?: Date
 }) {
   return {
     id: u.id,
     name: u.name,
+    username: u.username,
+    usernameChangedAt: u.usernameChangedAt ? u.usernameChangedAt.toISOString() : null,
     phone: u.phone,
     about: u.about,
     avatarKey: u.avatarKey,
@@ -299,11 +304,65 @@ export function publicUser(u: {
     email: u.email ?? null,
     emailVerified: u.emailVerified ?? false,
     role: u.role ?? 'user',
+    createdAt: u.createdAt ? u.createdAt.toISOString() : null,
   }
 }
 
 export function makeOtp(): string {
   return String(Math.floor(100000 + Math.random() * 900000))
+}
+
+/* ---------------- usernames (globally unique handles) ---------------- */
+
+/** 3–20 chars, lowercase a-z 0-9 _ — must start with a letter. */
+export const USERNAME_RE = /^[a-z][a-z0-9_]{2,19}$/
+
+/** Handles that must never be claimable. */
+export const USERNAME_RESERVED = new Set([
+  'admin', 'administrator', 'call', 'callapp', 'official', 'support', 'help',
+  'team', 'staff', 'mod', 'moderator', 'root', 'system', 'security', 'null',
+  'undefined', 'owner', 'bot', 'ai', 'assistant',
+])
+
+export const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
+
+/** Lowercase + strip anything outside a-z0-9_. Returns '' if nothing survives. */
+export function normalizeUsername(raw: string): string {
+  return (raw || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20)
+}
+
+/** Returns an error message for an invalid/reserved username, or null when valid. */
+export function usernameError(u: string): string | null {
+  if (!u) return 'Username is required'
+  if (u.length < 3) return 'Username must be at least 3 characters'
+  if (u.length > 20) return 'Username must be at most 20 characters'
+  if (!USERNAME_RE.test(u)) return 'Use lowercase letters, numbers or _ — starting with a letter'
+  if (USERNAME_RESERVED.has(u)) return 'This username is reserved — try another'
+  return null
+}
+
+/** Build the auto-username base from a display name (Google / OTP signups). */
+export function usernameBaseFromName(name: string): string {
+  const base = normalizeUsername(name).slice(0, 14)
+  return base.length >= 3 ? base : `user${base || Math.floor(1000 + Math.random() * 9000)}`
+}
+
+/** Generate a unique username from a display name; appends a number if needed. */
+export async function generateUniqueUsername(name: string): Promise<string> {
+  const base = usernameBaseFromName(name)
+  if (!(await db.user.findUnique({ where: { username: base } }))) return base
+  for (let i = 0; i < 40; i++) {
+    const candidate = `${base}${Math.floor(10 + Math.random() * 90)}${Math.floor(10 + Math.random() * 90)}`
+    if (!(await db.user.findUnique({ where: { username: candidate } }))) return candidate
+  }
+  // extremely unlikely fallback — timestamp based
+  return `${base}${Date.now().toString(36).slice(-6)}`
+}
+
+/** When a user may next change their username (7d after signup / last change). */
+export function nextUsernameChangeAt(u: { usernameChangedAt: Date | null; createdAt: Date }): number {
+  const anchor = (u.usernameChangedAt ?? u.createdAt).getTime()
+  return anchor + USERNAME_COOLDOWN_MS
 }
 
 /* ---------------- password hashing (scrypt, no external deps) ---------------- */

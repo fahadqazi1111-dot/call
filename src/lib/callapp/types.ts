@@ -1,6 +1,8 @@
 export interface Me {
   id: string
   name: string
+  username: string
+  usernameChangedAt?: string | null
   phone: string
   about: string
   avatarKey: number
@@ -9,6 +11,7 @@ export interface Me {
   email?: string | null
   emailVerified?: boolean
   role?: string
+  createdAt?: string | null
 }
 
 export interface Message {

@@ -17,6 +17,8 @@ model User {
   role          String         @default("user") // user | admin
   blocked       Boolean        @default(false)
   name          String
+  username      String         @unique // globally unique handle, lowercase a-z0-9_ (3-20 chars)
+  usernameChangedAt DateTime? // last username change; first change allowed 7 days after signup, then 1 per week
   about         String         @default("Available on CALL")
   avatarKey     Int            @default(0)
   avatarUrl     String?

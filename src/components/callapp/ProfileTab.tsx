@@ -1,9 +1,10 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Avatar } from './Avatar'
 import { CallLogoMark } from './CallLogo'
 import { useApp } from '@/lib/callapp/store'
+import { api } from '@/lib/callapp/api'
 import { toast } from 'sonner'
 import {
   User,
@@ -22,7 +23,33 @@ import {
   Coins,
   Bot,
   Shield,
+  AtSign,
+  CheckCircle2,
+  XCircle,
+  Clock3,
 } from 'lucide-react'
+
+const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
+
+/** Next epoch ms at which the username may be changed again (first change: 7d after signup). */
+function nextChangeAt(me: { usernameChangedAt?: string | null; createdAt?: string | null }): number {
+  const anchor = me.usernameChangedAt || me.createdAt
+  return (anchor ? new Date(anchor).getTime() : Date.now()) + USERNAME_COOLDOWN_MS
+}
+
+function fmtDate(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function fmtCountdown(ms: number): string {
+  const diff = Math.max(0, ms - Date.now())
+  const d = Math.floor(diff / 86400000)
+  const h = Math.floor((diff % 86400000) / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
 
 /** Center-crop an image file to a square and downscale to max 512px (jpeg). */
 function fileToSizedBlob(file: File, max = 512): Promise<Blob> {
@@ -79,7 +106,77 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const fileRef = useRef<HTMLInputElement>(null)
   const desk = variant === 'desktop'
 
+  // username dialog state
+  const [showUsername, setShowUsername] = useState(false)
+  const [uname, setUname] = useState('')
+  const [unameStatus, setUnameStatus] = useState<'idle' | 'checking' | 'ok' | 'bad'>('idle')
+  const [unameMsg, setUnameMsg] = useState('')
+  const [unameBusy, setUnameBusy] = useState(false)
+  const [nowTick, setNowTick] = useState(Date.now())
+
+  useEffect(() => {
+    if (!showUsername) return
+    const t = window.setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => window.clearInterval(t)
+  }, [showUsername])
+
+  // live availability check while typing (debounced)
+  useEffect(() => {
+    if (!showUsername) return
+    const v = uname.trim().toLowerCase()
+    if (!v || v === me?.username) {
+      setUnameStatus('idle')
+      setUnameMsg('')
+      return
+    }
+    setUnameStatus('checking')
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.usernameCheck(v)
+        if (res.available) {
+          setUnameStatus('ok')
+          setUnameMsg(`@${v} is available`)
+        } else {
+          setUnameStatus('bad')
+          setUnameMsg(res.reason || `@${v} is taken`)
+        }
+      } catch {
+        setUnameStatus('idle')
+        setUnameMsg('')
+      }
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [uname, showUsername, me?.username])
+
   if (!me) return null
+
+  const cooldownEnds = nextChangeAt(me)
+  const cooldownActive = nowTick < cooldownEnds
+
+  const openUsername = () => {
+    setUname(me.username)
+    setUnameStatus('idle')
+    setUnameMsg('')
+    setShowUsername(true)
+  }
+
+  const saveUsername = async () => {
+    const v = uname.trim().toLowerCase()
+    if (!v || v === me.username) {
+      setShowUsername(false)
+      return
+    }
+    setUnameBusy(true)
+    try {
+      await updateMe({ username: v })
+      toast.success(`Username updated to @${v}`)
+      setShowUsername(false)
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not update username')
+    } finally {
+      setUnameBusy(false)
+    }
+  }
 
   const saveProfile = async () => {
     if (!editName.trim()) return
@@ -160,6 +257,15 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
           </button>
         </div>
         <h1 className="mt-3.5 text-2xl font-extrabold text-cink">{me.name}</h1>
+        <button
+          className="mt-1 flex items-center gap-1 text-sm font-bold text-cbrand transition hover:opacity-80"
+          onClick={openUsername}
+          aria-label="Edit username"
+        >
+          <AtSign size={14} className="-ml-1" />
+          {me.username}
+          <Pencil size={11} className="opacity-60" />
+        </button>
         <p className="mt-1 text-sm text-cmut">+{me.phone}</p>
         <span className="mt-3 inline-block rounded-[20px] bg-[#E3EBFF] px-4 py-1.5 text-[13px] font-semibold text-cbrand-deep">
           {me.about}
@@ -181,6 +287,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       </div>
 
       <div className="mx-6 mt-6 overflow-hidden rounded-[20px] border border-cline bg-white">
+        <Row Icon={AtSign} label="Username" sub={`@${me.username} · unique handle`} onClick={openUsername} />
         <Row Icon={Coins} label="Wallet & coins" sub={wallet ? `🪙 ${wallet.coins} coins · 💎 ${wallet.earnings} diamonds` : 'Coins, gifts & withdrawals'} onClick={() => setOverlay('wallet')} />
         <Row Icon={Bot} label="CALL AI Assistant" sub="Chat, voice & image intelligence" onClick={() => setOverlay('ai')} />
         <Row Icon={Bell} label="Notifications" sub="Messages, gifts & battles" onClick={() => setOverlay('notifications')} />
@@ -220,6 +327,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         </div>
       </div>
 
+      {/* ---------- edit profile sheet ---------- */}
       {showEdit && (
         <div
           className={`inset-0 z-50 flex bg-black/45 ${
@@ -241,12 +349,105 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
                 <input className="app-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
               </div>
               <div>
+                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Username</label>
+                <button
+                  className="app-input flex items-center gap-1.5 text-left text-cmut"
+                  onClick={() => {
+                    setShowEdit(false)
+                    openUsername()
+                  }}
+                >
+                  @{me.username}
+                  <span className="ml-auto text-xs font-semibold text-cbrand">Change</span>
+                </button>
+              </div>
+              <div>
                 <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">About</label>
                 <input className="app-input" value={editAbout} onChange={(e) => setEditAbout(e.target.value)} maxLength={120} />
               </div>
             </div>
             <button className="btn-p mt-5 w-full disabled:opacity-50" disabled={busy || !editName.trim()} onClick={() => void saveProfile()}>
               {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- username change dialog ---------- */}
+      {showUsername && (
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${
+            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+          }`}
+          onClick={() => setShowUsername(false)}
+        >
+          <div
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Change username"
+          >
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+            <h2 className="text-xl font-extrabold text-cink">Your username</h2>
+            <p className="mt-1.5 text-[13px] leading-5 text-cmut">
+              Your handle across CALL — people can find and mention you with it. It must be unique.
+            </p>
+
+            <div className="relative mt-5">
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] font-bold text-cmut">@</span>
+              <input
+                className="app-input pl-9 pr-10"
+                value={uname}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={20}
+                onChange={(e) => setUname(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === ' ') e.preventDefault()
+                  if (e.key === 'Enter' && unameStatus === 'ok' && !cooldownActive) void saveUsername()
+                }}
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2">
+                {unameStatus === 'checking' && <Loader2 size={17} className="animate-spin text-cmut" />}
+                {unameStatus === 'ok' && <CheckCircle2 size={17} className="text-[#067647]" />}
+                {unameStatus === 'bad' && <XCircle size={17} className="text-cred" />}
+              </span>
+            </div>
+            {unameMsg && (
+              <p className={`mt-1.5 text-xs ${unameStatus === 'bad' ? 'text-cred' : unameStatus === 'ok' ? 'text-[#067647]' : 'text-cmut'}`}>
+                {unameMsg}
+              </p>
+            )}
+
+            {cooldownActive ? (
+              <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-3.5">
+                <Clock3 size={18} className="mt-0.5 flex-none text-[#B45309]" />
+                <div className="text-[13px] leading-5 text-[#7A5B16]">
+                  <b>Username changes are limited to once a week.</b>
+                  <br />
+                  You can change yours on <b>{fmtDate(cooldownEnds)}</b>
+                  {cooldownEnds - nowTick > 0 && (
+                    <>
+                      {' '}
+                      (in {fmtCountdown(cooldownEnds)})
+                    </>
+                  )}
+                  .
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-[12px] leading-5 text-[#9AA8C7]">
+                You can change it now. After this change there is a 1-week waiting period before the next one.
+              </p>
+            )}
+
+            <button
+              className="btn-p mt-5 w-full disabled:opacity-50"
+              disabled={unameBusy || cooldownActive || unameStatus !== 'ok' || !uname.trim() || uname.trim() === me.username}
+              onClick={() => void saveUsername()}
+            >
+              {unameBusy ? 'Saving…' : cooldownActive ? `Locked until ${fmtDate(cooldownEnds)}` : 'Save username'}
             </button>
           </div>
         </div>

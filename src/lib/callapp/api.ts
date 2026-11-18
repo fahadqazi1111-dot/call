@@ -64,11 +64,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ phone }),
     }),
-  verifyOtp: (phone: string, code: string, name?: string) =>
+  verifyOtp: (phone: string, code: string, name?: string, username?: string) =>
     request<{ ok?: boolean; needName?: boolean; token?: string; user?: Me; error?: string }>('/api/auth/verify', {
       method: 'POST',
-      body: JSON.stringify({ phone, code, name }),
+      body: JSON.stringify({ phone, code, name, username }),
     }),
+  usernameCheck: (username: string) =>
+    request<{ ok: boolean; available: boolean; reason?: string; mine?: boolean }>(
+      `/api/auth/username/check?u=${encodeURIComponent(username)}`
+    ),
+  authConfig: () => request<{ googleClientId: string | null; googleEnabled: boolean }>('/api/auth/config'),
   emailRequestCode: (email: string) =>
     request<{ ok: boolean; email: string; devCode: string; expiresInSec: number }>('/api/auth/email/request-code', {
       method: 'POST',
@@ -79,10 +84,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, code, linkToken }),
     }),
-  passwordRegister: (name: string, email: string, password: string) =>
+  passwordRegister: (name: string, email: string, password: string, username: string) =>
     request<{ ok: boolean; token: string; needEmailVerification: boolean }>('/api/auth/password/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, username }),
     }),
   passwordLogin: (email: string, password: string) =>
     request<{ ok: boolean; token: string; user: Me }>('/api/auth/password/login', {
@@ -102,8 +107,8 @@ export const api = {
 
   /* ---------- me ---------- */
   me: () => request<{ user: Me; wallet?: { coins: number; earnings: number } }>('/api/me'),
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null }) =>
-    request<{ user: Me }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string }) =>
+    request<{ user: Me; nextChangeAt?: string }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
 
   /* ---------- chats ---------- */
   chats: () => request<{ chats: ChatSummary[] }>('/api/chats'),
