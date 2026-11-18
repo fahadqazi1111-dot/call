@@ -91,6 +91,144 @@ class SoundKit {
     }
   }
 
+  /* ---------- gift-specific sound effects (all synthesized, no assets) ---------- */
+
+  private noiseBuffer(seconds: number): AudioBuffer | null {
+    const ctx = this.ac()
+    if (!ctx) return null
+    const len = Math.max(1, Math.floor(ctx.sampleRate * seconds))
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+    const data = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1
+    return buf
+  }
+
+  /** Filtered noise burst — the building block for whooshes/roars/crackles. */
+  private noise(durMs: number, gain: number, filterFreq: number, delayMs = 0, filterType: BiquadFilterType = 'lowpass') {
+    const ctx = this.ac()
+    const buf = this.noiseBuffer(durMs / 1000 + 0.05)
+    if (!ctx || !buf) return
+    const t0 = ctx.currentTime + delayMs / 1000
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    const filter = ctx.createBiquadFilter()
+    filter.type = filterType
+    filter.frequency.value = filterFreq
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0, t0)
+    g.gain.linearRampToValueAtTime(gain, t0 + durMs / 4000)
+    g.gain.setValueAtTime(gain, t0 + (durMs / 1000) * 0.6)
+    g.gain.linearRampToValueAtTime(0, t0 + durMs / 1000)
+    src.connect(filter).connect(g).connect(ctx.destination)
+    src.start(t0)
+    src.stop(t0 + durMs / 1000 + 0.05)
+  }
+
+  /** Frequency-swept tone (for roars/engines/whooshes). */
+  private sweep(f1: number, f2: number, durMs: number, gain: number, delayMs = 0, type: OscillatorType = 'sawtooth') {
+    const ctx = this.ac()
+    if (!ctx) return
+    const t0 = ctx.currentTime + delayMs / 1000
+    const osc = ctx.createOscillator()
+    const g = ctx.createGain()
+    osc.type = type
+    osc.frequency.setValueAtTime(f1, t0)
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, f2), t0 + durMs / 1000)
+    g.gain.setValueAtTime(0, t0)
+    g.gain.linearRampToValueAtTime(gain, t0 + durMs / 5000)
+    g.gain.setValueAtTime(gain, t0 + (durMs / 1000) * 0.55)
+    g.gain.linearRampToValueAtTime(0, t0 + durMs / 1000)
+    osc.connect(g).connect(ctx.destination)
+    osc.start(t0)
+    osc.stop(t0 + durMs / 1000 + 0.05)
+  }
+
+  /**
+   * Per-gift cinematic sound, matched to the gift's animKind.
+   * Rose/flower/heart → soft plucks, Crown → bells, Car → engine rev,
+   * Rocket → launch whoosh, Fireworks → crackle, Dragon → growl,
+   * Lion → powerful roar, Castle → epic chimes, Galaxy → cosmic roar.
+   */
+  giftEffect(animKind = 'generic') {
+    switch (animKind) {
+      case 'rose':
+      case 'flower':
+        // gentle harp-like pluck
+        this.beep(740, 200, 0.05)
+        this.beep(880, 240, 0.045, 120)
+        this.beep(1109, 300, 0.04, 260)
+        break
+      case 'heart':
+        // heartbeat double-thump
+        this.sweep(140, 90, 160, 0.16, 0, 'sine')
+        this.sweep(140, 90, 160, 0.13, 260, 'sine')
+        this.beep(660, 140, 0.03, 520)
+        break
+      case 'crown':
+        // royal bells + shimmer
+        this.beep(1319, 300, 0.07)
+        this.beep(1568, 320, 0.06, 180)
+        this.beep(2093, 420, 0.05, 360)
+        this.noise(500, 0.02, 6000, 360, 'highpass')
+        break
+      case 'car':
+        // engine rev
+        this.sweep(110, 320, 500, 0.12, 0, 'sawtooth')
+        this.sweep(320, 90, 420, 0.1, 520, 'sawtooth')
+        this.noise(700, 0.05, 900, 0)
+        break
+      case 'rocket':
+        // launch: rising whoosh + crackle tail
+        this.noise(900, 0.1, 500, 0)
+        this.sweep(120, 900, 850, 0.07, 60, 'triangle')
+        this.noise(500, 0.05, 3000, 700, 'highpass')
+        break
+      case 'fireworks': {
+        // whistle up + crackle bursts
+        this.sweep(500, 1800, 500, 0.05, 0, 'sine')
+        for (let i = 0; i < 5; i++) {
+          this.noise(90, 0.12 - i * 0.015, 2400 + i * 400, 520 + i * 130, 'highpass')
+        }
+        this.beep(1047, 220, 0.04, 540)
+        break
+      }
+      case 'dragon':
+        // low growl + wing flap noise
+        this.sweep(110, 65, 800, 0.14, 0, 'sawtooth')
+        this.sweep(82, 55, 700, 0.1, 260, 'square')
+        this.noise(650, 0.07, 400, 0)
+        this.noise(280, 0.05, 1200, 480, 'bandpass')
+        break
+      case 'lion':
+        // powerful roar: growling low sweep + breath noise
+        this.sweep(180, 70, 1100, 0.16, 0, 'sawtooth')
+        this.sweep(140, 60, 950, 0.12, 130, 'square')
+        this.noise(1000, 0.09, 700, 0)
+        this.noise(500, 0.06, 1800, 620, 'bandpass')
+        break
+      case 'castle':
+        // epic chime sequence
+        this.beep(523, 260, 0.07)
+        this.beep(659, 260, 0.065, 170)
+        this.beep(784, 260, 0.065, 340)
+        this.beep(1047, 480, 0.08, 510)
+        this.beep(1319, 620, 0.07, 680)
+        break
+      case 'superlion':
+      case 'galaxy':
+        // cosmic roar + shimmering sweep
+        this.sweep(160, 55, 1200, 0.15, 0, 'sawtooth')
+        this.sweep(400, 2400, 900, 0.04, 200, 'sine')
+        this.noise(1100, 0.08, 900, 0)
+        this.beep(1047, 300, 0.05, 700)
+        this.beep(1568, 420, 0.05, 900)
+        break
+      default:
+        this.gift(1)
+        break
+    }
+  }
+
   /** Rising countdown tick for battle starts. */
   countdownTick(n = 0) {
     this.beep(440 + n * 110, 120, 0.07)

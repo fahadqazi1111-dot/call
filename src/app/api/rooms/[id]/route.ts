@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, mediaUrl } from '@/lib/callapp/server'
+import { relayToRoom, relaySend } from '@/lib/callapp/roomSync'
 
 /** GET: room detail (meta + my membership). Active participant state comes from the socket service. */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -45,5 +46,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   }
   await db.voiceRoom.update({ where: { id }, data: { status: 'ended', endedAt: new Date() } })
   await db.roomParticipant.updateMany({ where: { roomId: id, leftAt: null }, data: { leftAt: new Date() } })
+  // everyone in the room (including this host) learns the room ended —
+  // server-side only, clients can never fake a room closure
+  await relayToRoom(id, 'room:closed', { roomId: id })
+  await relaySend([`room:${id}`], 'internal:room_closed', { roomId: id })
   return NextResponse.json({ ok: true })
 }

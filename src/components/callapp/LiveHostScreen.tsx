@@ -63,7 +63,7 @@ export function LiveHostScreen({
     let disposed = false
     const run = async () => {
       try {
-        const stream = await liveManager.startPublishing(liveId, true)
+        const stream = await liveManager.startPublishing(liveId, true, me?.id ?? '')
         if (disposed) return
         if (videoRef.current) {
           videoRef.current.srcObject = stream
@@ -129,22 +129,32 @@ export function LiveHostScreen({
 
   /* ---------- realtime events ---------- */
   useEffect(() => {
+    const seenComments = new Set<string>()
     const onComment = (p: unknown) => {
       const d = p as { liveId: string; comment: LiveComment }
-      if (d.liveId === liveId) setComments((c) => [...c.slice(-120), d.comment])
+      if (d.liveId !== liveId) return
+      if (d.comment?.id && seenComments.has(d.comment.id)) return
+      if (d.comment?.id) seenComments.add(d.comment.id)
+      setComments((c) => [...c.slice(-120), d.comment])
     }
+    const seenGifts = new Set<string>()
     const onGift = (p: unknown) => {
       const d = p as { liveId: string; payload: {
+        sendId?: string
         gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
       if (d.liveId !== liveId) return
-      // Server-verified fulfillment event drives the animation + scores.
+      // duplicate protection: one animation per verified transaction
+      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
+      if (seenGifts.has(dedupKey)) return
+      seenGifts.add(dedupKey)
+      // Server-verified fulfillment event drives the animation + gift-specific sound.
       const anim = animFromPayload(d.payload)
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      soundKit.giftEffect(d.payload.gift.animKind)
       setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 400)
       void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
       // battle score updates also arrive via the relayed battle:score event
     }
@@ -160,15 +170,22 @@ export function LiveHostScreen({
           : b
       )
     }
+    // the host UI also closes when the live ends (e.g. ended from another device)
+    const onEnded = (p: unknown) => {
+      const d = p as { liveId: string }
+      if (d.liveId === liveId) onClose()
+    }
     const offComment = socketClient.on('live:chat', onComment)
     const offGift = socketClient.on('live:gift', onGift)
     const offScore = socketClient.on('battle:score', onBattleScore)
+    const offEnded = socketClient.on('live:ended', onEnded)
     return () => {
       offComment()
       offGift()
       offScore()
+      offEnded()
     }
-  }, [liveId, battle])
+  }, [liveId, battle, onClose])
 
   /* ---------- battle invite flow ---------- */
   const startInvite = async () => {
@@ -319,8 +336,9 @@ export function LiveHostScreen({
       await finishBattle()
     }
     try {
+      // REST DELETE is the only way to end a live — the server broadcasts
+      // live:ended to every viewer itself (clients can never fake an end)
       await api.liveEnd(liveId)
-      socketClient.emit('live:end', { liveId })
     } catch {}
     onClose()
   }
@@ -332,7 +350,9 @@ export function LiveHostScreen({
     try {
       const res = await api.liveSendComment(liveId, text)
       socketClient.emit('live:chat', { liveId, comment: res.comment })
-      setComments((c) => [...c.slice(-120), res.comment])
+      if (!comments.some((c) => c.id === res.comment.id)) {
+        setComments((c) => [...c.slice(-120), res.comment])
+      }
     } catch {}
   }
 

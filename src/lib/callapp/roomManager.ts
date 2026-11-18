@@ -129,14 +129,19 @@ class RoomManager {
     this.preMic = stream
   }
 
-  /** Sync WebRTC connections to match the participant state. */
+  /** Sync WebRTC connections to match the participant state.
+   * Speakers connect send+recv to everyone; listeners connect recv-only to
+   * speakers. This fixes the old bug where ~half of listeners never received
+   * audio because speakers never created connections toward listeners. */
   private async syncPeers() {
     const speakers = this.state.participants.filter((u) => SPEAKING_ROLES.has(u.role))
+    const listeners = this.state.participants.filter((u) => u.role === 'listener')
     const iSpeak = this.isSpeaking()
 
-    // close peers that are no longer speakers
+    // close peers that left the room entirely
     for (const [uid, pc] of Array.from(this.peers)) {
-      if (!speakers.some((s) => s.userId === uid)) {
+      const stillThere = speakers.some((s) => s.userId === uid) || listeners.some((l) => l.userId === uid)
+      if (!stillThere) {
         pc.close()
         this.peers.delete(uid)
         const streams = { ...this.state.streams }
@@ -145,77 +150,119 @@ class RoomManager {
       }
     }
 
+    // connect to every other speaker (I may be speaker or listener)
     for (const s of speakers) {
       if (s.userId === this.myId()) continue
-      if (!this.peers.has(s.userId)) {
-        await this.ensurePeer(s.userId, iSpeak)
-      } else if (this.localStream) {
-        // ensure my track is attached when I become a speaker mid-room
-        const pc = this.peers.get(s.userId)!
-        const sender = pc.getSenders().find((x) => x.track?.kind === 'audio')
-        const track = this.localStream.getAudioTracks()[0]
-        if (track && sender && sender.track !== track) await sender.replaceTrack(track)
+      await this.ensurePeer(s.userId, iSpeak, SPEAKING_ROLES.has(s.role))
+    }
+    // as a speaker, also push my audio DOWN to every listener
+    if (iSpeak) {
+      for (const l of listeners) {
+        if (l.userId === this.myId()) continue
+        await this.ensurePeer(l.userId, true, false)
+      }
+    }
+
+    // ensure my own track is attached on every peer once I'm speaking
+    if (iSpeak && this.localStream) {
+      const track = this.localStream.getAudioTracks()[0]
+      if (track) {
+        for (const [, pc] of this.peers) {
+          const sender = pc.getSenders().find((x) => (x.track?.kind === 'audio' || x.track === null) && x.track !== track)
+          if (sender) {
+            try {
+              await sender.replaceTrack(track)
+            } catch {}
+          }
+        }
       }
     }
     this.emit()
   }
 
-  private async ensurePeer(otherId: string, iSpeak: boolean) {
-    const pc = new RTCPeerConnection(ICE_CONFIG)
-    this.peers.set(otherId, pc)
-    const remote = new MediaStream()
-    const streams = { ...this.state.streams, [otherId]: remote }
-    this.state.streams = streams
+  private async ensurePeer(otherId: string, iSpeak: boolean, otherSpeaks: boolean) {
+    let pc = this.peers.get(otherId)
+    if (!pc) {
+      pc = new RTCPeerConnection(ICE_CONFIG)
+      this.peers.set(otherId, pc)
+      const remote = new MediaStream()
+      const streams = { ...this.state.streams, [otherId]: remote }
+      this.state.streams = streams
 
-    pc.ontrack = (e) => {
-      if (!remote.getTracks().includes(e.track)) {
-        remote.addTrack(e.track)
-        this.state.streams = { ...this.state.streams, [otherId]: new MediaStream(remote.getTracks()) }
-        this.emit()
+      pc.ontrack = (e) => {
+        if (!remote.getTracks().includes(e.track)) {
+          remote.addTrack(e.track)
+          this.state.streams = { ...this.state.streams, [otherId]: new MediaStream(remote.getTracks()) }
+          this.emit()
+        }
       }
-    }
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socketClient.emit('room:signal', {
+            roomId: this.state.roomId,
+            to: otherId,
+            data: { kind: 'ice', payload: e.candidate.toJSON() },
+          })
+        }
+      }
+      pc.onconnectionstatechange = () => {
+        if (pc!.connectionState === 'failed' || pc!.connectionState === 'closed') {
+          pc!.close()
+          if (this.peers.get(otherId) === pc) this.peers.delete(otherId)
+        }
+      }
+
+      if (iSpeak && this.state.me) {
+        try {
+          const mic = await this.getMic()
+          const track = mic.getAudioTracks()[0]
+          if (track) pc.addTrack(track, mic)
+          else pc.addTransceiver('audio', { direction: 'recvonly' })
+        } catch {
+          // mic unavailable — stay recvonly
+          pc.addTransceiver('audio', { direction: 'recvonly' })
+        }
+      } else {
+        pc.addTransceiver('audio', { direction: 'recvonly' })
+      }
+
+      // Offer rules (avoid glare):
+      //  - speaker → listener: the SPEAKER always initiates
+      //  - speaker ↔ speaker: the lower userId initiates
+      //  - listener → speaker: never initiates (waits for the speaker)
+      const iInitiate = iSpeak && !otherSpeaks ? true : iSpeak && otherSpeaks ? this.myId() < otherId : false
+      if (iInitiate) {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
         socketClient.emit('room:signal', {
           roomId: this.state.roomId,
           to: otherId,
-          data: { kind: 'ice', payload: e.candidate.toJSON() },
+          data: { kind: 'offer', payload: offer },
         })
       }
-    }
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        pc.close()
-        if (this.peers.get(otherId) === pc) this.peers.delete(otherId)
+    } else if (iSpeak && this.localStream) {
+      // existing peer — make sure my newest track is attached (e.g. after FX swap)
+      const track = this.localStream.getAudioTracks()[0]
+      const sender = pc.getSenders().find((x) => (x.track?.kind === 'audio' || x.track === null) && (!track || x.track !== track))
+      if (sender && track) {
+        try {
+          await sender.replaceTrack(track)
+        } catch {}
       }
-    }
-
-    if (iSpeak && this.state.me) {
-      try {
-        const mic = await this.getMic()
-        const track = mic.getAudioTracks()[0]
-        if (track) pc.addTrack(track, mic)
-      } catch {
-        // mic unavailable — stay recvonly
-      }
-    } else {
-      pc.addTransceiver('audio', { direction: 'recvonly' })
-    }
-
-    // deterministic offerer to avoid glare: lower userId initiates
-    if (this.myId() && this.myId() < otherId) {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      socketClient.emit('room:signal', {
-        roomId: this.state.roomId,
-        to: otherId,
-        data: { kind: 'offer', payload: offer },
-      })
     }
   }
 
   private async handleSignal(p: { roomId: string; from: string; data: { kind: string; payload: unknown } }) {
     if (p.roomId !== this.state.roomId || !p.from) return
+    const other = this.state.participants.find((u) => u.userId === p.from)
+    if (!other) return
+    // create the peer on demand when the offer arrives first (e.g. a speaker
+    // pushing audio down to me before my own sync ran)
+    if (!this.peers.has(p.from)) {
+      const iSpeak = this.isSpeaking()
+      const otherSpeaks = SPEAKING_ROLES.has(other.role)
+      await this.ensurePeerRaw(p.from, iSpeak, otherSpeaks)
+    }
     const pc = this.peers.get(p.from)
     if (!pc) return
     const { kind, payload } = p.data
@@ -250,6 +297,47 @@ class RoomManager {
     }
   }
 
+  /** Create a peer connection WITHOUT offering (used when the remote side initiates). */
+  private async ensurePeerRaw(otherId: string, iSpeak: boolean, otherSpeaks: boolean) {
+    const pc = new RTCPeerConnection(ICE_CONFIG)
+    this.peers.set(otherId, pc)
+    const remote = new MediaStream()
+    const streams = { ...this.state.streams, [otherId]: remote }
+    this.state.streams = streams
+    pc.ontrack = (e) => {
+      if (!remote.getTracks().includes(e.track)) {
+        remote.addTrack(e.track)
+        this.state.streams = { ...this.state.streams, [otherId]: new MediaStream(remote.getTracks()) }
+        this.emit()
+      }
+    }
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socketClient.emit('room:signal', {
+          roomId: this.state.roomId,
+          to: otherId,
+          data: { kind: 'ice', payload: e.candidate.toJSON() },
+        })
+      }
+    }
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        pc.close()
+        if (this.peers.get(otherId) === pc) this.peers.delete(otherId)
+      }
+    }
+    if (iSpeak && this.state.me) {
+      try {
+        const mic = await this.getMic()
+        const track = mic.getAudioTracks()[0]
+        if (track) pc.addTrack(track, mic)
+      } catch {}
+    } else if (!otherSpeaks) {
+      pc.addTransceiver('audio', { direction: 'recvonly' })
+    }
+    // no offer — the remote side initiates
+  }
+
   /* ---------- public controls ---------- */
 
   private leaveTimer: number | null = null
@@ -272,7 +360,8 @@ class RoomManager {
       handRaised: false,
     }
     this.state.connected = true
-    // grab mic if speaker-ish so first state sync attaches audio immediately
+    // mic is captured ONLY when I actually hold a speaking role — listeners
+    // never touch the microphone hardware (privacy + permission correctness)
     if (SPEAKING_ROLES.has(this.state.me.role)) {
       try {
         await this.getMic()
@@ -313,6 +402,8 @@ class RoomManager {
   }
 
   async toggleMute(): Promise<boolean> {
+    // Listeners have no microphone to mute
+    if (!this.isSpeaking()) return this.state.micMuted
     const track = this.localStream?.getAudioTracks()[0]
     if (!track) return false
     track.enabled = !track.enabled
@@ -320,23 +411,100 @@ class RoomManager {
     if (this.state.me) {
       this.state.me = { ...this.state.me, muted: this.state.micMuted }
     }
+    // broadcast my mute state to the room (persisted via REST + socket mirror)
+    if (this.state.roomId) {
+      socketClient.emit('room:self_mute', { roomId: this.state.roomId, muted: this.state.micMuted })
+      try {
+        const { api } = await import('./api')
+        void api.roomStage(this.state.roomId, 'mute_self', { muted: this.state.micMuted })
+      } catch {}
+    }
     this.emit()
     return this.state.micMuted
   }
 
-  raiseHand(raised: boolean) {
-    if (!this.state.roomId) return
-    socketClient.emit('room:moderate', {
+  /** I was promoted (host invite accepted / hand approved) — open the mic now. */
+  async becomeSpeaker(): Promise<void> {
+    if (!this.state.roomId || !this.state.me) return
+    if (!SPEAKING_ROLES.has(this.state.me.role)) return
+    try {
+      await this.getMic()
+    } catch {}
+    // re-announce with the verified role so the service + peers update
+    socketClient.emit('room:join', {
       roomId: this.state.roomId,
-      action: raised ? 'hand_up' : 'hand_down',
-      targetId: this.myId(),
-      by: this.myId(),
+      user: {
+        id: this.state.me.userId,
+        name: this.state.me.name,
+        avatarKey: this.state.me.avatarKey,
+        avatarUrl: this.state.me.avatarUrl,
+      },
+      role: this.state.me.role,
     })
-    if (this.state.me) {
-      this.state.me = { ...this.state.me, handRaised: raised }
+    await this.syncPeers()
+  }
+
+  /** I was moved back to listeners — stop transmitting immediately. */
+  async becomeListener(): Promise<void> {
+    if (!this.state.me) return
+    if (SPEAKING_ROLES.has(this.state.me.role)) return
+    // detach my audio from every sender and release the mic
+    for (const [, pc] of this.peers) {
+      const sender = pc.getSenders().find((x) => x.track?.kind === 'audio')
+      if (sender) {
+        try {
+          await sender.replaceTrack(null)
+        } catch {}
+      }
+    }
+    if (!this.preMic) {
+      this.localStream?.getTracks().forEach((t) => t.stop())
+    } else {
+      this.localStream?.getTracks().forEach((t) => t.stop())
+    }
+    this.localStream = null
+    this.preMic = null
+    this.fxHandle?.stop()
+    this.fxHandle = null
+    this.state.micMuted = false
+    socketClient.emit('room:join', {
+      roomId: this.state.roomId,
+      user: {
+        id: this.state.me.userId,
+        name: this.state.me.name,
+        avatarKey: this.state.me.avatarKey,
+        avatarUrl: this.state.me.avatarUrl,
+      },
+      role: 'listener',
+    })
+    await this.syncPeers()
+  }
+
+  /** Enforce a host-issued mute locally (the track actually stops transmitting). */
+  enforceRemoteMute(muted: boolean) {
+    const track = this.localStream?.getAudioTracks()[0]
+    if (!track) return
+    if (muted && track.enabled) {
+      track.enabled = false
+      this.state.micMuted = true
       this.emit()
     }
-    // server-side persistence + broadcast happens through REST + room:state
+  }
+
+  /** Raise/lower hand = microphone request (persisted via REST stage API). */
+  async requestMic(requested: boolean): Promise<boolean> {
+    if (!this.state.roomId) return false
+    try {
+      const { api } = await import('./api')
+      await api.roomStage(this.state.roomId, requested ? 'request_mic' : 'cancel_request')
+      if (this.state.me) {
+        this.state.me = { ...this.state.me, handRaised: requested }
+        this.emit()
+      }
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**

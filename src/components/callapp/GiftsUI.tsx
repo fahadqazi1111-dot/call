@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Gift as GiftIcon, Loader2, ChevronLeft, Users, Sparkles, Info } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
+import { adViewerKey } from '@/lib/callapp/utils'
 import { toast } from 'sonner'
 import { Avatar } from './Avatar'
 import { PaymentModal, waitForPayment, type PendingPayment } from './PaymentModal'
@@ -19,23 +20,7 @@ export interface GiftAnim {
   tier: number
 }
 
-/* ---------------- animation layer (unchanged visuals, money tiers) ---------------- */
-
-const ANIM_CLASSES: Record<string, string> = {
-  rose: 'gift-float',
-  heart: 'gift-float',
-  flower: 'gift-float',
-  crown: 'gift-drop',
-  diamond: 'gift-drop',
-  car: 'gift-drive',
-  rocket: 'gift-rocket',
-  dragon: 'gift-fly',
-  lion: 'gift-fly',
-  superlion: 'gift-fly-big',
-  castle: 'gift-fly-big',
-  fireworks: 'gift-burst',
-  generic: 'gift-float',
-}
+/* ---------------- animation layer (per-gift cinematic scenes) ---------------- */
 
 function tierOf(price: number): number {
   if (price >= 30) return 3
@@ -43,22 +28,256 @@ function tierOf(price: number): number {
   return 1
 }
 
+/** deterministic pseudo-random per gift instance, so server & client layouts differ nicely */
+function seeded(n: number): number {
+  const x = Math.sin(n) * 10000
+  return x - Math.floor(x)
+}
+
+function GiftLabel({ g }: { g: GiftAnim }) {
+  return (
+    <div className="flex items-center gap-2 rounded-2xl bg-black/70 px-3 py-2 text-white shadow-xl backdrop-blur">
+      <span className={g.tier >= 3 ? 'text-[34px]' : g.tier === 2 ? 'text-[28px]' : 'text-[22px]'}>{g.emoji}</span>
+      <div className="leading-tight">
+        <div className="text-[12px] font-bold">{g.name}</div>
+        <div className="text-[10.5px] text-white/75">{g.from} → {g.to}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Build the per-gift animation scene. Each gift gets its own choreography. */
+function GiftScene({ g }: { g: GiftAnim }) {
+  const kind = g.animKind
+  const emojiSize = g.tier >= 3 ? 'text-[92px]' : g.tier === 2 ? 'text-[74px]' : 'text-[58px]'
+
+  // small helpers for particle fields
+  const parts = (n: number) => Array.from({ length: n }, (_, i) => i)
+
+  if (kind === 'lion') {
+    // powerful roar: big lion scaling in + double shockwave ring + screen shake
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <div className="lion-shake absolute inset-0 flex items-center justify-center">
+          <span className={`lion-roar ${emojiSize}`}>{g.emoji}</span>
+          <span className="lion-ring absolute h-24 w-24 rounded-full border-4 border-[#FFD166]" style={{ animationDelay: '120ms' }} />
+          <span className="lion-ring absolute h-24 w-24 rounded-full border-2 border-[#F59E0B]/70" style={{ animationDelay: '420ms' }} />
+        </div>
+        <div className="absolute bottom-[34%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'dragon') {
+    // dragon flies across with a fire trail
+    return (
+      <div className="absolute inset-0">
+        <div className="dragon-fly absolute left-0 top-[30%]">
+          <span className={emojiSize}>{g.emoji}</span>
+        </div>
+        {parts(10).map((i) => (
+          <span
+            key={i}
+            className="dragon-fire absolute text-[22px]"
+            style={{
+              top: `${26 + seeded(i + 1) * 16}%`,
+              left: `${seeded(i + 7) * 80}%`,
+              animationDelay: `${180 + i * 140}ms`,
+            }}
+          >
+            {['🔥', '🔥', '💨'][i % 3]}
+          </span>
+        ))}
+        <div className="absolute bottom-[16%] left-1/2 -translate-x-1/2"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'rocket') {
+    // launch from bottom with flame + smoke
+    return (
+      <div className="absolute inset-0">
+        <div className="rocket-launch absolute bottom-[-80px] left-1/2 -translate-x-1/2">
+          <span className={emojiSize}>{g.emoji}</span>
+        </div>
+        {parts(8).map((i) => (
+          <span
+            key={i}
+            className="rocket-smoke absolute text-[20px]"
+            style={{ left: `${42 + seeded(i + 3) * 16}%`, animationDelay: `${i * 130}ms` }}
+          >
+            💨
+          </span>
+        ))}
+        <div className="absolute bottom-[18%] left-1/2 -translate-x-1/2"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'fireworks') {
+    // center burst with radiating particles
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        {parts(14).map((i) => (
+          <span
+            key={i}
+            className="fw-burst absolute text-[26px]"
+            style={{
+              // @ts-expect-error css custom property
+              '--a': `${(i / 14) * 360}deg`,
+              '--d': `${60 + seeded(i + 2) * 90}px`,
+              animationDelay: `${seeded(i) * 160}ms`,
+            }}
+          >
+            {['✨', '🌟', '💥', '🎆'][i % 4]}
+          </span>
+        ))}
+        <span className={`fw-core ${emojiSize}`}>{g.emoji}</span>
+        <div className="absolute bottom-[30%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'crown') {
+    // drops from the top with rotating glow rays
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <div className="crown-rays absolute h-56 w-56 rounded-full" />
+        <span className={`crown-drop ${emojiSize}`}>{g.emoji}</span>
+        {parts(8).map((i) => (
+          <span
+            key={i}
+            className="crown-sparkle absolute text-[16px]"
+            style={{ left: `${28 + seeded(i + 4) * 44}%`, top: `${30 + seeded(i + 9) * 24}%`, animationDelay: `${i * 110}ms` }}
+          >
+            ✨
+          </span>
+        ))}
+        <div className="absolute bottom-[30%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'car') {
+    // drives across with speed lines
+    return (
+      <div className="absolute inset-0">
+        <div className="car-drive absolute bottom-[26%] left-0">
+          <span className={emojiSize}>{g.emoji}</span>
+        </div>
+        {parts(6).map((i) => (
+          <span
+            key={i}
+            className="speed-line absolute h-[3px] rounded-full bg-white/60"
+            style={{ top: `${30 + seeded(i + 5) * 14}%`, width: `${40 + seeded(i) * 60}px`, animationDelay: `${i * 90}ms` }}
+          />
+        ))}
+        <div className="absolute bottom-[12%] left-1/2 -translate-x-1/2"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'heart') {
+    // pulsing heart + rising mini hearts
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`heart-pulse ${emojiSize}`}>{g.emoji}</span>
+        {parts(9).map((i) => (
+          <span
+            key={i}
+            className="heart-rise absolute text-[20px]"
+            style={{ left: `${16 + seeded(i + 6) * 68}%`, animationDelay: `${200 + i * 170}ms` }}
+          >
+            {['❤️', '💖', '💕'][i % 3]}
+          </span>
+        ))}
+        <div className="absolute bottom-[28%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'rose' || kind === 'flower') {
+    // bloom in the center + falling petals
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`bloom-in ${emojiSize}`}>{g.emoji}</span>
+        {parts(10).map((i) => (
+          <span
+            key={i}
+            className="petal-fall absolute text-[18px]"
+            style={{
+              left: `${12 + seeded(i + 1) * 76}%`,
+              animationDelay: `${140 + i * 150}ms`,
+              animationDuration: `${1500 + seeded(i) * 900}ms`,
+            }}
+          >
+            {['🌸', '🌺', '🌷', '🌹'][i % 4]}
+          </span>
+        ))}
+        <div className="absolute bottom-[26%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'castle') {
+    // epic entrance + sparkles
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`castle-in ${emojiSize}`}>{g.emoji}</span>
+        {parts(12).map((i) => (
+          <span
+            key={i}
+            className="castle-sparkle absolute text-[15px]"
+            style={{ left: `${14 + seeded(i + 2) * 72}%`, top: `${20 + seeded(i + 8) * 45}%`, animationDelay: `${i * 90}ms` }}
+          >
+            ✨
+          </span>
+        ))}
+        <div className="absolute bottom-[24%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  if (kind === 'superlion') {
+    // cosmic version: starburst + colossal emoji
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        {parts(16).map((i) => (
+          <span
+            key={i}
+            className="fw-burst absolute text-[20px]"
+            style={{
+              // @ts-expect-error css custom property
+              '--a': `${(i / 16) * 360}deg`,
+              '--d': `${100 + seeded(i + 3) * 120}px`,
+              animationDelay: `${seeded(i) * 200}ms`,
+            }}
+          >
+            ⭐
+          </span>
+        ))}
+        <span className={`lion-roar ${emojiSize}`}>{g.emoji}</span>
+        <div className="absolute bottom-[30%]"><GiftLabel g={g} /></div>
+      </div>
+    )
+  }
+
+  // generic fallback: elegant float-up
+  return (
+    <div className="absolute inset-0">
+      <div className="gift-float absolute left-1/2 top-[38%] -translate-x-1/2">
+        <GiftLabel g={g} />
+      </div>
+    </div>
+  )
+}
+
 export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
       {gifts.map((g) => (
-        <div
-          key={g.key}
-          className={`absolute ${ANIM_CLASSES[g.animKind] ?? 'gift-float'}`}
-          style={{ animationDuration: `${g.durationMs}ms` }}
-        >
-          <div className="flex items-center gap-2 rounded-2xl bg-black/70 px-3 py-2 text-white shadow-xl backdrop-blur">
-            <span className={g.tier >= 3 ? 'text-[46px]' : g.tier === 2 ? 'text-[38px]' : 'text-[30px]'}>{g.emoji}</span>
-            <div className="leading-tight">
-              <div className="text-[12px] font-bold">{g.name}</div>
-              <div className="text-[10.5px] text-white/75">{g.from} → {g.to}</div>
-            </div>
-          </div>
+        <div key={g.key} className="absolute inset-0" style={{ animationDuration: `${g.durationMs}ms` }}>
+          <GiftScene g={g} />
         </div>
       ))}
     </div>
@@ -67,13 +286,15 @@ export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
 
 /** Play a delivered gift event (payload from REST fulfillment → socket relay). */
 export function animFromPayload(payload: {
+  sendId?: string
   gift: { name: string; emoji: string; animKind: string; durationMs: number; priceUsd?: number }
   from: { name: string }
   to: { name: string }
 }): GiftAnim {
   const price = payload.gift.priceUsd ?? 0
   return {
-    key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    // key by the verified transaction id → duplicate events never re-render
+    key: payload.sendId || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     emoji: payload.gift.emoji,
     name: payload.gift.name,
     animKind: payload.gift.animKind,
@@ -88,7 +309,7 @@ export function soundTierFor(price: number): number {
   return Math.min(3, tierOf(price))
 }
 
-/* ---------------- TikTok-style gift panel ---------------- */
+/* ---------------- gift panel ---------------- */
 
 interface PickerProps {
   context: 'room' | 'live' | 'battle'
@@ -330,43 +551,125 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
 }
 
 
-/* ---------------- ad banner (placements) ---------------- */
+/* ---------------- ads (serving) ---------------- */
 
+interface ServedAd {
+  id: string
+  title: string
+  body: string
+  imageUrl: string | null
+  linkUrl: string | null
+}
+export type { ServedAd }
+
+/** Fetch one rotated ad for a placement (excluding ads already on screen). */
+async function fetchAd(placement: string, exclude: string[] = []): Promise<ServedAd | null> {
+  try {
+    const res = await api.ads(placement, exclude)
+    return res.ads[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Ad shown in list screens — auto-rotates every 45s so multiple advertisers share the slot. */
 export function AdBanner({ placement }: { placement: 'chats' | 'rooms' | 'profile' }) {
-  const [ad, setAd] = useState<{ id: string; title: string; body: string; linkUrl: string | null } | null>(null)
-  const firedRef = useRef(false)
+  const [ad, setAd] = useState<ServedAd | null>(null)
+  const firedRef = useRef<string | null>(null)
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await api.ads(placement)
-        if (res.ads.length) setAd(res.ads[0])
-      } catch {}
-    })()
+    let alive = true
+    const load = async (exclude: string[] = []) => {
+      const next = await fetchAd(placement, exclude)
+      if (!alive) return
+      if (next) setAd(next)
+    }
+    void load()
+    const t = window.setInterval(() => {
+      setAd((cur) => {
+        void load(cur ? [cur.id] : [])
+        return cur
+      })
+    }, 45_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
   }, [placement])
 
   useEffect(() => {
-    if (ad && !firedRef.current) {
-      firedRef.current = true
-      void api.adEvent(ad.id, 'impression').catch(() => {})
+    if (ad && firedRef.current !== ad.id) {
+      firedRef.current = ad.id
+      void api.adEvent(ad.id, 'impression', adViewerKey()).catch(() => {})
     }
   }, [ad])
 
   if (!ad) return null
   return (
     <button
-      className="mx-2 mb-2 flex items-center gap-3 rounded-[18px] border border-cline bg-white px-3.5 py-3 text-left transition hover:bg-cbg"
+      className="mx-2 mb-2 flex items-center gap-3 overflow-hidden rounded-[18px] border border-cline bg-white px-3.5 py-2.5 text-left transition hover:bg-cbg"
       onClick={() => {
         if (ad.linkUrl) window.open(ad.linkUrl, '_blank', 'noopener')
-        void api.adEvent(ad.id, 'click').catch(() => {})
+        void api.adEvent(ad.id, 'click', adViewerKey()).catch(() => {})
       }}
     >
-      <span className="rounded-md bg-[#E7EEFF] px-1.5 py-0.5 text-[9px] font-extrabold tracking-wide text-cbrand">AD</span>
+      {ad.imageUrl ? (
+        <img src={ad.imageUrl} alt="" className="h-11 w-11 flex-none rounded-xl object-cover" />
+      ) : (
+        <span className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[#E7EEFF] text-[10px] font-extrabold tracking-wide text-cbrand">
+          AD
+        </span>
+      )}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-bold text-cink">{ad.title}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded bg-csoft px-1 py-0.5 text-[8.5px] font-extrabold uppercase tracking-wider text-cmut">Sponsored</span>
+          <div className="truncate text-[13px] font-bold text-cink">{ad.title}</div>
+        </div>
         {ad.body && <div className="truncate text-[11.5px] text-cmut">{ad.body}</div>}
       </div>
       <Sparkles size={15} className="flex-none text-cmut" />
     </button>
+  )
+}
+
+/**
+ * Sponsored card injected INSIDE chat conversations after an admin-configured
+ * number of messages. Clearly identifiable, non-intrusive, and tracks
+ * impressions/clicks with the same deduped events as every other placement.
+ */
+export function SponsoredAdCard({ ad }: { ad: ServedAd }) {
+  const firedRef = useRef(false)
+  useEffect(() => {
+    if (!firedRef.current && ad.id) {
+      firedRef.current = true
+      void api.adEvent(ad.id, 'impression', adViewerKey()).catch(() => {})
+    }
+  }, [ad.id])
+  return (
+    <div className="my-1.5 w-full max-w-[420px] overflow-hidden rounded-[18px] border border-cline bg-white shadow-sm">
+      <button
+        className="w-full text-left"
+        onClick={() => {
+          if (ad.linkUrl) window.open(ad.linkUrl, '_blank', 'noopener')
+          void api.adEvent(ad.id, 'click', adViewerKey()).catch(() => {})
+        }}
+        aria-label={`Sponsored: ${ad.title}`}
+      >
+        <div className="flex items-center justify-between bg-cbg px-3 py-1.5">
+          <span className="text-[9.5px] font-extrabold uppercase tracking-widest text-cmut">Sponsored</span>
+          <Sparkles size={12} className="text-cmut" />
+        </div>
+        {ad.imageUrl && (
+          <img src={ad.imageUrl} alt={ad.title} className="h-28 w-full object-cover" loading="lazy" />
+        )}
+        <div className="px-3.5 py-2.5">
+          <div className="truncate text-[13.5px] font-extrabold text-cink">{ad.title}</div>
+          {ad.body && <div className="mt-0.5 line-clamp-2 text-[12px] leading-[17px] text-cmut">{ad.body}</div>}
+          {ad.linkUrl && (
+            <span className="mt-2 inline-flex items-center rounded-full bg-csoft px-3 py-1 text-[11px] font-bold text-cbrand">Learn more →</span>
+          )}
+        </div>
+      </button>
+    </div>
   )
 }

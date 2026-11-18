@@ -55,6 +55,9 @@ class SocketClient {
       'room:moderate',
       'room:closed',
       'room:removed',
+      'room:mic_request',
+      'room:mic_invite',
+      'room:self_mute',
       // video live + battles
       'live:viewers',
       'live:viewer:join',

@@ -52,8 +52,48 @@ const relayServer = createServer((req, res) => {
           for (const id of ids) io.to(id).emit(event, body.data)
           reached++
         } else if (t.startsWith('room:') || t.startsWith('live:')) {
-          io.to(t).emit(event, body.data)
-          reached++
+          // internal control events mutate service state instead of being
+          // broadcast — REST routes are the single source of truth
+          if (event === 'internal:room_sync') {
+            const sync = body.data as { roomId?: string; participants?: RoomUser[] }
+            if (sync?.roomId && Array.isArray(sync.participants)) {
+              const members = new Map<string, RoomUser>()
+              for (const p of sync.participants) {
+                if (!p?.userId) continue
+                members.set(p.userId, {
+                  userId: p.userId,
+                  name: p.name ?? '',
+                  avatarKey: p.avatarKey ?? 0,
+                  avatarUrl: p.avatarUrl ?? null,
+                  role: p.role ?? 'listener',
+                  muted: !!p.muted,
+                  handRaised: !!p.handRaised,
+                  stageInvite: !!p.stageInvite,
+                })
+              }
+              roomMembers.set(sync.roomId, members)
+              broadcastRoomState(sync.roomId)
+              reached++
+            }
+          } else if (event === 'internal:room_closed') {
+            const d = body.data as { roomId?: string }
+            if (d?.roomId) {
+              roomMembers.delete(d.roomId)
+              io.to(`room:${d.roomId}`).emit('room:closed', { roomId: d.roomId })
+              reached++
+            }
+          } else if (event === 'internal:live_ended') {
+            const d = body.data as { liveId?: string }
+            if (d?.liveId) {
+              io.to(`live:${d.liveId}`).emit('live:ended', { liveId: d.liveId })
+              liveHosts.delete(d.liveId)
+              liveViewers.delete(d.liveId)
+              reached++
+            }
+          } else {
+            io.to(t).emit(event, body.data)
+            reached++
+          }
         }
       }
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, reached }))
@@ -65,6 +105,35 @@ const relayServer = createServer((req, res) => {
   })
 })
 relayServer.listen(3004, () => console.log('CALL internal relay on port 3004'))
+
+/* ================= server-side role verification =================
+ * The socket service has no DB access, so it verifies every privileged
+ * action against the Next.js backend. Clients can NEVER grant themselves
+ * host/publisher rights by emitting crafted events.
+ */
+const VERIFY_URL = process.env.CALL_APP_URL || 'http://127.0.0.1:3000'
+const verifyCache = new Map<string, { data: Record<string, unknown>; at: number }>()
+
+async function verify(kind: 'room' | 'live', id: string, userId: string): Promise<Record<string, unknown> | null> {
+  if (!id || !userId) return null
+  const key = `${kind}:${id}:${userId}`
+  const cached = verifyCache.get(key)
+  if (cached && Date.now() - cached.at < 12_000) return cached.data
+  try {
+    const res = await fetch(`${VERIFY_URL}/api/internal/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-internal-secret': RELAY_SECRET },
+      body: JSON.stringify({ kind, id, userId }),
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return cached?.data ?? null
+    const data = (await res.json()) as Record<string, unknown>
+    verifyCache.set(key, { data, at: Date.now() })
+    return data
+  } catch {
+    return cached?.data ?? null
+  }
+}
 
 const io = new Server(httpServer, {
   // DO NOT change the path, it is used by Caddy to forward the request to the correct port
@@ -121,6 +190,7 @@ interface RoomUser {
   role: string
   muted: boolean
   handRaised: boolean
+  stageInvite?: boolean
 }
 // roomId -> Map<userId, RoomUser>
 const roomMembers = new Map<string, Map<string, RoomUser>>()
@@ -243,31 +313,40 @@ io.on('connection', (socket: Socket) => {
   socket.on('room:join', (p: { roomId: string; user: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null }; role?: string }) => {
     if (!p?.roomId || !p?.user?.id) return
     myUserId = myUserId || p.user.id
-    const members = roomMembers.get(p.roomId) ?? new Map<string, RoomUser>()
-    members.set(p.user.id, {
-      userId: p.user.id,
-      name: p.user.name,
-      avatarKey: p.user.avatarKey ?? 0,
-      avatarUrl: p.user.avatarUrl ?? null,
-      role: p.role || 'listener',
-      muted: false,
-      handRaised: false,
-    })
-    roomMembers.set(p.roomId, members)
-    myRooms.add(p.roomId)
-    socket.join(`room:${p.roomId}`)
-    broadcastRoomState(p.roomId)
+    // ROLE IS SERVER-VERIFIED — the client-provided role is ignored.
+    void (async () => {
+      const v = await verify('room', p.roomId, p.user.id)
+      // dropped ONLY when the backend explicitly says so (ended room / kicked /
+      // blocked). A transient verify failure keeps the user as a safe listener.
+      if (v && (!v.exists || v.blocked)) {
+        socket.emit('room:removed', { roomId: p.roomId, reason: 'unavailable' })
+        return
+      }
+      const role = v && v.role ? (v.role as string) : 'listener'
+      const members = roomMembers.get(p.roomId) ?? new Map<string, RoomUser>()
+      members.set(p.user.id, {
+        userId: p.user.id,
+        name: p.user.name,
+        avatarKey: p.user.avatarKey ?? 0,
+        avatarUrl: p.user.avatarUrl ?? null,
+        role,
+        muted: false,
+        handRaised: false,
+      })
+      roomMembers.set(p.roomId, members)
+      myRooms.add(p.roomId)
+      socket.join(`room:${p.roomId}`)
+      broadcastRoomState(p.roomId)
+    })()
   })
 
-  socket.on('room:leave', (p: { roomId: string; userId?: string }) => {
-    if (!p?.roomId) return
-    const uid = p.userId || myUserId
-    if (!uid) return
+  socket.on('room:leave', (p: { roomId: string }) => {
+    // a client may only remove ITSELF from a room — never someone else
+    if (!p?.roomId || !myUserId) return
     const members = roomMembers.get(p.roomId)
-    members?.delete(uid)
+    members?.delete(myUserId)
     if (members && members.size === 0) {
       roomMembers.delete(p.roomId)
-      io.to(`room:${p.roomId}`).emit('room:closed', { roomId: p.roomId })
     } else {
       broadcastRoomState(p.roomId)
     }
@@ -292,29 +371,44 @@ io.on('connection', (socket: Socket) => {
   })
 
   socket.on('room:signal', (p: { roomId: string; to: string; data: unknown }) => {
-    if (!p?.to) return
+    if (!p?.to || !myUserId) return
+    // WebRTC signals may only flow between members of the same room
+    const members = roomMembers.get(p.roomId ?? '')
+    if (!members || (!members.has(myUserId) && !members.has(p.to))) return
     for (const id of socketsOf(p.to)) io.to(id).emit('room:signal', { roomId: p.roomId, from: myUserId, data: p.data })
   })
 
+  /** self mute badge sync (only affects MY row; host force-mute goes via REST) */
+  socket.on('room:self_mute', (p: { roomId: string; muted: boolean }) => {
+    if (!p?.roomId || !myUserId) return
+    const member = roomMembers.get(p.roomId)?.get(myUserId)
+    if (!member || member.role === 'listener') return
+    member.muted = !!p.muted
+    broadcastRoomState(p.roomId)
+  })
+
   socket.on('room:moderate', (p: { roomId: string; action: string; targetId: string; by: string }) => {
-    if (!p?.roomId || !p?.action || !p?.targetId) return
+    // Authorization happens on REST; this echo is only a fast-path mirror of
+    // already-verified changes and can never escalate roles by itself.
+    if (!p?.roomId || !p?.action || !p?.targetId || !myUserId) return
     const members = roomMembers.get(p.roomId)
+    const me = members?.get(myUserId)
+    const canModerate = me && (me.role === 'host' || me.role === 'cohost')
+    const selfHand = p.targetId === myUserId && (p.action === 'hand_up' || p.action === 'hand_down')
+    if (!canModerate && !selfHand) return
     const target = members?.get(p.targetId)
     if (members && target) {
-      if (p.action === 'promote') { target.role = 'speaker'; target.handRaised = false }
-      else if (p.action === 'cohost') { target.role = 'cohost'; target.handRaised = false }
-      else if (p.action === 'demote') { target.role = 'listener'; target.handRaised = false }
-      else if (p.action === 'mute') target.muted = true
-      else if (p.action === 'unmute') target.muted = false
-      else if (p.action === 'hand_ok') { target.role = 'speaker'; target.handRaised = false }
-      else if (p.action === 'hand_no') target.handRaised = false
-      else if (p.action === 'kick' || p.action === 'block') {
-        members.delete(p.targetId)
-        broadcastRoomState(p.roomId)
-        for (const id of socketsOf(p.targetId)) {
-          io.to(id).emit('room:removed', { roomId: p.roomId, reason: p.action })
-        }
-        return
+      if (canModerate) {
+        if (p.action === 'promote') { target.role = 'speaker'; target.handRaised = false }
+        else if (p.action === 'cohost') { target.role = 'cohost'; target.handRaised = false }
+        else if (p.action === 'demote') { target.role = 'listener'; target.handRaised = false }
+        else if (p.action === 'mute') target.muted = true
+        else if (p.action === 'unmute') target.muted = false
+        else if (p.action === 'hand_ok') { target.role = 'speaker'; target.handRaised = false }
+        else if (p.action === 'hand_no') target.handRaised = false
+      }
+      if (selfHand) {
+        target.handRaised = p.action === 'hand_up' && target.role === 'listener'
       }
       broadcastRoomState(p.roomId)
     }
@@ -325,27 +419,36 @@ io.on('connection', (socket: Socket) => {
   socket.on('live:join', (p: { liveId: string; user: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null }; asHost?: boolean }) => {
     if (!p?.liveId || !p?.user?.id) return
     myUserId = myUserId || p.user.id
-    socket.join(`live:${p.liveId}`)
-    myLives.add(p.liveId)
-    if (p.asHost) {
-      const hosts = liveHosts.get(p.liveId) ?? new Set<string>()
-      hosts.add(p.user.id)
-      liveHosts.set(p.liveId, hosts)
-    } else {
-      const viewers = liveViewers.get(p.liveId) ?? new Map<string, LiveViewer>()
-      viewers.set(p.user.id, {
-        userId: p.user.id,
-        name: p.user.name,
-        avatarKey: p.user.avatarKey ?? 0,
-        avatarUrl: p.user.avatarUrl ?? null,
-      })
-      liveViewers.set(p.liveId, viewers)
-      // tell the host (and battle participants) a new viewer needs a stream
-      for (const hostId of liveHosts.get(p.liveId) ?? []) {
-        for (const id of socketsOf(hostId)) io.to(id).emit('live:viewer:join', { liveId: p.liveId, viewer: viewers.get(p.user.id) })
+    // asHost is SERVER-VERIFIED — only the live host / accepted battle
+    // participants may register as publishers
+    void (async () => {
+      let asHost = !!p.asHost
+      if (asHost) {
+        const v = await verify('live', p.liveId, p.user.id)
+        asHost = !!(v && v.isLive && (v.isHost || v.isParticipant))
       }
-    }
-    broadcastViewers(p.liveId)
+      socket.join(`live:${p.liveId}`)
+      myLives.add(p.liveId)
+      if (asHost) {
+        const hosts = liveHosts.get(p.liveId) ?? new Set<string>()
+        hosts.add(p.user.id)
+        liveHosts.set(p.liveId, hosts)
+      } else {
+        const viewers = liveViewers.get(p.liveId) ?? new Map<string, LiveViewer>()
+        viewers.set(p.user.id, {
+          userId: p.user.id,
+          name: p.user.name,
+          avatarKey: p.user.avatarKey ?? 0,
+          avatarUrl: p.user.avatarUrl ?? null,
+        })
+        liveViewers.set(p.liveId, viewers)
+        // tell the host (and battle participants) a new viewer needs a stream
+        for (const hostId of liveHosts.get(p.liveId) ?? []) {
+          for (const id of socketsOf(hostId)) io.to(id).emit('live:viewer:join', { liveId: p.liveId, viewer: viewers.get(p.user.id) })
+        }
+      }
+      broadcastViewers(p.liveId)
+    })()
   })
 
   socket.on('live:leave', (p: { liveId: string; userId?: string }) => {
@@ -373,7 +476,9 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('live:chat', (p: { liveId: string; comment: unknown }) => {
     if (!p?.liveId || !p.comment) return
-    io.to(`live:${p.liveId}`).emit('live:chat', { liveId: p.liveId, comment: p.comment })
+    // sender already appended its own comment from the REST response —
+    // excluding the sender here prevents duplicate self-comments
+    socket.to(`live:${p.liveId}`).emit('live:chat', { liveId: p.liveId, comment: p.comment })
   })
 
   socket.on('live:react', (p: { liveId: string; emoji: string; from: { id: string; name: string } }) => {
@@ -392,10 +497,15 @@ io.on('connection', (socket: Socket) => {
   })
 
   socket.on('live:end', (p: { liveId: string }) => {
-    if (!p?.liveId) return
-    io.to(`live:${p.liveId}`).emit('live:ended', { liveId: p.liveId })
-    liveHosts.delete(p.liveId)
-    liveViewers.delete(p.liveId)
+    if (!p?.liveId || !myUserId) return
+    // ONLY the verified host may end the live from the socket path
+    void (async () => {
+      const v = await verify('live', p.liveId, myUserId)
+      if (!v || !v.isHost) return
+      io.to(`live:${p.liveId}`).emit('live:ended', { liveId: p.liveId })
+      liveHosts.delete(p.liveId)
+      liveViewers.delete(p.liveId)
+    })()
   })
 
   /* ---- battles ---- */
@@ -463,7 +573,6 @@ io.on('connection', (socket: Socket) => {
       members?.delete(myUserId)
       if (members && members.size === 0) {
         roomMembers.delete(roomId)
-        io.to(`room:${roomId}`).emit('room:closed', { roomId })
       } else if (members) {
         broadcastRoomState(roomId)
       }

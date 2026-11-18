@@ -10,7 +10,7 @@ import { LiveHostScreen } from './LiveHostScreen'
 import { LiveViewerScreen } from './LiveViewerScreen'
 import type { LiveSessionItem } from '@/lib/callapp/types'
 
-/** TikTok-style Video Live tab: session list + go live + viewer. */
+/** Video Live tab: session list + go live + viewer. */
 export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
   const [sessions, setSessions] = useState<LiveSessionItem[]>([])
@@ -95,31 +95,41 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
           </div>
         ) : (
           <div className={`grid gap-3 ${desk ? 'grid-cols-1 px-4 pt-3' : 'grid-cols-2 px-5 pt-2'}`}>
-            {sessions.map((s) => (
-              <button
-                key={s.id}
-                className="group relative overflow-hidden rounded-[18px] border border-cline bg-gradient-to-br from-[#1a1d2b] to-[#101219] p-4 text-left text-white transition hover:shadow-lg"
-                onClick={() => setWatching(s)}
-              >
-                <div className="flex items-center justify-between pb-3">
-                  <span className="rounded-full bg-red-500 px-2.5 py-1 text-[10px] font-bold">● LIVE</span>
-                  <span className="flex items-center gap-1 text-[11px] font-semibold text-white/70">
-                    <Eye size={13} /> {s.viewerCount}
-                  </span>
-                </div>
-                <Avatar name={s.host.name} avatarKey={s.host.avatarKey} size={52} src={s.host.avatarUrl} />
-                <p className="mt-2.5 truncate text-[15px] font-bold">{s.title}</p>
-                <p className="truncate text-[12px] text-white/60">{s.host.name}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  {s.mode === 'battle' && (
-                    <span className="rounded-full bg-[#FFD166]/20 px-2 py-0.5 text-[10px] font-bold text-[#FFD166]">⚔️ Battle</span>
-                  )}
-                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                    {s.mode === 'battle' ? 'Teams live' : 'Solo live'}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {sessions.map((s) => {
+              const isMine = s.isMine || s.host.id === me?.id
+              return (
+                <button
+                  key={s.id}
+                  className="group relative overflow-hidden rounded-[18px] border border-cline bg-gradient-to-br from-[#1a1d2b] to-[#101219] p-4 text-left text-white transition hover:shadow-lg"
+                  onClick={() => {
+                    // my own stream → resume the HOST screen (never the viewer)
+                    if (isMine) {
+                      setHosting({ id: s.id, title: s.title, mode: s.mode })
+                    } else {
+                      setWatching(s)
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between pb-3">
+                    <span className="rounded-full bg-red-500 px-2.5 py-1 text-[10px] font-bold">● LIVE</span>
+                    <span className="flex items-center gap-1 text-[11px] font-semibold text-white/70">
+                      <Eye size={13} /> {s.viewerCount}
+                    </span>
+                  </div>
+                  <Avatar name={s.host.name} avatarKey={s.host.avatarKey} size={52} src={s.host.avatarUrl} />
+                  <p className="mt-2.5 truncate text-[15px] font-bold">{s.title}</p>
+                  <p className="truncate text-[12px] text-white/60">{s.host.name}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    {s.mode === 'battle' && (
+                      <span className="rounded-full bg-[#FFD166]/20 px-2 py-0.5 text-[10px] font-bold text-[#FFD166]">⚔️ Battle</span>
+                    )}
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                      {isMine ? 'Your broadcast · tap to manage' : s.mode === 'battle' ? 'Teams live' : 'Solo live'}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

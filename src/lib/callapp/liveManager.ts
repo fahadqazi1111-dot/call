@@ -41,7 +41,7 @@ interface SignalMsg {
 }
 
 /**
- * Video Live client (TikTok-style).
+ * Video Live client.
  *  Host / battle participants: publish their camera to EVERY viewer
  *  (one send-only RTCPeerConnection per viewer — mesh, honest & free).
  *  Battle participants additionally receive each other's streams.
@@ -124,9 +124,9 @@ class LiveManager {
 
   /* ---------------- host / participant ---------------- */
 
-  async startPublishing(liveId: string, withVideo: boolean) {
+  async startPublishing(liveId: string, withVideo: boolean, myId = '') {
     this.bindSocket()
-    this._myId = this._myId || ''
+    this._myId = myId || this._myId
     this.state.liveId = liveId
     this.state.role = this.state.role ?? 'host'
     this.state.connected = true

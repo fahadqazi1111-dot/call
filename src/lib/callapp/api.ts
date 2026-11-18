@@ -297,6 +297,8 @@ export const api = {
     request<{ message: RoomChatMsg }>(`/api/rooms/${id}/messages`, { method: 'POST', body: JSON.stringify({ text }) }),
   roomModerate: (id: string, action: string, targetId: string) =>
     request<{ ok: boolean }>(`/api/rooms/${id}/moderate`, { method: 'POST', body: JSON.stringify({ action, targetId }) }),
+  roomStage: (id: string, action: string, extra?: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/api/rooms/${id}/stage`, { method: 'POST', body: JSON.stringify({ action, ...extra }) }),
 
   /* ---------- live + battles ---------- */
   liveSessions: () =>
@@ -341,8 +343,39 @@ export const api = {
     request<{ ok: boolean; unread: number }>('/api/notifications', { method: 'POST', body: JSON.stringify(payload) }),
 
   /* ---------- ads (serving + USER CAMPAIGNS) ---------- */
-  ads: (placement: string) => request<{ ads: AdItem[]; enabled: boolean }>(`/api/ads?placement=${placement}`),
-  adEvent: (id: string, action: 'impression' | 'click') => request<{ ok: boolean }>(`/api/ads/${id}/${action}`, { method: 'POST' }),
+  ads: (placement: string, exclude?: string[]) => {
+    const q = new URLSearchParams({ placement })
+    if (exclude?.length) q.set('exclude', exclude.join(','))
+    return request<{ ads: AdItem[]; enabled: boolean; chatAd?: { firstAfter: number; interval: number } }>(
+      `/api/ads?${q.toString()}`
+    )
+  },
+  adEvent: (id: string, action: 'impression' | 'click', viewerKey?: string) =>
+    request<{ ok: boolean; counted?: boolean }>(`/api/ads/${id}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ viewerKey: viewerKey || undefined }),
+    }),
+  adAnalytics: () =>
+    request<{
+      totals: { impressions: number; clicks: number; ctr: number; spend: number; activeCampaigns: number; campaigns: number }
+      campaigns: Array<{
+        id: string
+        title: string
+        status: string
+        placements: string
+        budget: number
+        totalCost: number
+        impressions: number
+        clicks: number
+        ctr: number
+        startsAt: string | null
+        endsAt: string | null
+        createdAt: string
+        rejectionReason: string | null
+        last14Days: { impressions: number; clicks: number }
+      }>
+      daily: Array<{ day: string; impressions: number; clicks: number }>
+    }>('/api/ads/analytics'),
   adPackages: () => request<{ packages: AdPackageItem[] }>('/api/ads/packages'),
   adCampaigns: () =>
     request<{ campaigns: AdCampaignItem[]; payments: Array<{ id: string; status: string; amount: number; isTest: boolean; createdAt: string }> }>(

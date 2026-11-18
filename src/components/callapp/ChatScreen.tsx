@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar, OfficialAvatar } from './Avatar'
 import { VoiceBubble } from './VoiceBubble'
 import { useRecorder } from './useRecorder'
@@ -8,7 +8,9 @@ import { useApp } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
 import { StaffTick } from './StaffTick'
+import { SponsoredAdCard, type ServedAd } from './GiftsUI'
 import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck } from 'lucide-react'
+import { api } from '@/lib/callapp/api'
 import type { Message } from '@/lib/callapp/types'
 
 const EMOJIS = ['😀', '😂', '🥰', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😭', '😮', '🤝']
@@ -50,6 +52,9 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const [draft, setDraft] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [sending, setSending] = useState(false)
+  /** sponsored ads config (admin-controlled message intervals) */
+  const [adCfg, setAdCfg] = useState({ firstAfter: 10, interval: 20 })
+  const [chatAds, setChatAds] = useState<ServedAd[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const typingLast = useRef(0)
@@ -117,8 +122,60 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       arr.push(m)
       byDay.set(key, arr)
     }
-    return Array.from(byDay.entries())
-  }, [messages])
+    const entries = Array.from(byDay.entries())
+    // ---- sponsored ad slots (admin-configured message intervals) ----
+    // after the first N messages, then after every M further messages.
+    // An ad slot number is attached to the local index of the message it
+    // follows, so cards render inline without disturbing message state.
+    let global = 0
+    let slot = 0
+    const slots = entries.map(([, msgs]) => {
+      const map: Record<number, number> = {}
+      for (let i = 0; i < msgs.length; i++) {
+        global++
+        const after = global
+        if (after === adCfg.firstAfter || (after > adCfg.firstAfter && (after - adCfg.firstAfter) % adCfg.interval === 0)) {
+          map[i] = slot++
+        }
+      }
+      return map
+    })
+    return { entries, slots }
+  }, [messages, adCfg])
+
+  /* ---------- in-chat sponsored ads (rotation + admin intervals) ---------- */
+  const slotCount = useMemo(() => {
+    return groups.slots.reduce((n, map) => n + Object.keys(map).length, 0)
+  }, [groups])
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await api.ads('chats')
+        if (!alive) return
+        if (res.chatAd) setAdCfg(res.chatAd)
+        if (res.ads[0]) setChatAds([res.ads[0]])
+      } catch {}
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+  useEffect(() => {
+    // fetch a different rotated ad for each additional slot
+    if (slotCount <= chatAds.length) return
+    let alive = true
+    void (async () => {
+      try {
+        const exclude = chatAds.map((a) => a.id)
+        const res = await api.ads('chats', exclude)
+        if (alive && res.ads[0]) setChatAds((cur) => [...cur, res.ads[0]])
+      } catch {}
+    })()
+    return () => {
+      alive = false
+    }
+  }, [slotCount, chatAds.length])
 
   if (!peer) return null
 
@@ -214,7 +271,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           </div>
         )}
 
-        {groups.map(([day, msgs]) => (
+        {groups.entries.map(([day, msgs], gi) => (
           <div key={day}>
             <div className="my-3 flex justify-center">
               <span className="rounded-[12px] bg-[#E8ECF6] px-3 py-1 text-xs font-semibold text-cmut">
@@ -224,9 +281,15 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
               </span>
             </div>
             <div className="flex flex-col gap-2.5">
-              {msgs.map((m) => (
-                <MessageRow key={m.id} msg={m} peerName={peer.name} />
-              ))}
+              {msgs.map((m, mi) => {
+                const slot = groups.slots[gi]?.[mi]
+                return (
+                  <Fragment key={m.id}>
+                    <MessageRow msg={m} peerName={peer.name} />
+                    {slot !== undefined && chatAds[slot] && <SponsoredAdCard ad={chatAds[slot]} />}
+                  </Fragment>
+                )
+              })}
             </div>
           </div>
         ))}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/callapp/server'
+import { relaySend, relayToLive } from '@/lib/callapp/roomSync'
 
 /** GET: live session detail. */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -75,5 +76,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
       data: { status: 'ended', endedAt: new Date(), winnerSide: best.side >= 0 ? best.side : null },
     })
   }
+  // server-side broadcast: every viewer/host learns the live ended (viewers
+  // can never fake this event because only this verified route emits it)
+  await relayToLive(id, 'live:ended', { liveId: id })
+  await relaySend([`live:${id}`], 'internal:live_ended', { liveId: id })
   return NextResponse.json({ ok: true })
 }

@@ -13,7 +13,7 @@ import { BattleVideoLayout } from './LiveHostScreen'
 import type { LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/callapp/types'
 
 /**
- * TikTok-style viewer: full-screen vertical video of the host (and battle
+ * Live viewer: full-screen vertical video of the host (and battle
  * teams), floating comments, gift animations, viewer count, battle scores.
  */
 export function LiveViewerScreen({ session, onClose }: { session: LiveSessionItem; onClose: () => void }) {
@@ -62,22 +62,33 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
 
   /* ---------- realtime events ---------- */
   useEffect(() => {
+    const seenComments = new Set<string>()
     const onComment = (p: unknown) => {
       const d = p as { liveId: string; comment: LiveComment }
-      if (d.liveId === session.id) setComments((c) => [...c.slice(-120), d.comment])
+      if (d.liveId !== session.id) return
+      if (d.comment?.id && seenComments.has(d.comment.id)) return
+      if (d.comment?.id) seenComments.add(d.comment.id)
+      setComments((c) => [...c.slice(-120), d.comment])
     }
+    const seenGifts = new Set<string>()
     const onGift = (p: unknown) => {
       const d = p as { liveId: string; payload: {
+        sendId?: string
         gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
       if (d.liveId !== session.id) return
-      // Animation is driven by the server-verified fulfillment event only.
+      // duplicate protection: one animation per verified transaction
+      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
+      if (seenGifts.has(dedupKey)) return
+      seenGifts.add(dedupKey)
+      // Animation is driven by the server-verified fulfillment event only,
+      // with the gift's own sound effect.
       const anim = animFromPayload(d.payload)
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      soundKit.giftEffect(d.payload.gift.animKind)
       setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 400)
     }
     const onEnded = (p: unknown) => {
       const d = p as { liveId: string }
@@ -147,7 +158,9 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
     try {
       const res = await api.liveSendComment(session.id, text)
       socketClient.emit('live:chat', { liveId: session.id, comment: res.comment })
-      setComments((c) => [...c.slice(-120), res.comment])
+      if (!comments.some((c) => c.id === res.comment.id)) {
+        setComments((c) => [...c.slice(-120), res.comment])
+      }
     } catch {}
   }
 

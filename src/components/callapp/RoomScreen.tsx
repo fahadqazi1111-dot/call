@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Mic, MicOff, Hand, MessageSquareText, Gift, LogOut, X, Send,
   Crown, Shield, Volume2, HandMetal, Loader2, Smile, ArrowDownToLine,
-  ChevronUp, ChevronDown, Radio,
+  ChevronUp, ChevronDown, Radio, MicVocal,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -17,6 +17,7 @@ import { VOICE_FX, createFxStream } from '@/lib/callapp/voiceFx'
 import type { GiftSessionStats, RoomChatMsg, RoomUserState } from '@/lib/callapp/types'
 
 const REACTIONS = ['👍', '❤️', '😂', '🎉', '😮', '🔥']
+const MAX_SPEAKERS = 5
 
 export function RoomScreen({
   roomId,
@@ -43,8 +44,19 @@ export function RoomScreen({
   const [fxBusy, setFxBusy] = useState(false)
   const [confirmInvite, setConfirmInvite] = useState(false)
   const [notice, setNotice] = useState('')
+  /** stage invitation I received from the host (must accept to speak) */
+  const [micInvite, setMicInvite] = useState<{ from: string; roomTitle: string } | null>(null)
+  /** my mic request is awaiting host approval */
+  const [requestPending, setRequestPending] = useState(false)
   const animKey = useRef(0)
   const myRoleRef = useRef<string>('listener')
+  const seenGifts = useRef<Set<string>>(new Set())
+  const prevRole = useRef<string>('listener')
+
+  const flash = (msg: string, ms = 2400) => {
+    setNotice(msg)
+    window.setTimeout(() => setNotice(''), ms)
+  }
 
   /* ---------- join + bind ---------- */
   useEffect(() => {
@@ -53,23 +65,22 @@ export function RoomScreen({
     let disposed = false
     const run = async () => {
       try {
-        // my persisted role (host if I created it)
+        // authoritative role from the server (host if I created the room)
         let role = 'listener'
         try {
           const detail = await api.room(roomId)
           role = detail.membership?.role ?? 'listener'
           if (detail.room.host.id === me.id) role = 'host'
-        } catch {}
-        myRoleRef.current = role
-        // default mic (no FX) — injected so mute controls work consistently
-        try {
-          const raw = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
-          if (disposed) {
-            raw.getTracks().forEach((t) => t.stop())
+          if (detail.membership?.blocked) {
+            setNotice('You are blocked from this room')
+            window.setTimeout(() => onClose(), 1400)
             return
           }
-          roomManager.setMicStream(raw)
         } catch {}
+        myRoleRef.current = role
+        prevRole.current = role
+        // NOTE: the microphone is captured ONLY for speaking roles — listeners
+        // never open the mic (host/invite approval required first).
         await roomManager.join(roomId, me, role)
         // chat history
         try {
@@ -88,7 +99,7 @@ export function RoomScreen({
     }
   }, [roomId])
 
-  /* ---------- realtime chat / reactions / gifts ---------- */
+  /* ---------- realtime chat / reactions / gifts / stage events ---------- */
   useEffect(() => {
     const onChat = (p: unknown) => {
       const d = p as { roomId: string; message: RoomChatMsg }
@@ -104,17 +115,25 @@ export function RoomScreen({
     }
     const onGift = (p: unknown) => {
       const d = p as { roomId: string; payload: {
+        sendId?: string
         gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
       if (d.roomId !== roomId) return
-      // Animation + sound are driven SOLELY by the server-verified fulfillment
-      // event — nothing is ever shown before the payment is confirmed.
+      // duplicate protection: one animation per verified transaction
+      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
+      if (seenGifts.current.has(dedupKey)) return
+      seenGifts.current.add(dedupKey)
+      // Animation + gift-specific sound are driven SOLELY by the
+      // server-verified fulfillment event — nothing shows pre-payment.
       const anim = animFromPayload(d.payload)
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      soundKit.giftEffect(d.payload.gift.animKind)
       setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
+      window.setTimeout(() => {
+        setAnims((a) => a.filter((x) => x.key !== anim.key))
+        seenGifts.current.delete(dedupKey)
+      }, d.payload.gift.durationMs + 400)
       void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
     }
     const onRemoved = (p: unknown) => {
@@ -123,32 +142,92 @@ export function RoomScreen({
       setNotice(d.reason === 'block' ? 'You were blocked from this room' : 'You were removed from the room')
       window.setTimeout(() => onClose(), 1200)
     }
+    const onClosed = () => {
+      flash('The host ended the room')
+      window.setTimeout(() => onClose(), 1200)
+    }
+    /** listener: the host invited me onto the microphone */
+    const onMicInvite = (p: unknown) => {
+      const d = p as { roomId: string; roomTitle?: string; from?: { name: string } }
+      if (d.roomId !== roomId) return
+      setMicInvite({ from: d.from?.name ?? 'The host', roomTitle: d.roomTitle ?? title })
+      soundKit.pop(true)
+    }
+    /** host/co-host: a listener requested the microphone */
+    const onMicRequest = (p: unknown) => {
+      const d = p as { roomId: string; user?: { name: string } }
+      if (d.roomId !== roomId) return
+      if (myRoleRef.current === 'host' || myRoleRef.current === 'cohost') {
+        flash(`✋ ${d.user?.name ?? 'A listener'} requests the microphone`)
+      }
+    }
     const offChat = socketClient.on('room:chat', onChat)
     const offReact = socketClient.on('room:react', onReact)
     const offGift = socketClient.on('room:gift', onGift)
     const offRemoved = socketClient.on('room:removed', onRemoved)
+    const offClosed = socketClient.on('room:closed', onClosed)
+    const offInvite = socketClient.on('room:mic_invite', onMicInvite)
+    const offRequest = socketClient.on('room:mic_request', onMicRequest)
     return () => {
       offChat()
       offReact()
       offGift()
       offRemoved()
+      offClosed()
+      offInvite()
+      offRequest()
     }
   }, [roomId, onClose])
+
+  /* ---------- role changes (promotion / demotion from the verified sync) ---------- */
+  const stRole = state?.me?.role ?? myRoleRef.current
+  useEffect(() => {
+    if (stRole === prevRole.current) return
+    const before = prevRole.current
+    prevRole.current = stRole
+    const wasListener = before === 'listener'
+    const nowSpeaking = stRole === 'host' || stRole === 'cohost' || stRole === 'speaker'
+    if (wasListener && nowSpeaking) {
+      setRequestPending(false)
+      flash('🎤 You are on stage — your microphone is live')
+      void roomManager.becomeSpeaker()
+    } else if (!wasListener && stRole === 'listener') {
+      flash('You were moved back to the listeners')
+      void roomManager.becomeListener()
+    } else if (nowSpeaking) {
+      void roomManager.becomeSpeaker()
+    }
+    myRoleRef.current = stRole
+  }, [stRole])
+
+  /* ---------- muted by the host: enforce locally as well ---------- */
+  useEffect(() => {
+    const mutedByHost = !!state?.me?.muted
+    if (mutedByHost) {
+      roomManager.enforceRemoteMute(true)
+      if (state?.micMuted === false) flash('🔇 The host muted your microphone')
+    } else {
+      roomManager.enforceRemoteMute(false)
+    }
+  }, [state?.me?.muted])
 
   const st = state
   const myRole = st?.me?.role ?? myRoleRef.current
   const isHostLike = myRole === 'host' || myRole === 'cohost'
   const iAmHost = myRole === 'host'
+  const iSpeak = myRole === 'host' || myRole === 'cohost' || myRole === 'speaker'
   const speakers = (st?.participants ?? []).filter((p) => ['host', 'cohost', 'speaker'].includes(p.role))
   const listeners = (st?.participants ?? []).filter((p) => p.role === 'listener')
   const handRaised = (st?.participants ?? []).filter((p) => p.handRaised)
+  const seatsFree = Math.max(0, MAX_SPEAKERS - speakers.length)
 
-  /* ---------- mic + fx ---------- */
+  /* ---------- mic + fx (speakers only) ---------- */
   const toggleMute = async () => {
     await roomManager.toggleMute()
   }
 
   const applyFx = async (effect: string) => {
+    if (!iSpeak) return
     if (fxBusy) return
     setFxBusy(true)
     try {
@@ -162,12 +241,6 @@ export function RoomScreen({
         roomManager.setMicStream(fx.stream)
       }
       setVoiceFx(effect)
-      // re-attach to peers
-      const s = roomManager.snapshot()
-      for (const p of s.participants) {
-        if (p.userId === me?.id) continue
-        // manager re-syncs tracks on next state update; force by re-sync
-      }
       await roomManager.refreshMic()
       setNotice(effect === 'original' ? 'Original voice' : `Voice FX: ${VOICE_FX.find((v) => v.id === effect)?.name}`)
       window.setTimeout(() => setNotice(''), 2200)
@@ -191,23 +264,44 @@ export function RoomScreen({
   const moderate = async (action: string, targetId: string) => {
     try {
       await api.roomModerate(roomId, action, targetId)
-      socketClient.emit('room:moderate', { roomId, action, targetId, by: me?.id })
     } catch (e) {
       alert((e as Error).message)
     }
   }
 
-  const raiseHand = () => {
-    const raised = !st?.me?.handRaised
-    // persist via REST then broadcast
-    void api
-      .roomModerate(roomId, raised ? 'hand_up' : 'hand_down', me?.id ?? '')
-      .then(() => socketClient.emit('room:moderate', { roomId, action: raised ? 'hand_up' : 'hand_down', targetId: me?.id, by: me?.id }))
-      .catch(() => {})
-    if (st?.me) {
-      setState({ ...st, me: { ...st.me, handRaised: raised } })
+  /* ---------- stage: request / invite / accept ---------- */
+  const requestMic = async () => {
+    if (iSpeak) return
+    const ok = await roomManager.requestMic(!requestPending)
+    if (ok) {
+      setRequestPending(!requestPending)
+      flash(requestPending ? 'Mic request cancelled' : 'Mic request sent — waiting for the host to approve')
+    } else {
+      flash('Could not send the request')
     }
-    if (raised) soundKit.pop(true)
+  }
+
+  const inviteToStage = async (target: RoomUserState) => {
+    if (seatsFree <= 0) {
+      flash('All mic seats are taken')
+      return
+    }
+    try {
+      await api.roomStage(roomId, 'invite_mic', { targetId: target.userId })
+      flash(`Stage invitation sent to ${target.name} — waiting for them to accept`)
+    } catch (e) {
+      flash((e as Error).message || 'Could not send the invitation')
+    }
+  }
+
+  const respondInvite = async (accept: boolean) => {
+    try {
+      await api.roomStage(roomId, accept ? 'accept_invite' : 'decline_invite')
+      flash(accept ? 'Joining the stage…' : 'Invitation declined')
+    } catch (e) {
+      flash((e as Error).message || 'Could not respond to the invitation')
+    }
+    setMicInvite(null)
   }
 
   const inviteFriends = async () => {
@@ -256,9 +350,8 @@ export function RoomScreen({
   const endRoom = async () => {
     if (!confirm('End this room for everyone?')) return
     try {
+      // REST ends the room AND broadcasts room:closed server-side
       await api.roomEnd(roomId)
-      socketClient.emit('room:leave', { roomId })
-      socketClient.emit('room:moderate', { roomId, action: 'close', targetId: '', by: me?.id })
     } catch {}
     onClose()
   }
@@ -293,7 +386,11 @@ export function RoomScreen({
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[17px] font-extrabold">{title}</h2>
           <p className="text-[11px] text-white/60">
-            {st.participants.length} in room · {speakers.length}/{5} speakers
+            {st.participants.length} in room · {speakers.length}/{MAX_SPEAKERS} speakers
+            {iAmHost && <span className="ml-1 font-bold text-[#FFD166]">· you are the host</span>}
+            {myRole === 'cohost' && <span className="ml-1 font-bold text-[#7DD3FC]">· co-host</span>}
+            {myRole === 'speaker' && !isHostLike && <span className="ml-1 font-bold text-green-300">· on stage</span>}
+            {myRole === 'listener' && <span className="ml-1 text-white/45">· listener</span>}
             {!entryPaid && me && <span className="ml-1 text-[#FFD166]">· free room</span>}
           </p>
         </div>
@@ -331,7 +428,7 @@ export function RoomScreen({
       {/* speaker grid */}
       <div className="flex-1 overflow-y-auto px-4 pb-2 pt-3 app-scroll">
         <div className="grid grid-cols-3 gap-3">
-          {speakers.slice(0, 5).map((p) => (
+          {speakers.slice(0, MAX_SPEAKERS).map((p) => (
             <SpeakerTile
               key={p.userId}
               user={p}
@@ -342,7 +439,7 @@ export function RoomScreen({
               onGift={() => setGiftTarget(p)}
             />
           ))}
-          {Array.from({ length: Math.max(0, 5 - speakers.length) }).map((_, i) => (
+          {Array.from({ length: Math.max(0, MAX_SPEAKERS - Math.min(speakers.length, MAX_SPEAKERS)) }).map((_, i) => (
             <div key={`empty-${i}`} className="flex aspect-square flex-col items-center justify-center rounded-[18px] border border-dashed border-white/15 text-white/30">
               <Mic size={20} />
               <span className="mt-1 text-[10px]">Empty seat</span>
@@ -350,10 +447,10 @@ export function RoomScreen({
           ))}
         </div>
 
-        {/* hand raises */}
+        {/* microphone requests — host approves / rejects */}
         {handRaised.length > 0 && (
           <div className="mt-4 rounded-[16px] bg-white/10 p-3">
-            <p className="pb-2 text-[12px] font-bold text-[#FFD166]">✋ Raised hands</p>
+            <p className="pb-2 text-[12px] font-bold text-[#FFD166]">🎤 Microphone requests</p>
             <div className="flex flex-wrap gap-2">
               {handRaised.map((p) => (
                 <div key={p.userId} className="flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1.5">
@@ -361,32 +458,53 @@ export function RoomScreen({
                   <span className="text-[12px] font-semibold">{p.name}</span>
                   {isHostLike && (
                     <>
-                      <button className="rounded-full bg-green-500/30 px-2 py-0.5 text-[10px] font-bold text-green-300" onClick={() => void moderate('hand_ok', p.userId)}>
-                        Accept
+                      <button
+                        className="rounded-full bg-green-500/30 px-2 py-0.5 text-[10px] font-bold text-green-300 disabled:opacity-40"
+                        disabled={seatsFree <= 0}
+                        title={seatsFree <= 0 ? 'No free mic seats' : 'Approve mic request'}
+                        onClick={() => void moderate('hand_ok', p.userId)}
+                      >
+                        Approve
                       </button>
                       <button className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70" onClick={() => void moderate('hand_no', p.userId)}>
                         Reject
                       </button>
                     </>
                   )}
+                  {!isHostLike && p.userId === me?.id && <span className="text-[10px] font-semibold text-[#FFD166]">Waiting for approval…</span>}
                 </div>
               ))}
             </div>
+            {isHostLike && seatsFree <= 0 && <p className="pt-2 text-[11px] font-semibold text-red-300">All {MAX_SPEAKERS} mic seats are occupied — move someone to listeners first.</p>}
           </div>
         )}
 
         {/* listeners */}
         <div className="mt-4">
-          <p className="pb-2 text-[12px] font-bold text-white/50">Listeners ({listeners.length})</p>
+          <p className="pb-2 text-[12px] font-bold text-white/50">
+            Listeners ({listeners.length})
+            {isHostLike && <span className="ml-2 font-normal text-white/40">tap 🎤 to invite someone onto the stage</span>}
+          </p>
           <div className="flex flex-wrap gap-2">
             {listeners.slice(0, 30).map((p) => (
               <div key={p.userId} className="flex items-center gap-1.5 rounded-full bg-white/5 py-1 pl-1 pr-2.5">
                 <Avatar name={p.name} avatarKey={p.avatarKey} size={24} src={p.avatarUrl} />
                 <span className="max-w-[90px] truncate text-[11px] text-white/80">{p.name}</span>
+                {p.stageInvite && <span className="text-[9px] font-bold text-[#FFD166]">invited</span>}
                 {isHostLike && p.userId !== me?.id && (
-                  <button className="text-[10px] font-bold text-red-300" onClick={() => void moderate('kick', p.userId)}>
-                    ✕
-                  </button>
+                  <>
+                    <button
+                      className="text-[#7DD3FC] hover:text-white"
+                      title={`Invite ${p.name} to the stage`}
+                      aria-label={`Invite ${p.name} to the stage`}
+                      onClick={() => void inviteToStage(p)}
+                    >
+                      <MicVocal size={14} />
+                    </button>
+                    <button className="text-[10px] font-bold text-red-300" onClick={() => void moderate('kick', p.userId)} title="Remove from room">
+                      ✕
+                    </button>
+                  </>
                 )}
               </div>
             ))}
@@ -395,42 +513,49 @@ export function RoomScreen({
         </div>
       </div>
 
-      {/* voice fx strip */}
-      <div className="flex gap-1.5 overflow-x-auto px-4 py-2 stories-scroll">
-        {VOICE_FX.slice(0, 8).map((f) => (
-          <button
-            key={f.id}
-            className={`flex-none rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
-              voiceFx === f.id ? 'bg-white text-black' : 'bg-white/10 text-white/75 hover:bg-white/20'
-            }`}
-            disabled={fxBusy}
-            onClick={() => void applyFx(f.id)}
-          >
-            {f.emoji} {f.name}
-          </button>
-        ))}
-      </div>
+      {/* voice fx strip — SPEAKERS ONLY */}
+      {iSpeak && (
+        <div className="flex gap-1.5 overflow-x-auto px-4 py-2 stories-scroll">
+          {VOICE_FX.slice(0, 8).map((f) => (
+            <button
+              key={f.id}
+              className={`flex-none rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+                voiceFx === f.id ? 'bg-white text-black' : 'bg-white/10 text-white/75 hover:bg-white/20'
+              }`}
+              disabled={fxBusy}
+              onClick={() => void applyFx(f.id)}
+            >
+              {f.emoji} {f.name}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* bottom controls */}
+      {/* bottom controls — role based */}
       <div className="flex items-center justify-around px-6 pb-8 pt-2">
-        <button
-          className={`flex h-[54px] w-[54px] items-center justify-center rounded-full transition ${
-            st.micMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
-          }`}
-          onClick={() => void toggleMute()}
-          title={st.micMuted ? 'Unmute' : 'Mute'}
-        >
-          {st.micMuted ? <MicOff size={22} /> : <Mic size={22} />}
-        </button>
-        <button
-          className={`flex h-[54px] w-[54px] items-center justify-center rounded-full transition ${
-            st.me?.handRaised ? 'bg-[#FFD166] text-black' : 'bg-white/10 text-white hover:bg-white/20'
-          }`}
-          onClick={raiseHand}
-          title="Raise hand"
-        >
-          <Hand size={22} />
-        </button>
+        {iSpeak ? (
+          /* speakers: mic mute */
+          <button
+            className={`flex h-[54px] w-[54px] items-center justify-center rounded-full transition ${
+              st.me?.muted || st.micMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+            }`}
+            onClick={() => void toggleMute()}
+            title={st.micMuted ? 'Unmute' : 'Mute'}
+          >
+            {st.me?.muted || st.micMuted ? <MicOff size={22} /> : <Mic size={22} />}
+          </button>
+        ) : (
+          /* listeners: request the microphone (host approval required) */
+          <button
+            className={`flex h-[54px] w-[54px] items-center justify-center rounded-full transition ${
+              requestPending || st.me?.handRaised ? 'bg-[#FFD166] text-black' : 'bg-white/10 text-white hover:bg-white/20'
+            }`}
+            onClick={() => void requestMic()}
+            title={requestPending || st.me?.handRaised ? 'Cancel mic request' : 'Request microphone'}
+          >
+            <Hand size={22} />
+          </button>
+        )}
         <button
           className="flex h-[54px] w-[54px] items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
           onClick={() => {
@@ -503,6 +628,32 @@ export function RoomScreen({
         </div>
       )}
 
+      {/* stage invitation dialog (listener) — explicit accept required */}
+      {micInvite && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/60 px-8">
+          <div className="w-full max-w-sm rounded-[22px] bg-[#181b26] p-6 text-center shadow-2xl">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-cbrand/20 text-cbrand">
+              <MicVocal size={26} />
+            </span>
+            <h3 className="mt-3 text-[17px] font-extrabold">Invitation to speak</h3>
+            <p className="mt-1.5 text-[13px] leading-5 text-white/70">
+              <b>{micInvite.from}</b> invited you to join the microphone in “{micInvite.roomTitle}”. Do you accept?
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                className="flex-1 rounded-full bg-white/10 py-3 text-sm font-bold text-white/80 hover:bg-white/20"
+                onClick={() => void respondInvite(false)}
+              >
+                Decline
+              </button>
+              <button className="flex-1 rounded-full bg-green-500 py-3 text-sm font-bold text-white hover:bg-green-400" onClick={() => void respondInvite(true)}>
+                Accept &amp; speak
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* gift picker — recipients are always eligible hosts, never me */}
       {giftOpen && me && (
         <GiftPickerSheet
@@ -568,7 +719,7 @@ function SpeakerTile({
       <audio ref={audioRef} autoPlay playsInline className="hidden" />
       <div className={`relative rounded-full p-[3px] ${isMe ? 'bg-cbrand' : 'bg-white/20'}`}>
         <Avatar name={user.name} avatarKey={user.avatarKey} size={54} src={user.avatarUrl} />
-        {user.muted && (
+        {(user.muted || isMe) && (
           <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white">
             <MicOff size={12} />
           </span>
@@ -599,12 +750,16 @@ function SpeakerTile({
       )}
       {menu && canModerate && (
         <div className="absolute inset-x-0 bottom-1 z-20 mx-1 rounded-xl bg-[#0b0d13]/95 p-2 text-[11px] shadow-xl">
-          <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate('promote'); setMenu(false) }}>
-            <HandMetal size={12} className="mr-1.5 inline" /> Make speaker
-          </button>
-          <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate('cohost'); setMenu(false) }}>
-            <Shield size={12} className="mr-1.5 inline" /> Make co-host
-          </button>
+          {user.role !== 'speaker' && (
+            <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate('promote'); setMenu(false) }}>
+              <HandMetal size={12} className="mr-1.5 inline" /> Make speaker
+            </button>
+          )}
+          {user.role !== 'cohost' && (
+            <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate('cohost'); setMenu(false) }}>
+              <Shield size={12} className="mr-1.5 inline" /> Make co-host
+            </button>
+          )}
           <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate(user.muted ? 'unmute' : 'mute'); setMenu(false) }}>
             {user.muted ? '🔊 Unmute' : '🔇 Force mute'}
           </button>

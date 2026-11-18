@@ -90,3 +90,18 @@ export function formatPhone(digits: string): string {
   if (d.length <= 7) return `${d.slice(0, 4)} ${d.slice(4)}`
   return `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7, 10)}`
 }
+
+/** Stable anonymous device key for ad event dedup (per browser). */
+export function adViewerKey(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    let k = window.localStorage.getItem('call_ad_viewer_key')
+    if (!k) {
+      k = `dev-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
+      window.localStorage.setItem('call_ad_viewer_key', k)
+    }
+    return k
+  } catch {
+    return `sess-${Math.random().toString(36).slice(2, 10)}`
+  }
+}

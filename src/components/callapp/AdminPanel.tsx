@@ -867,7 +867,7 @@ function AiSection() {
 }
 
 function AdsSection() {
-  const [tab, setTab] = useState<'campaigns' | 'packages'>('campaigns')
+  const [tab, setTab] = useState<'campaigns' | 'packages' | 'settings'>('campaigns')
   const [ads, setAds] = useState<Array<{
     id: string; title: string; body: string; imageUrl: string | null; linkUrl: string | null
     placements: string; status: string; isUserAd: boolean
@@ -920,6 +920,40 @@ function AdsSection() {
     void load()
   }
 
+  /* ---------- serving settings (chat ad frequency, placements, CPM) ---------- */
+  const [adsCfg, setAdsCfg] = useState<{ enabled: boolean; placements: string[]; chatAdFirstAfter: number; chatAdInterval: number; cpmUsd: number } | null>(null)
+  const loadAdsCfg = async () => {
+    try {
+      const res = await api.adminSettings()
+      const a = (res.settings as Record<string, Record<string, unknown>>).ads || {}
+      setAdsCfg({
+        enabled: a.enabled !== false,
+        placements: Array.isArray(a.placements) ? (a.placements as string[]) : ['chats', 'rooms', 'profile'],
+        chatAdFirstAfter: Number(a.chatAdFirstAfter ?? 10),
+        chatAdInterval: Number(a.chatAdInterval ?? 20),
+        cpmUsd: Number(a.cpmUsd ?? 2.5),
+      })
+    } catch {}
+  }
+  useEffect(() => {
+    if (tab === 'settings') queueMicrotask(() => void loadAdsCfg())
+  }, [tab])
+  const saveAdsCfg = async () => {
+    if (!adsCfg) return
+    try {
+      await api.adminSaveSettings('ads', {
+        enabled: adsCfg.enabled,
+        placements: adsCfg.placements,
+        chatAdFirstAfter: Math.max(1, Math.floor(adsCfg.chatAdFirstAfter || 10)),
+        chatAdInterval: Math.max(1, Math.floor(adsCfg.chatAdInterval || 20)),
+        cpmUsd: Math.max(0.1, adsCfg.cpmUsd || 2.5),
+      })
+      toast.success('Ad serving settings saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
   const STATUS_CLS: Record<string, string> = {
     active: 'bg-green-50 text-green-700',
     paused: 'bg-amber-50 text-[#B7791F]',
@@ -942,6 +976,9 @@ function AdsSection() {
           <button className={`h-9 rounded-full px-4 text-[12px] font-bold ${tab === 'packages' ? 'bg-cink text-white' : 'bg-csoft text-cmut'}`} onClick={() => setTab('packages')}>
             Ad packages
           </button>
+          <button className={`h-9 rounded-full px-4 text-[12px] font-bold ${tab === 'settings' ? 'bg-cink text-white' : 'bg-csoft text-cmut'}`} onClick={() => setTab('settings')}>
+            Serving settings
+          </button>
         </div>
         <div className="flex-1" />
         {tab === 'campaigns' ? (
@@ -954,6 +991,80 @@ function AdsSection() {
           </button>
         )}
       </div>
+
+      {tab === 'settings' && adsCfg && (
+        <div className="space-y-3 rounded-[16px] border border-cline p-4">
+          <h3 className="text-[14px] font-extrabold text-cink">Ad serving settings</h3>
+          <label className="flex items-center gap-2 text-[13px] font-semibold text-cink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[#2F5BEA]"
+              checked={adsCfg.enabled}
+              onChange={(e) => setAdsCfg({ ...adsCfg, enabled: e.target.checked })}
+            />
+            Ads enabled platform-wide
+          </label>
+          <div className="flex flex-wrap gap-3 text-[12.5px] text-cink">
+            {['chats', 'rooms', 'profile'].map((p) => (
+              <label key={p} className="flex items-center gap-1.5 font-semibold capitalize">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#2F5BEA]"
+                  checked={adsCfg.placements.includes(p)}
+                  onChange={(e) =>
+                    setAdsCfg({
+                      ...adsCfg,
+                      placements: e.target.checked ? [...adsCfg.placements, p] : adsCfg.placements.filter((x) => x !== p),
+                    })
+                  }
+                />
+                {p}
+              </label>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-[11.5px] font-bold uppercase tracking-wide text-cmut">Chat ad — first ad after N messages</span>
+              <input
+                type="number"
+                min={1}
+                className="mt-1 h-10 w-full rounded-[10px] border border-cline px-3 text-[13px] outline-none focus:border-cbrand"
+                value={adsCfg.chatAdFirstAfter}
+                onChange={(e) => setAdsCfg({ ...adsCfg, chatAdFirstAfter: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11.5px] font-bold uppercase tracking-wide text-cmut">Next ads every M messages</span>
+              <input
+                type="number"
+                min={1}
+                className="mt-1 h-10 w-full rounded-[10px] border border-cline px-3 text-[13px] outline-none focus:border-cbrand"
+                value={adsCfg.chatAdInterval}
+                onChange={(e) => setAdsCfg({ ...adsCfg, chatAdInterval: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11.5px] font-bold uppercase tracking-wide text-cmut">Effective CPM (USD / 1000 impressions)</span>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                className="mt-1 h-10 w-full rounded-[10px] border border-cline px-3 text-[13px] outline-none focus:border-cbrand"
+                value={adsCfg.cpmUsd}
+                onChange={(e) => setAdsCfg({ ...adsCfg, cpmUsd: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <p className="text-[11px] leading-4 text-cmut">
+            Example: first ad after {adsCfg.chatAdFirstAfter} messages, then another every {adsCfg.chatAdInterval} messages. Campaigns
+            with a budget stop serving automatically once they deliver (budget ÷ CPM) × 1000 impressions. Ads rotate fairly across all
+            eligible advertisers.
+          </p>
+          <button className="h-11 w-full rounded-full bg-cbrand text-[13px] font-bold text-white" onClick={() => void saveAdsCfg()}>
+            Save serving settings
+          </button>
+        </div>
+      )}
 
       {tab === 'campaigns' ? (
         <div className="space-y-2">

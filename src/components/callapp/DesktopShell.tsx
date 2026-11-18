@@ -125,7 +125,7 @@ function RoomsMainPanel() {
     <MainPlaceholder
       Icon={Radio}
       title="Voice Rooms"
-      sub="Join live audio rooms — free hangouts or paid rooms that earn diamonds for the host. Pick a room on the left."
+      sub="Join live audio rooms — free hangouts or paid rooms that earn real money for the host. Pick a room on the left."
       cta={{ label: 'Create a room', action: () => setTab('rooms') }}
     />
   )
@@ -137,7 +137,7 @@ function LiveMainPanel() {
     <MainPlaceholder
       Icon={Clapperboard}
       title="Video Live & Battles"
-      sub="TikTok-style live broadcasts with 1v1 and 2v2 battles, gift scoring and winner announcements. Pick a stream on the left."
+      sub="Live video broadcasts with 1v1 and 2v2 battles, gift scoring and winner announcements. Pick a stream on the left."
       cta={{ label: 'Go live', action: () => setTab('live') }}
     />
   )

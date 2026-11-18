@@ -357,6 +357,9 @@ model RoomParticipant {
   role       String    @default("listener") // host | cohost | speaker | listener
   muted      Boolean   @default(false)
   handRaised Boolean   @default(false)
+  /** host invited this listener onto the mic — must be accepted before promoting */
+  stageInvite Boolean  @default(false)
+  invitedAt  DateTime?
   blocked    Boolean   @default(false)
   entryPaid  Boolean   @default(false)
   joinedAt   DateTime  @default(now())
@@ -555,12 +558,34 @@ model Ad {
   startsAt        DateTime?
   endsAt          DateTime?
   weight          Int        @default(1)
+  /** fair rotation: when this ad was last picked by the ad server */
+  lastServedAt    DateTime?
+  serves          Int        @default(0)
   reviewedBy      String?
   reviewedAt      DateTime?
   createdAt       DateTime   @default(now())
+  events          AdEvent[]
 
   @@index([status, createdAt])
   @@index([ownerId])
+}
+
+/**
+ * Per-event ad tracking with viewer dedup. One row per (ad, kind, viewer, day):
+ * duplicate impressions/clicks from the same viewer on the same day are
+ * rejected by the unique index, so counters never inflate.
+ */
+model AdEvent {
+  id        String   @id @default(cuid())
+  adId      String
+  ad        Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  kind      String // impression | click
+  viewerKey String // userId or anonymous device id
+  dayKey    String // YYYY-MM-DD (UTC)
+  createdAt DateTime @default(now())
+
+  @@unique([adId, kind, viewerKey, dayKey])
+  @@index([adId, kind, createdAt])
 }
 
 /**

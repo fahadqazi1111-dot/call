@@ -32,6 +32,7 @@ export function AdsScreen({ onClose }: { onClose: () => void }) {
   const [showCreate, setShowCreate] = useState(false)
   const [checkout, setCheckout] = useState<PendingPayment | null>(null)
   const [isTest, setIsTest] = useState(true)
+  const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof api.adAnalytics>> | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -43,8 +44,18 @@ export function AdsScreen({ onClose }: { onClose: () => void }) {
     setLoading(false)
   }
 
+  const loadAnalytics = async () => {
+    try {
+      setAnalytics(await api.adAnalytics())
+    } catch {}
+  }
+
   useEffect(() => {
     queueMicrotask(() => void load())
+    queueMicrotask(() => void loadAnalytics())
+    // reports update automatically as ad activity occurs
+    const t = window.setInterval(() => void loadAnalytics(), 20_000)
+    return () => window.clearInterval(t)
   }, [])
 
   return (
@@ -75,6 +86,84 @@ export function AdsScreen({ onClose }: { onClose: () => void }) {
         </header>
 
         <main className="px-5 pt-4">
+          {/* ---------- advertiser analytics dashboard ---------- */}
+          {analytics && analytics.totals.campaigns > 0 && (
+            <section className="mb-4 rounded-[20px] border border-cline bg-white p-4">
+              <div className="flex items-center justify-between pb-3">
+                <div>
+                  <h2 className="text-[15px] font-extrabold text-cink">Campaign analytics</h2>
+                  <p className="text-[11px] text-cmut">Live performance across all your advertisements · auto-updating</p>
+                </div>
+                <RefreshCw size={15} className="text-cmut" />
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="rounded-[14px] bg-cbg px-2 py-2.5 text-center">
+                  <p className="text-[16px] font-extrabold text-cink">{analytics.totals.impressions}</p>
+                  <p className="flex items-center justify-center gap-1 text-[9.5px] text-cmut"><Eye size={10} /> Impressions</p>
+                </div>
+                <div className="rounded-[14px] bg-cbg px-2 py-2.5 text-center">
+                  <p className="text-[16px] font-extrabold text-cink">{analytics.totals.clicks}</p>
+                  <p className="flex items-center justify-center gap-1 text-[9.5px] text-cmut"><MousePointerClick size={10} /> Clicks</p>
+                </div>
+                <div className="rounded-[14px] bg-cbg px-2 py-2.5 text-center">
+                  <p className="text-[16px] font-extrabold text-cbrand">{analytics.totals.ctr.toFixed(1)}%</p>
+                  <p className="text-[9.5px] text-cmut">CTR</p>
+                </div>
+                <div className="rounded-[14px] bg-cbg px-2 py-2.5 text-center">
+                  <p className="text-[16px] font-extrabold text-cink">${analytics.totals.spend.toFixed(2)}</p>
+                  <p className="flex items-center justify-center gap-1 text-[9.5px] text-cmut"><Wallet size={10} /> Spend</p>
+                </div>
+              </div>
+              {/* 14-day activity chart (impressions) */}
+              {analytics.daily.some((d) => d.impressions > 0 || d.clicks > 0) && (
+                <div className="mt-3 rounded-[14px] bg-cbg px-3 pb-2 pt-3">
+                  <p className="pb-2 text-[10.5px] font-bold uppercase tracking-wider text-cmut">Last 14 days</p>
+                  <div className="flex h-14 items-end gap-[3px]">
+                    {analytics.daily.map((d) => {
+                      const max = Math.max(...analytics.daily.map((x) => x.impressions), 1)
+                      const h = Math.max(3, Math.round((d.impressions / max) * 46))
+                      const has = d.impressions > 0
+                      return (
+                        <div key={d.day} className="group relative flex-1" title={`${d.day}: ${d.impressions} impressions, ${d.clicks} clicks`}>
+                          <div
+                            className={`w-full rounded-t-[3px] ${has ? 'bg-cbrand' : 'bg-[#D6DEF0]'}`}
+                            style={{ height: h }}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* per-campaign performance table */}
+              <div className="mt-3 overflow-hidden rounded-[14px] border border-cline">
+                <table className="w-full text-left text-[11.5px]">
+                  <thead>
+                    <tr className="bg-cbg text-[9.5px] uppercase tracking-wider text-cmut">
+                      <th className="px-2.5 py-2 font-bold">Campaign</th>
+                      <th className="px-2 py-2 text-right font-bold">Impr.</th>
+                      <th className="px-2 py-2 text-right font-bold">Clicks</th>
+                      <th className="px-2.5 py-2 text-right font-bold">CTR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics.campaigns.map((c) => (
+                      <tr key={c.id} className="border-t border-cline">
+                        <td className="max-w-[150px] px-2.5 py-2">
+                          <p className="truncate font-bold text-cink">{c.title}</p>
+                          <p className="text-[9.5px] text-cmut">{STATUS_META[c.status as AdCampaignStatus]?.label ?? c.status}</p>
+                        </td>
+                        <td className="px-2 py-2 text-right font-semibold text-cink">{c.impressions}</td>
+                        <td className="px-2 py-2 text-right font-semibold text-cink">{c.clicks}</td>
+                        <td className="px-2.5 py-2 text-right font-bold text-cbrand">{c.ctr.toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           {loading ? (
             <div className="flex justify-center pt-16">
               <Loader2 className="animate-spin text-cbrand" size={24} />
