@@ -119,6 +119,35 @@ async function main() {
   } else if (existingAdmin.role !== 'admin') {
     await prisma.user.update({ where: { id: existingAdmin.id }, data: { role: 'admin' } })
   }
+
+  /* ---------- default admin #2 (idempotent) — fahadqazi1111@gmail.com / 12345678 ---------- */
+  const defAdminEmail = 'fahadqazi1111@gmail.com'
+  const defAdmin = await prisma.user.findUnique({ where: { email: defAdminEmail } })
+  const { hashPassword } = await import('../src/lib/callapp/server')
+  if (!defAdmin) {
+    await prisma.user.create({
+      data: {
+        phone: '0000000002',
+        email: defAdminEmail,
+        emailVerified: true,
+        passwordHash: hashPassword('12345678'),
+        role: 'admin',
+        name: 'Fahad Mazhar',
+        username: 'fahadqazi',
+      },
+    })
+    console.log('Default admin created: fahadqazi1111@gmail.com / 12345678')
+  } else {
+    const patch: { role?: string; emailVerified?: boolean; passwordHash?: string } = {}
+    if (defAdmin.role !== 'admin') patch.role = 'admin'
+    if (!defAdmin.emailVerified) patch.emailVerified = true
+    // never overwrite a password the user has chosen themselves
+    if (!defAdmin.passwordHash) patch.passwordHash = hashPassword('12345678')
+    if (Object.keys(patch).length) {
+      await prisma.user.update({ where: { id: defAdmin.id }, data: patch })
+      console.log('Default admin ensured: fahadqazi1111@gmail.com (role admin)')
+    }
+  }
 }
 
 main()

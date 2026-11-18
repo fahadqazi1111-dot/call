@@ -97,6 +97,7 @@ interface AppState {
   loginSuccess: (token: string, user: Me) => void
   updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) => Promise<void>
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
+  markPasswordSet: () => void
   logout: () => void
 
   loadChats: () => Promise<void>
@@ -225,6 +226,13 @@ export const useApp = create<AppState>((set, get) => ({
     if (s) saveSession({ ...s, user })
     // refresh chats so peers that mirror my profile pick up the new photo
     void get().loadChats()
+  },
+
+  /** after a successful password change/set, reflect hasPassword locally + in the stored session */
+  markPasswordSet: () => {
+    set((s) => (s.me ? { me: { ...s.me, hasPassword: true } } : s))
+    const sess = loadSession()
+    if (sess && sess.user) saveSession({ ...sess, user: { ...sess.user, hasPassword: true } })
   },
 
   logout: () => {

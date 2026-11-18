@@ -34,6 +34,9 @@ import {
   TrendingUp,
   Lock,
   LockOpen,
+  LockKeyhole,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 
 const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
@@ -122,6 +125,17 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const [unameMsg, setUnameMsg] = useState('')
   const [unameBusy, setUnameBusy] = useState(false)
   const [nowTick, setNowTick] = useState(Date.now())
+
+  // password dialog state
+  const [showPwd, setShowPwd] = useState(false)
+  const [pwdCur, setPwdCur] = useState('')
+  const [pwdNew, setPwdNew] = useState('')
+  const [pwdConf, setPwdConf] = useState('')
+  const [pwdBusy, setPwdBusy] = useState(false)
+  const [showCur, setShowCur] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [showConf, setShowConf] = useState(false)
+  const markPasswordSet = useApp((s) => s.markPasswordSet)
 
   useEffect(() => {
     if (!showUsername) return
@@ -251,6 +265,43 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   }
 
   const isStaff = me.role === 'admin' || me.role === 'team'
+  const hasPwd = !!me.hasPassword
+
+  const openPassword = () => {
+    setPwdCur('')
+    setPwdNew('')
+    setPwdConf('')
+    setShowCur(false)
+    setShowNew(false)
+    setShowConf(false)
+    setShowPwd(true)
+  }
+
+  const savePassword = async () => {
+    if (pwdNew.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    if (pwdNew !== pwdConf) {
+      toast.error('New passwords do not match')
+      return
+    }
+    if (hasPwd && !pwdCur) {
+      toast.error('Enter your current password first')
+      return
+    }
+    setPwdBusy(true)
+    try {
+      await api.passwordChange(hasPwd ? pwdCur : null, pwdNew)
+      markPasswordSet()
+      toast.success(hasPwd ? 'Password updated' : 'Password set — you can now log in with it')
+      setShowPwd(false)
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not update password')
+    } finally {
+      setPwdBusy(false)
+    }
+  }
 
   return (
     <div
@@ -401,6 +452,12 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
             Icon={Mail}
             label="Email"
             sub={me.email ? `${me.email}${me.emailVerified ? ' · verified' : ''}` : 'Not linked yet'}
+          />
+          <Row
+            Icon={LockKeyhole}
+            label={hasPwd ? 'Change password' : 'Set password'}
+            sub={hasPwd ? 'Update your login password anytime' : 'Add a password for email login & security'}
+            onClick={openPassword}
           />
           <Row Icon={Bell} label="Push notifications" sub="New messages & calls" onClick={enableNotifications} />
         </div>
@@ -588,6 +645,86 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
           </div>
         </div>
       )}
+
+      {/* ---------- password change / set dialog ---------- */}
+      {showPwd && (
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${
+            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+          }`}
+          onClick={() => setShowPwd(false)}
+        >
+          <div
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label={hasPwd ? 'Change password' : 'Set password'}
+          >
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 flex-none items-center justify-center rounded-[14px] bg-[#E7EEFF] text-cbrand">
+                <LockKeyhole size={20} />
+              </span>
+              <div>
+                <h2 className="text-xl font-extrabold text-cink">{hasPwd ? 'Change password' : 'Set a password'}</h2>
+                <p className="mt-0.5 text-[12.5px] text-cmut">
+                  {hasPwd ? 'Choose a strong password you don\u2019t use anywhere else.' : 'Add a password so you can also log in with your email.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {hasPwd && (
+                <PwdField
+                  label="Current password"
+                  value={pwdCur}
+                  setValue={setPwdCur}
+                  show={showCur}
+                  toggle={() => setShowCur((v) => !v)}
+                  autoComplete="current-password"
+                  placeholder="Your current password"
+                />
+              )}
+              <PwdField
+                label={hasPwd ? 'New password' : 'Password'}
+                value={pwdNew}
+                setValue={setPwdNew}
+                show={showNew}
+                toggle={() => setShowNew((v) => !v)}
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                hint="Use at least 8 characters — a mix of letters and numbers is best."
+              />
+              <PwdField
+                label="Confirm new password"
+                value={pwdConf}
+                setValue={setPwdConf}
+                show={showConf}
+                toggle={() => setShowConf((v) => !v)}
+                autoComplete="new-password"
+                placeholder="Repeat the new password"
+              />
+            </div>
+
+            {pwdConf && pwdNew !== pwdConf && (
+              <p className="mt-2 text-xs font-semibold text-cred">Passwords do not match yet.</p>
+            )}
+
+            <button
+              className="btn-p mt-5 w-full disabled:opacity-50"
+              disabled={
+                pwdBusy ||
+                pwdNew.length < 8 ||
+                pwdNew !== pwdConf ||
+                (hasPwd && !pwdCur)
+              }
+              onClick={() => void savePassword()}
+            >
+              {pwdBusy ? 'Saving…' : hasPwd ? 'Update password' : 'Set password'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -618,5 +755,52 @@ function Row({
       </span>
       <ChevronRight size={17} className="text-[#9AA8C7]" />
     </button>
+  )
+}
+
+/** Password input with show/hide toggle. */
+function PwdField({
+  label,
+  value,
+  setValue,
+  show,
+  toggle,
+  autoComplete,
+  placeholder,
+  hint,
+}: {
+  label: string
+  value: string
+  setValue: (v: string) => void
+  show: boolean
+  toggle: () => void
+  autoComplete: string
+  placeholder?: string
+  hint?: string
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">{label}</label>
+      <div className="relative">
+        <input
+          className="app-input pr-12"
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-cmut transition hover:text-cink"
+          onClick={toggle}
+          aria-label={show ? 'Hide password' : 'Show password'}
+        >
+          {show ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+      </div>
+      {hint && <p className="mt-1.5 text-[11px] leading-4 text-[#9AA8C7]">{hint}</p>}
+    </div>
   )
 }

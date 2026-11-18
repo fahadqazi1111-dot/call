@@ -115,6 +115,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, code, newPassword }),
     }),
+  /** Change (or first-time set) the signed-in user's own password. */
+  passwordChange: (currentPassword: string | null, newPassword: string) =>
+    request<{ ok: boolean }>('/api/auth/password/change', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
   googleSignIn: (credential: string) =>
     request<{ ok: boolean; token: string; user: Me }>('/api/auth/google', {
       method: 'POST',

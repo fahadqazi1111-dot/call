@@ -343,6 +343,7 @@ export function publicUser(u: {
   isOfficial?: boolean
   allowNonContacts?: boolean
   createdAt?: Date
+  passwordHash?: string | null
 }) {
   return {
     id: u.id,
@@ -360,6 +361,7 @@ export function publicUser(u: {
     isOfficial: u.isOfficial ?? false,
     allowNonContacts: u.allowNonContacts ?? false,
     createdAt: u.createdAt ? u.createdAt.toISOString() : null,
+    hasPassword: !!u.passwordHash,
   }
 }
 

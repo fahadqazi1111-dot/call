@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Gift as GiftIcon, Loader2, ChevronLeft, Users, Sparkles, Info } from 'lucide-react'
+import { Gift as GiftIcon, Loader2, ChevronLeft, Users, Sparkles, Info, Megaphone, ExternalLink, X } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { adViewerKey } from '@/lib/callapp/utils'
 import { toast } from 'sonner'
@@ -572,9 +572,117 @@ async function fetchAd(placement: string, exclude: string[] = []): Promise<Serve
   }
 }
 
-/** Ad shown in list screens — auto-rotates every 45s so multiple advertisers share the slot. */
+/** Count a click-through and open the advertiser's website in a new tab. */
+function openAdTarget(ad: ServedAd) {
+  if (!ad.linkUrl) return
+  void api.adEvent(ad.id, 'click', adViewerKey()).catch(() => {})
+  window.open(ad.linkUrl, '_blank', 'noopener')
+}
+
+/**
+ * Distinct ad icon — a gradient megaphone badge with a tiny "AD" tag.
+ * Clearly different from profile avatars and from the old plain square,
+ * so sponsored content is instantly recognisable everywhere.
+ */
+function AdGlyph({ size = 20, box = 'h-11 w-11' }: { size?: number; box?: string }) {
+  return (
+    <span className={`relative flex ${box} flex-none items-center justify-center rounded-xl bg-brand-grad text-white shadow-sm`}>
+      <Megaphone size={size} strokeWidth={2.4} />
+      <span className="absolute -right-1.5 -top-1.5 rounded-full bg-white px-1 text-[7.5px] font-black leading-[13px] tracking-wider text-cbrand ring-1 ring-cline">
+        AD
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Full-detail ad popup — artwork, name, complete description and a visit
+ * button. Opens when an ad card is tapped; the small external-link icon on
+ * the card bypasses this popup and goes straight to the target website.
+ */
+export function AdDetailModal({ ad, onClose }: { ad: ServedAd; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  let host = ''
+  if (ad.linkUrl) {
+    try {
+      host = new URL(ad.linkUrl).hostname.replace(/^www\./, '')
+    } catch {
+      host = ''
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Sponsored: ${ad.title}`}
+    >
+      <div
+        className="w-full max-w-[400px] overflow-hidden rounded-[26px] bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* artwork — the ad image is shown large here */}
+        <div className="relative">
+          {ad.imageUrl ? (
+            <img src={ad.imageUrl} alt={ad.title} className="h-48 w-full object-cover" />
+          ) : (
+            <div className="flex h-44 w-full items-center justify-center bg-brand-grad">
+              <Megaphone size={52} className="text-white/90" strokeWidth={1.6} />
+            </div>
+          )}
+          <button
+            type="button"
+            aria-label="Close"
+            className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/55"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+          <span className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-widest text-cbrand shadow">
+            <Megaphone size={10} /> Sponsored
+          </span>
+        </div>
+
+        {/* info */}
+        <div className="px-5 pb-5 pt-4">
+          <h3 className="text-[17px] font-extrabold leading-snug text-cink">{ad.title}</h3>
+          <p className="mt-0.5 text-[10.5px] font-bold uppercase tracking-wider text-[#9AA8C7]">Advertisement</p>
+          {ad.body && <p className="mt-3 whitespace-pre-wrap text-[13.5px] leading-[20px] text-[#4A5568]">{ad.body}</p>}
+          {ad.linkUrl && (
+            <button
+              type="button"
+              className="btn-p mt-4 flex w-full items-center justify-center gap-2"
+              onClick={() => openAdTarget(ad)}
+            >
+              <ExternalLink size={15} /> Visit {host || 'website'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Ad shown in list screens — auto-rotates every 45s so multiple advertisers
+ * share the slot. Tapping the card opens the detail popup; the small
+ * external-link icon at the end opens the target website directly.
+ */
 export function AdBanner({ placement }: { placement: 'chats' | 'rooms' | 'profile' }) {
   const [ad, setAd] = useState<ServedAd | null>(null)
+  const [detail, setDetail] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const titleRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const firedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -604,41 +712,94 @@ export function AdBanner({ placement }: { placement: 'chats' | 'rooms' | 'profil
     }
   }, [ad])
 
+  /* detect truncated text so a small "More" badge can hint at the full popup */
+  useEffect(() => {
+    if (!ad) return
+    const check = () => {
+      const t = titleRef.current
+      const b = bodyRef.current
+      const cut =
+        !!(t && t.scrollWidth > t.clientWidth + 1) || !!(b && b.scrollWidth > b.clientWidth + 1)
+      setOverflows(cut)
+    }
+    const raf = window.requestAnimationFrame(check)
+    const t = window.setTimeout(check, 350)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.clearTimeout(t)
+    }
+  }, [ad])
+
   if (!ad) return null
   return (
-    <button
-      className="mx-2 mb-2 flex items-center gap-3 overflow-hidden rounded-[18px] border border-cline bg-white px-3.5 py-2.5 text-left transition hover:bg-cbg"
-      onClick={() => {
-        if (ad.linkUrl) window.open(ad.linkUrl, '_blank', 'noopener')
-        void api.adEvent(ad.id, 'click', adViewerKey()).catch(() => {})
-      }}
-    >
-      {ad.imageUrl ? (
-        <img src={ad.imageUrl} alt="" className="h-11 w-11 flex-none rounded-xl object-cover" />
-      ) : (
-        <span className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-[#E7EEFF] text-[10px] font-extrabold tracking-wide text-cbrand">
-          AD
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="rounded bg-csoft px-1 py-0.5 text-[8.5px] font-extrabold uppercase tracking-wider text-cmut">Sponsored</span>
-          <div className="truncate text-[13px] font-bold text-cink">{ad.title}</div>
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Sponsored: ${ad.title}. Tap for details.`}
+        className="mx-2 mb-2 flex cursor-pointer items-center gap-3 overflow-hidden rounded-[18px] border border-cline bg-white px-3.5 py-2.5 text-left transition hover:bg-cbg"
+        onClick={() => setDetail(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setDetail(true)
+          }
+        }}
+      >
+        {ad.imageUrl ? (
+          <img src={ad.imageUrl} alt="" className="h-11 w-11 flex-none rounded-xl object-cover" />
+        ) : (
+          <AdGlyph />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="flex-none rounded bg-csoft px-1 py-0.5 text-[8.5px] font-extrabold uppercase tracking-wider text-cmut">
+              Sponsored
+            </span>
+            <div ref={titleRef} className="min-w-0 truncate text-[13px] font-bold text-cink">
+              {ad.title}
+            </div>
+          </div>
+          {ad.body && (
+            <div ref={bodyRef} className="mt-0.5 min-w-0 truncate text-[11.5px] text-cmut">
+              {ad.body}
+            </div>
+          )}
+          {overflows && (
+            <span className="mt-1 inline-flex items-center rounded-full bg-[#E7EEFF] px-1.5 py-[1.5px] text-[8.5px] font-extrabold uppercase tracking-wide text-cbrand">
+              More
+            </span>
+          )}
         </div>
-        {ad.body && <div className="truncate text-[11.5px] text-cmut">{ad.body}</div>}
+        {ad.linkUrl && (
+          <button
+            type="button"
+            aria-label="Open advertiser website"
+            title="Open website"
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-csoft text-cmut transition hover:bg-[#E7EEFF] hover:text-cbrand"
+            onClick={(e) => {
+              e.stopPropagation()
+              openAdTarget(ad)
+            }}
+          >
+            <ExternalLink size={14} />
+          </button>
+        )}
       </div>
-      <Sparkles size={15} className="flex-none text-cmut" />
-    </button>
+      {detail && <AdDetailModal ad={ad} onClose={() => setDetail(false)} />}
+    </>
   )
 }
 
 /**
  * Sponsored card injected INSIDE chat conversations after an admin-configured
- * number of messages. Clearly identifiable, non-intrusive, and tracks
- * impressions/clicks with the same deduped events as every other placement.
+ * number of messages. Tapping opens the detail popup; the small icon in the
+ * header opens the target website directly. Impressions/clicks are tracked
+ * with the same deduped events as every other placement.
  */
 export function SponsoredAdCard({ ad }: { ad: ServedAd }) {
   const firedRef = useRef(false)
+  const [detail, setDetail] = useState(false)
   useEffect(() => {
     if (!firedRef.current && ad.id) {
       firedRef.current = true
@@ -646,30 +807,52 @@ export function SponsoredAdCard({ ad }: { ad: ServedAd }) {
     }
   }, [ad.id])
   return (
-    <div className="my-1.5 w-full max-w-[420px] overflow-hidden rounded-[18px] border border-cline bg-white shadow-sm">
-      <button
-        className="w-full text-left"
-        onClick={() => {
-          if (ad.linkUrl) window.open(ad.linkUrl, '_blank', 'noopener')
-          void api.adEvent(ad.id, 'click', adViewerKey()).catch(() => {})
-        }}
-        aria-label={`Sponsored: ${ad.title}`}
-      >
+    <>
+      <div className="my-1.5 w-full max-w-[420px] overflow-hidden rounded-[18px] border border-cline bg-white shadow-sm">
         <div className="flex items-center justify-between bg-cbg px-3 py-1.5">
           <span className="text-[9.5px] font-extrabold uppercase tracking-widest text-cmut">Sponsored</span>
-          <Sparkles size={12} className="text-cmut" />
-        </div>
-        {ad.imageUrl && (
-          <img src={ad.imageUrl} alt={ad.title} className="h-28 w-full object-cover" loading="lazy" />
-        )}
-        <div className="px-3.5 py-2.5">
-          <div className="truncate text-[13.5px] font-extrabold text-cink">{ad.title}</div>
-          {ad.body && <div className="mt-0.5 line-clamp-2 text-[12px] leading-[17px] text-cmut">{ad.body}</div>}
-          {ad.linkUrl && (
-            <span className="mt-2 inline-flex items-center rounded-full bg-csoft px-3 py-1 text-[11px] font-bold text-cbrand">Learn more →</span>
+          {ad.linkUrl ? (
+            <button
+              type="button"
+              aria-label="Open advertiser website"
+              title="Open website"
+              className="flex h-6 w-6 items-center justify-center rounded-full text-cmut transition hover:text-cbrand"
+              onClick={() => openAdTarget(ad)}
+            >
+              <ExternalLink size={12} />
+            </button>
+          ) : (
+            <Sparkles size={12} className="text-cmut" />
           )}
         </div>
-      </button>
-    </div>
+        <div
+          role="button"
+          tabIndex={0}
+          className="w-full cursor-pointer text-left"
+          onClick={() => setDetail(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setDetail(true)
+            }
+          }}
+          aria-label={`Sponsored: ${ad.title}`}
+        >
+          {ad.imageUrl && (
+            <img src={ad.imageUrl} alt={ad.title} className="h-28 w-full object-cover" loading="lazy" />
+          )}
+          <div className="px-3.5 py-2.5">
+            <div className="truncate text-[13.5px] font-extrabold text-cink">{ad.title}</div>
+            {ad.body && <div className="mt-0.5 line-clamp-2 text-[12px] leading-[17px] text-cmut">{ad.body}</div>}
+            {ad.linkUrl && (
+              <span className="mt-2 inline-flex items-center rounded-full bg-csoft px-3 py-1 text-[11px] font-bold text-cbrand">
+                Learn more →
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {detail && <AdDetailModal ad={ad} onClose={() => setDetail(false)} />}
+    </>
   )
 }

@@ -14,6 +14,7 @@ export interface Me {
   isOfficial?: boolean
   allowNonContacts?: boolean
   createdAt?: string | null
+  hasPassword?: boolean
 }
 
 export interface Message {
