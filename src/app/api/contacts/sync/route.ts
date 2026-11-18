@@ -31,10 +31,11 @@ export async function POST(req: Request) {
         create: { ownerId: me.id, phone: r.phone, name: r.name },
       })
     }
-    // Smart matching: exact digits, national format (0-prefix), and subscriber-suffix.
+    // Smart matching: exact digits, national format (0-prefix), my country code, and subscriber-suffix.
     const matched = await matchRegisteredUsers(
       rows.map((r) => r.phone),
-      me.id
+      me.id,
+      me.phone
     )
     return NextResponse.json({
       ok: true,

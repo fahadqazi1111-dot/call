@@ -55,12 +55,17 @@ export function phoneSuffixKey(raw: string): string {
 
 /**
  * Match a list of contact phone numbers against registered users.
- * Tries exact digit match first, then national-format (leading zeros stripped),
- * then the 9-digit subscriber suffix. Returns Map<contactPhone, user>.
+ * Tries, in order:
+ *   1. exact digit match
+ *   2. national format — leading zeros stripped
+ *   3. national format with my own country code prepended (e.g. 0333… → 92 333…)
+ *   4. the 9-digit subscriber suffix (last resort)
+ * Returns Map<contactPhone, user>.
  */
 export async function matchRegisteredUsers(
   phones: string[],
-  excludeUserId: string
+  excludeUserId: string,
+  myPhone?: string
 ): Promise<Map<string, MatchableUser>> {
   const users = await db.user.findMany({
     where: { NOT: { id: excludeUserId } },
@@ -75,11 +80,25 @@ export async function matchRegisteredUsers(
     if (k.length >= 9 && !suffix.has(k)) suffix.set(k, u)
   }
 
+  // Candidate country codes taken from my own registered number (1–4 digit prefixes).
+  const ccs: string[] = []
+  const mine = (myPhone || '').replace(/\D/g, '')
+  for (let l = 1; l <= 4 && l < mine.length; l++) ccs.push(mine.slice(0, l))
+
   const result = new Map<string, MatchableUser>()
   for (const p of phones) {
     const d = (p || '').replace(/\D/g, '')
     let u = exact.get(d)
-    if (!u && d.startsWith('0')) u = exact.get(d.replace(/^0+/, ''))
+    if (!u && d.startsWith('0')) {
+      const nat = d.replace(/^0+/, '')
+      u = exact.get(nat)
+      if (!u) {
+        for (const cc of ccs) {
+          u = exact.get(cc + nat)
+          if (u) break
+        }
+      }
+    }
     if (!u) {
       const k = phoneSuffixKey(d)
       if (k.length >= 9) u = suffix.get(k)

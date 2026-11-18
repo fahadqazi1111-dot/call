@@ -16,9 +16,14 @@ import {
   FileUp,
   ClipboardPaste,
   X,
+  Share2,
+  ShieldCheck,
+  Zap,
+  Users,
 } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { toast } from 'sonner'
+import { shareInvite } from '@/lib/callapp/invite'
 import { parseContactsSource, parseContactFile, type ParsedContact } from '@/lib/callapp/importContacts'
 
 interface PickerContact {
@@ -46,6 +51,10 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // contact-access permission sheet (WhatsApp-style explainer before any fetch)
+  const [showPerm, setShowPerm] = useState(false)
+  const [permBusy, setPermBusy] = useState(false)
 
   // import dialog state
   const [showImport, setShowImport] = useState(false)
@@ -88,14 +97,36 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   const registeredCount = contacts.filter((c) => c.user).length
   const canPick = pickerSupported()
 
-  /** Native picker on Chrome Android; everywhere else open the universal import dialog. */
-  const pickDeviceContacts = async () => {
+  /** Ask once per device, like WhatsApp does on first open of Contacts. */
+  useEffect(() => {
+    if (contacts.length > 0) return
+    try {
+      if (localStorage.getItem('call.contactsAsked') === '1') return
+    } catch {}
+    setShowPerm(true)
+  }, [])
+
+  const rememberAsked = () => {
+    try {
+      localStorage.setItem('call.contactsAsked', '1')
+    } catch {}
+  }
+
+  /**
+   * The actual access step, shown after the user taps "Allow".
+   * Chrome Android: the browser's own native permission + picker UI.
+   * Everywhere else: the universal import dialog (.vcf / CSV / paste).
+   */
+  const runAccess = async () => {
+    rememberAsked()
+    setShowPerm(false)
     if (!canPick) {
       setShowImport(true)
       setImportTab('file')
       return
     }
     try {
+      setPermBusy(true)
       const picked = await (navigator as Navigator & { contacts: ContactsPicker }).contacts.select(
         ['name', 'tel'],
         { multiple: true }
@@ -107,13 +138,27 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
         .filter((c) => c.phone)
       const res = await syncDeviceContacts(mapped)
       if (res) {
-        toast.success(`Synced ${res.saved} contacts — ${res.matched} on CALL`)
+        toast.success(
+          res.matched > 0
+            ? `${res.matched} friend${res.matched > 1 ? 's' : ''} already on CALL out of ${res.saved} contacts`
+            : `Synced ${res.saved} contacts — none on CALL yet, send invites below`
+        )
       }
     } catch {
-      toast.error('Contact selection cancelled')
+      // user denied in the browser picker or cancelled — offer the import path
+      toast.error('Contact access was not granted — you can import a file instead')
+      setShowImport(true)
+      setImportTab('file')
     } finally {
+      setPermBusy(false)
       setBusy(false)
     }
+  }
+
+  /** Every sync entry point goes through the permission explainer first. */
+  const startSyncFlow = () => {
+    if (permBusy) return
+    setShowPerm(true)
   }
 
   /* ---------- import dialog helpers ---------- */
@@ -207,11 +252,11 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
         <div className="px-4 py-2">
           <button
             className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
-            onClick={() => void pickDeviceContacts()}
-            disabled={busy}
+            onClick={startSyncFlow}
+            disabled={busy || permBusy}
           >
             <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cbrand">
-              {busy ? <Loader2 size={24} className="animate-spin" /> : <Download size={24} />}
+              {busy || permBusy ? <Loader2 size={24} className="animate-spin" /> : <Download size={24} />}
             </span>
             <div>
               <div className="text-[16px] font-bold text-cink">
@@ -220,7 +265,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
               <div className="mt-0.5 flex items-center gap-1 text-sm text-[#4A5568]">
                 {canPick ? (
                   <>
-                    <Smartphone size={14} /> Import from this phone
+                    <Smartphone size={14} /> Allow access, find friends on CALL
                   </>
                 ) : (
                   <>
@@ -242,17 +287,43 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
               <div className="mt-0.5 text-sm text-[#4A5568]">Add someone by number</div>
             </div>
           </button>
+          <button
+            className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
+            onClick={() => void shareInvite()}
+          >
+            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cgreen">
+              <Share2 size={24} />
+            </span>
+            <div>
+              <div className="text-[16px] font-bold text-cink">Invite friends</div>
+              <div className="mt-0.5 text-sm text-[#4A5568]">Share CALL — free forever</div>
+            </div>
+          </button>
         </div>
 
         {groups.length === 0 ? (
-          <div className="flex flex-col items-center pt-16 text-center">
+          <div className="flex flex-col items-center pt-12 text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-cbrand">
-              <UserPlus size={32} />
+              <Users size={34} />
             </div>
             <p className="mt-5 text-lg font-bold text-cink">No contacts yet</p>
             <p className="mt-1 px-10 text-sm text-cmut">
-              Import contacts from a .vcf file, paste numbers, or add them manually. Friends on CALL show a badge.
+              Allow access to your contacts — friends already on CALL appear here automatically, just like WhatsApp.
             </p>
+            <button
+              className="btn-p mt-6 w-[230px]"
+              onClick={startSyncFlow}
+              disabled={busy || permBusy}
+            >
+              {busy || permBusy ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+              {canPick ? 'Sync contacts' : 'Import contacts'}
+            </button>
+            <button
+              className="mt-3 flex h-11 items-center gap-2 rounded-full px-5 text-sm font-bold text-cbrand transition hover:bg-csoft"
+              onClick={() => void shareInvite()}
+            >
+              <Share2 size={17} /> Invite friends instead
+            </button>
           </div>
         ) : (
           groups.map(([letter, arr]) => (
@@ -261,7 +332,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
               {arr.map((c) => (
                 <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
                   <Avatar
-                    name={c.user?.name ?? c.name}
+                    name={c.name}
                     avatarKey={c.user?.avatarKey ?? 0}
                     size={desk ? 42 : 46}
                     online={c.user ? online[c.user.id] : undefined}
@@ -269,15 +340,19 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[15px] font-bold text-cink">
-                      <span className="truncate">{c.user?.name ?? c.name}</span>
+                      <span className="truncate">{c.name}</span>
                       {c.user && (
                         <span className="flex-none rounded-full bg-[#E3EBFF] px-2 py-0.5 text-[10px] font-bold text-cbrand-deep">
                           ON CALL
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 text-[13px] text-[#4A5568]">
-                      {c.user ? (online[c.user.id] ? 'Online now' : 'Invite them for a free call') : c.phone}
+                    <div className="mt-0.5 truncate text-[13px] text-[#4A5568]">
+                      {c.user
+                        ? online[c.user.id]
+                          ? 'Online now'
+                          : c.phone
+                        : `Not on CALL · ${c.phone}`}
                     </div>
                   </div>
                   {c.user ? (
@@ -305,7 +380,13 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
                       </button>
                     </>
                   ) : (
-                    <span className="rounded-full bg-cbg px-3 py-1.5 text-xs font-semibold text-cmut">Not on CALL</span>
+                    <button
+                      className="flex h-9 flex-none items-center gap-1.5 rounded-full bg-[#DFF3E7] px-3.5 text-xs font-bold text-[#0B8A46] transition hover:bg-[#CFEDDC]"
+                      aria-label={`Invite ${c.name} to CALL`}
+                      onClick={() => void shareInvite({ name: c.name, phone: c.phone })}
+                    >
+                      <Share2 size={14} /> Invite
+                    </button>
                   )}
                 </div>
               ))}
@@ -317,6 +398,95 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           {registeredCount} of {contacts.length} contacts are on CALL
         </p>
       </div>
+
+      {/* ---------- contact access permission explainer (WhatsApp-style) ---------- */}
+      {showPerm && (
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${
+            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+          }`}
+          onClick={() => {
+            rememberAsked()
+            setShowPerm(false)
+          }}
+        >
+          <div
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Contact access permission"
+          >
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+            <div className="flex flex-col items-center text-center">
+              <span className="flex h-[74px] w-[74px] items-center justify-center rounded-[24px] bg-csoft text-cbrand">
+                <Users size={36} />
+              </span>
+              <h2 className="mt-4 text-xl font-extrabold text-cink">Find friends on CALL</h2>
+              <p className="mt-1.5 text-[15px] leading-6 text-cmut">
+                Allow CALL to read your contacts so friends already here show up automatically —
+                just like WhatsApp.
+              </p>
+            </div>
+
+            <ul className="mt-5 space-y-3 text-left">
+              <li className="flex items-start gap-3">
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+                  <ShieldCheck size={19} />
+                </span>
+                <div>
+                  <div className="text-[14px] font-bold text-cink">Private by design</div>
+                  <div className="text-[13px] text-cmut">
+                    Numbers are only matched, never sold or posted anywhere.
+                  </div>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+                  <Zap size={19} />
+                </span>
+                <div>
+                  <div className="text-[14px] font-bold text-cink">Instant friend list</div>
+                  <div className="text-[13px] text-cmut">
+                    Anyone already registered appears with an ON CALL badge — ready to call or chat.
+                  </div>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-[#DFF3E7] text-[#0B8A46]">
+                  <Share2 size={19} />
+                </span>
+                <div>
+                  <div className="text-[14px] font-bold text-cink">One-tap invite</div>
+                  <div className="text-[13px] text-cmut">
+                    Friends not on CALL yet get an invite button — share via SMS or any app.
+                  </div>
+                </div>
+              </li>
+            </ul>
+
+            {canPick ? (
+              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+                {permBusy ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
+                {permBusy ? 'Waiting for permission…' : 'Allow contact access'}
+              </button>
+            ) : (
+              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+                {permBusy ? <Loader2 size={18} className="animate-spin" /> : <FileUp size={18} />}
+                Choose how to import
+              </button>
+            )}
+            <button
+              className="mt-3 h-11 w-full text-sm font-bold text-cmut transition hover:text-cink"
+              onClick={() => {
+                rememberAsked()
+                setShowPerm(false)
+              }}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ---------- add single contact ---------- */}
       {showAdd && (

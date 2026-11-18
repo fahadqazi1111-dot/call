@@ -10,10 +10,11 @@ export async function GET(req: Request) {
     where: { ownerId: me.id },
     orderBy: [{ name: 'asc' }],
   })
-  // Smart matching: exact digits, national format (0-prefix), and subscriber-suffix.
+  // Smart matching: exact digits, national format (0-prefix), my country code, and subscriber-suffix.
   const matched = await matchRegisteredUsers(
     contacts.map((c) => c.phone),
-    me.id
+    me.id,
+    me.phone
   )
   const list = contacts.map((c) => {
     const u = matched.get(c.phone)
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
         name: String(name || '').trim().slice(0, 40) || normalized,
       },
     })
-    const u = (await matchRegisteredUsers([normalized], me.id)).get(normalized)
+    const u = (await matchRegisteredUsers([normalized], me.id, me.phone)).get(normalized)
     return NextResponse.json({
       contact: {
         id: contact.id,
