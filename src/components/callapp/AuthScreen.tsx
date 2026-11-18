@@ -3,7 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CallWordmark } from './CallLogo'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
-import { ChevronLeft, Phone, ShieldCheck, KeyRound, Mail, AtSign, Loader2, CheckCircle2, XCircle, Info } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronLeft,
+  Eye,
+  EyeOff,
+  Info,
+  KeyRound,
+  Loader2,
+  Lock,
+  Mail,
+  Phone,
+  ShieldCheck,
+  Smartphone,
+  User,
+  XCircle,
+} from 'lucide-react'
 import { api, setToken } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 
@@ -22,7 +38,11 @@ const COUNTRIES = [
   { code: '+20', label: 'EG' },
 ]
 
-type Step = 'phone' | 'otp' | 'name' | 'email' | 'verify' | 'google'
+type Step = 'start' | 'otp' | 'name' | 'verify' | 'google'
+type Mode = 'login' | 'signup'
+type SignupMethod = 'phone' | 'email'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /** Turn "Ayesha Siddiqui" into "ayeshasiddiqui" — a username suggestion. */
 function suggestUsername(name: string): string {
@@ -30,6 +50,29 @@ function suggestUsername(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 16)
+}
+
+function GoogleG({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  )
 }
 
 interface GsiWindow {
@@ -41,6 +84,47 @@ interface GsiWindow {
       }
     }
   }
+}
+
+/* ================= shared bits ================= */
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">{children}</label>
+}
+
+function SandboxBanner({ code, onFill }: { code: string; onFill: () => void }) {
+  return (
+    <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-4">
+      <KeyRound size={20} className="flex-none text-[#B45309]" />
+      <div className="text-[13px] leading-5 text-[#7A5B16]">
+        Sandbox code (free mode):{' '}
+        <button
+          className="font-bold tracking-widest text-[#B45309] underline decoration-dotted"
+          onClick={onFill}
+        >
+          {code}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function OtpSlots({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex justify-center">
+      <InputOTP maxLength={6} value={value} onChange={onChange}>
+        <InputOTPGroup className="gap-2">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <InputOTPSlot
+              key={i}
+              index={i}
+              className="h-14 w-12 rounded-2xl border-[1.5px] border-[#DDE3EE] text-lg font-bold shadow-none md:h-[52px] md:w-11"
+            />
+          ))}
+        </InputOTPGroup>
+      </InputOTP>
+    </div>
+  )
 }
 
 /* ================= username field with live availability ================= */
@@ -65,6 +149,11 @@ function UsernameField({
         setMsg('')
         return
       }
+      if (v.length < 3) {
+        setStatus('bad')
+        setMsg('At least 3 characters')
+        return
+      }
       setStatus('checking')
       try {
         const res = await api.usernameCheck(v)
@@ -85,13 +174,13 @@ function UsernameField({
 
   return (
     <div>
-      <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
-        Username <span className="font-normal text-cmut">(optional — unique, like a handle)</span>
-      </label>
+      <FieldLabel>
+        Username <span className="font-normal text-cmut">(unique handle — optional)</span>
+      </FieldLabel>
       <div className="relative">
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] font-bold text-cmut">@</span>
         <input
-          className="app-input pl-9 pr-10"
+          className="app-input w-full pl-9 pr-10"
           placeholder="yourname"
           value={value}
           autoCapitalize="none"
@@ -126,26 +215,39 @@ function UsernameField({
 
 export function AuthScreen() {
   const loginSuccess = useApp((s) => s.loginSuccess)
-  const [step, setStep] = useState<Step>('phone')
-  const [country, setCountry] = useState('+92')
-  const [phone, setPhone] = useState('')
-  const [otp, setOtp] = useState('')
-  const [name, setName] = useState('')
-  const [username, setUsername] = useState('')
-  const [devCode, setDevCode] = useState('')
+
+  const [mode, setMode] = useState<Mode>('login')
+  const [step, setStep] = useState<Step>('start')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  // shared
+  const [country, setCountry] = useState('+92')
+  const [otp, setOtp] = useState('')
+  const [devCode, setDevCode] = useState('')
   const [resendIn, setResendIn] = useState(0)
+  const [showPw, setShowPw] = useState(false)
   const resendTimer = useRef<number | null>(null)
 
-  // email steps
-  const [emailTab, setEmailTab] = useState<'login' | 'signup'>('signup')
-  const [email, setEmail] = useState('')
+  // login: one smart identifier — email or phone
+  const [identifier, setIdentifier] = useState('')
+  const idIsEmail = identifier.includes('@')
+  const idDigits = identifier.replace(/\D/g, '')
   const [password, setPassword] = useState('')
+
+  // signup
+  const [signupMethod, setSignupMethod] = useState<SignupMethod>('phone')
+  const [phone, setPhone] = useState('')
+  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
+  const [usernameTouched, setUsernameTouched] = useState(false)
+  const [email, setEmail] = useState('')
+
+  // email verification
   const [pendingToken, setPendingToken] = useState('')
   const [emailCode, setEmailCode] = useState('')
   const [emailDevCode, setEmailDevCode] = useState('')
-  const [usernameTouched, setUsernameTouched] = useState(false)
+
   const googleHostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -156,13 +258,23 @@ export function AuthScreen() {
     }
   }, [resendIn])
 
-  const fullPhone = () => `${country}${phone.replace(/\D/g, '')}`
+  const signupPhone = () => `${country}${phone.replace(/\D/g, '')}`
+  const loginPhone = () => `${country}${idDigits}`
+  const isSignupPhone = mode === 'signup' && signupMethod === 'phone'
+  const activePhone = isSignupPhone ? signupPhone() : loginPhone()
 
-  const requestOtp = async (resend = false) => {
+  const goStart = () => {
+    setError('')
+    setStep('start')
+  }
+
+  /* ---------- phone OTP (login + signup) ---------- */
+
+  const requestOtp = async (fullPhone: string, resend = false) => {
     setBusy(true)
     setError('')
     try {
-      const res = await api.requestOtp(fullPhone())
+      const res = await api.requestOtp(fullPhone)
       setDevCode(res.devCode)
       setResendIn(30)
       if (!resend) setStep('otp')
@@ -173,11 +285,13 @@ export function AuthScreen() {
     }
   }
 
-  const verify = async (withName?: string, withUsername?: string) => {
+  const verifyOtp = async () => {
     setBusy(true)
     setError('')
     try {
-      const res = await api.verifyOtp(fullPhone(), otp, withName, withUsername)
+      const res = isSignupPhone
+        ? await api.verifyOtp(activePhone, otp, name.trim(), username.trim().toLowerCase())
+        : await api.verifyOtp(activePhone, otp)
       if (res.needName) {
         setStep('name')
         return
@@ -190,23 +304,35 @@ export function AuthScreen() {
     }
   }
 
-  /* ---------- email + password ---------- */
+  /* ---------- login submit (email or phone) ---------- */
 
-  const submitEmail = async () => {
+  const submitLogin = () => {
+    if (idIsEmail) {
+      if (!EMAIL_RE.test(identifier.trim()) || !password) return
+      setBusy(true)
+      setError('')
+      api
+        .passwordLogin(identifier.trim().toLowerCase(), password)
+        .then((res) => loginSuccess(res.token, res.user))
+        .catch((e) => setError((e as Error).message))
+        .finally(() => setBusy(false))
+    } else {
+      if (idDigits.length < 7) return
+      void requestOtp(loginPhone())
+    }
+  }
+
+  /* ---------- email + password signup ---------- */
+
+  const submitSignupEmail = async () => {
     setBusy(true)
     setError('')
     try {
-      if (emailTab === 'login') {
-        const res = await api.passwordLogin(email.trim().toLowerCase(), password)
-        loginSuccess(res.token, res.user)
-        return
-      }
-      // signup — username falls back to a suggestion from the name
-      const uname = (username.trim() || suggestUsername(name)).toLowerCase()
       if (!name.trim()) {
         setError('Name is required')
         return
       }
+      const uname = (username.trim() || suggestUsername(name)).toLowerCase()
       const res = await api.passwordRegister(name.trim(), email.trim().toLowerCase(), password, uname)
       // session starts right away; verify the email with a code next
       setPendingToken(res.token)
@@ -257,7 +383,7 @@ export function AuthScreen() {
         loginSuccess(res.token, res.user)
       } catch (e) {
         setError((e as Error).message)
-        setStep('phone')
+        setStep('start')
       } finally {
         setBusy(false)
       }
@@ -312,248 +438,218 @@ export function AuthScreen() {
     }
   }, [step, onGoogleCredential])
 
-  const backFromEmail = () => {
+  /* ---------- derived form state ---------- */
+
+  const loginEmailReady = EMAIL_RE.test(identifier.trim()) && password.length > 0
+  const loginPhoneReady = idDigits.length >= 7
+  const loginReady = idIsEmail ? loginEmailReady : loginPhoneReady
+
+  const signupPhoneReady = name.trim().length >= 2 && phone.replace(/\D/g, '').length >= 7
+  const signupEmailReady = name.trim().length >= 2 && EMAIL_RE.test(email.trim()) && password.length >= 8
+
+  /* ---------- header copy ---------- */
+
+  const header = (() => {
+    if (step === 'otp')
+      return { t: 'Verify your number', s: `We sent a 6-digit code to ${country} ${activePhone.replace(country, '')}` }
+    if (step === 'name')
+      return { t: 'Set up your profile', s: 'Choose the name and username your contacts will see.' }
+    if (step === 'verify')
+      return { t: 'Verify your email', s: `Enter the 6-digit code sent to ${email}` }
+    if (step === 'google')
+      return { t: 'Continue with Google', s: 'A unique username is created from your Google name automatically.' }
+    return mode === 'login'
+      ? { t: 'Welcome back', s: 'Log in with your email or phone number.' }
+      : { t: 'Create your account', s: 'Pick a unique @username — it becomes your handle on CALL.' }
+  })()
+
+  const switchMode = (m: Mode) => {
     setError('')
-    setStep('phone')
+    setMode(m)
+    setStep('start')
   }
 
-  const titles: Record<Step, string> = {
-    phone: 'Welcome to CALL',
-    otp: 'Verify your number',
-    name: 'Set up your profile',
-    email: emailTab === 'login' ? 'Log in to CALL' : 'Create your CALL account',
-    verify: 'Verify your email',
-    google: 'Continue with Google',
+  const back = () => {
+    setError('')
+    if (step === 'name') setStep('otp')
+    else goStart()
   }
 
-  const subs: Record<Step, string> = {
-    phone: 'One World. One Call. Log in with your phone number.',
-    otp: `We sent a 6-digit code to ${country} ${phone}`,
-    name: 'Choose the name and username your contacts will see.',
-    email: emailTab === 'login' ? 'Use your email and password.' : 'Pick a unique username — it becomes your handle on CALL.',
-    verify: `Enter the 6-digit code sent to ${email}`,
-    google: 'Sign in with your Google account — a username is created for you automatically.',
-  }
+  const showBack = step !== 'start'
+  const showTabs = step === 'start'
 
   return (
-    <div className="app-scroll absolute inset-0 flex flex-col overflow-y-auto bg-white px-6 pb-8">
-      <div className="mx-auto flex min-h-full w-full max-w-[460px] flex-1 flex-col">
-        <div className="pt-16">
-          {step !== 'phone' ? (
-            <button
-              className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-csoft text-cbrand"
-              onClick={() => {
-                setError('')
-                if (step === 'name') setStep('otp')
-                else if (step === 'otp') setStep('phone')
-                else if (step === 'google') setStep('phone')
-                else if (step === 'verify') setStep('phone')
-                else setStep('phone')
-              }}
-              aria-label="Back"
-            >
-              <ChevronLeft size={20} />
-            </button>
-          ) : null}
-          <CallWordmark size={44} showTagline={false} />
-          <h1 className="mt-6 text-[32px] font-extrabold tracking-tight text-cink">{titles[step]}</h1>
-          <p className="mt-2 text-[15px] text-cmut">{subs[step]}</p>
-        </div>
-
-        {/* ============ phone step ============ */}
-        {step === 'phone' && (
-          <div className="mt-8">
-            <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Phone number</label>
-            <div className="flex gap-2.5">
-              <select
-                className="app-input w-[108px] flex-none appearance-none px-3 text-center"
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                aria-label="Country code"
-              >
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.label} {c.code}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="app-input"
-                inputMode="tel"
-                placeholder="3XX XXXXXXX"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && phone.replace(/\D/g, '').length >= 7 && void requestOtp()}
-              />
-            </div>
-            <button
-              className="btn-p mt-6 w-full disabled:opacity-50"
-              disabled={busy || phone.replace(/\D/g, '').length < 7}
-              onClick={() => void requestOtp()}
-            >
-              <Phone size={18} /> {busy ? 'Sending code…' : 'Continue'}
-            </button>
-
-            <div className="my-5 flex items-center gap-3 text-[13px] text-cmut">
-              <div className="h-px flex-1 bg-cline" /> or <div className="h-px flex-1 bg-cline" />
+    <div className="app-scroll absolute inset-0 overflow-y-auto bg-white md:bg-page-grad">
+      <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col px-5 pb-8 pt-14 sm:px-6 md:pb-9 md:pt-10">
+        <div className="md:my-auto">
+          <div className="md:rounded-[30px] md:border md:border-white md:bg-white/95 md:p-9 md:shadow-[0_36px_90px_-45px_rgba(14,23,38,0.45)]">
+            {/* ---------- header ---------- */}
+            <div>
+              {showBack && (
+                <button
+                  className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-csoft text-cbrand transition hover:bg-[#e2e9fb]"
+                  onClick={back}
+                  aria-label="Back"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+              )}
+              <div className="flex items-center gap-3">
+                <CallWordmark size={38} showTagline={false} />
+              </div>
+              <h1 className="mt-5 text-[28px] font-extrabold leading-tight tracking-tight text-cink md:text-[30px]">
+                {header.t}
+              </h1>
+              <p className="mt-1.5 text-[14.5px] leading-6 text-cmut">{header.s}</p>
             </div>
 
-            <div className="flex flex-col gap-2.5">
-              <button
-                className="btn-p w-full bg-white text-cink shadow-[0_1px_2px_rgba(14,23,38,0.08)] border border-cline"
-                onClick={() => {
-                  setError('')
-                  setEmailTab('signup')
-                  setStep('email')
-                }}
-              >
-                <Mail size={18} /> Continue with email
-              </button>
-              <button
-                className="btn-p w-full bg-white text-cink shadow-[0_1px_2px_rgba(14,23,38,0.08)] border border-cline"
-                onClick={() => {
-                  setError('')
-                  setStep('google')
-                }}
-              >
-                <span className="text-[17px] leading-none font-extrabold" aria-hidden="true">
-                  G
-                </span>
-                Continue with Google
-              </button>
-            </div>
-
-            <p className="mt-5 text-center text-[13px] text-cmut">
-              Already have an email account?{' '}
-              <button
-                className="font-semibold text-cbrand"
-                onClick={() => {
-                  setError('')
-                  setEmailTab('login')
-                  setStep('email')
-                }}
-              >
-                Log in
-              </button>
-            </p>
-
-            <p className="mt-5 rounded-2xl bg-cbg p-4 text-[13px] leading-5 text-cmut">
-              <span className="font-semibold text-cbrand">Free sandbox mode:</span> verification codes are
-              generated right here — no SMS gateway needed. Your number stays on this device&apos;s database.
-            </p>
-          </div>
-        )}
-
-        {/* ============ phone otp step ============ */}
-        {step === 'otp' && (
-          <div className="mt-8">
-            {devCode && (
-              <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-4">
-                <KeyRound size={20} className="flex-none text-[#B45309]" />
-                <div className="text-[13px] leading-5 text-[#7A5B16]">
-                  Sandbox code (free mode):{' '}
+            {/* ---------- mode tabs ---------- */}
+            {showTabs && (
+              <div className="mt-6 grid grid-cols-2 gap-1.5 rounded-[18px] bg-cbg p-1.5">
+                {(['login', 'signup'] as const).map((m) => (
                   <button
-                    className="font-bold tracking-widest text-[#B45309] underline decoration-dotted"
-                    onClick={() => setOtp(devCode)}
+                    key={m}
+                    className={`h-11 rounded-[14px] text-[14px] font-bold transition-all ${
+                      mode === m
+                        ? 'bg-white text-cink shadow-[0_2px_8px_rgba(14,23,38,0.1)]'
+                        : 'text-cmut hover:text-cink'
+                    }`}
+                    onClick={() => switchMode(m)}
                   >
-                    {devCode}
+                    {m === 'login' ? 'Log in' : 'Sign up'}
                   </button>
+                ))}
+              </div>
+            )}
+
+            {/* ================= LOGIN ================= */}
+            {step === 'start' && mode === 'login' && (
+              <div className="mt-6">
+                <FieldLabel>Email or phone</FieldLabel>
+                <div className="flex gap-2.5">
+                  {!idIsEmail && (
+                    <select
+                      className="app-input w-[106px] flex-none appearance-none px-2 text-center"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      aria-label="Country code"
+                    >
+                      {COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.label} {c.code}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="relative min-w-0 flex-1">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                      {idIsEmail ? <Mail size={18} /> : <Smartphone size={18} />}
+                    </span>
+                    <input
+                      className="app-input w-full pl-11"
+                      inputMode={idIsEmail ? 'email' : 'tel'}
+                      autoCapitalize="none"
+                      autoComplete="email"
+                      placeholder={idIsEmail ? 'you@example.com' : '3XX 1234567'}
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
+                    />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-4 text-[#9AA8C7]">
+                  Type an email to log in with your password, or a number to get a one-time code.
+                </p>
+
+                {idIsEmail && (
+                  <div className="mt-4">
+                    <FieldLabel>Password</FieldLabel>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                        <Lock size={18} />
+                      </span>
+                      <input
+                        className="app-input w-full pl-11 pr-12"
+                        type={showPw ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        placeholder="Your password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                        onClick={() => setShowPw((v) => !v)}
+                        aria-label={showPw ? 'Hide password' : 'Show password'}
+                      >
+                        {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || !loginReady}
+                  onClick={submitLogin}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Please wait…
+                    </>
+                  ) : idIsEmail ? (
+                    'Log in'
+                  ) : (
+                    <>
+                      <Phone size={18} /> Send code
+                    </>
+                  )}
+                </button>
+
+                <div className="my-5 flex items-center gap-3 text-[12.5px] text-cmut">
+                  <div className="h-px flex-1 bg-cline" /> or <div className="h-px flex-1 bg-cline" />
+                </div>
+
+                <button
+                  className="btn-p flex w-full items-center justify-center gap-2.5 border border-cline bg-white text-cink shadow-[0_1px_2px_rgba(14,23,38,0.08)]"
+                  onClick={() => {
+                    setError('')
+                    setStep('google')
+                  }}
+                >
+                  <GoogleG /> Continue with Google
+                </button>
+
+                <div className="mt-5 flex items-start gap-2 rounded-2xl bg-cbg p-3.5 text-[12px] leading-5 text-cmut">
+                  <Info size={14} className="mt-0.5 flex-none text-cbrand" />
+                  <span>
+                    Free sandbox build — verification codes are shown right in the app, no SMS needed.
+                  </span>
                 </div>
               </div>
             )}
-            <InputOTP maxLength={6} value={otp} onChange={setOtp}>
-              <InputOTPGroup className="gap-2">
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <InputOTPSlot key={i} index={i} className="h-14 w-12 rounded-2xl border-[1.5px] border-[#DDE3EE] text-lg font-bold shadow-none" />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-            <button
-              className="btn-p mt-6 w-full disabled:opacity-50"
-              disabled={busy || otp.length < 6}
-              onClick={() => void verify()}
-            >
-              <ShieldCheck size={18} /> {busy ? 'Verifying…' : 'Verify & continue'}
-            </button>
-            <div className="mt-4 text-center text-sm text-cmut">
-              {resendIn > 0 ? (
-                <span>
-                  Resend code in <b className="text-cbrand">{resendIn}s</b>
-                </span>
-              ) : (
-                <button className="font-semibold text-cbrand" onClick={() => void requestOtp(true)}>
-                  Resend code
-                </button>
-              )}
-            </div>
-          </div>
-        )}
 
-        {/* ============ phone name+username step ============ */}
-        {step === 'name' && (
-          <div className="mt-8">
-            <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Full name</label>
-            <input
-              className="app-input"
-              placeholder="Your name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                if (!usernameTouched) setUsername(suggestUsername(e.target.value))
-              }}
-              autoFocus
-            />
-            <div className="mt-4">
-              <UsernameField
-                value={username}
-                onChange={(v) => {
-                  setUsernameTouched(true)
-                  setUsername(v)
-                }}
-              />
-            </div>
-            <button
-              className="btn-p mt-6 w-full disabled:opacity-50"
-              disabled={busy || name.trim().length < 2}
-              onClick={() => void verify(name.trim(), username.trim().toLowerCase())}
-            >
-              {busy ? 'Creating account…' : 'Create my account'}
-            </button>
-          </div>
-        )}
+            {/* ================= SIGNUP ================= */}
+            {step === 'start' && mode === 'signup' && (
+              <div className="mt-6">
+                <FieldLabel>Full name</FieldLabel>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                    <User size={18} />
+                  </span>
+                  <input
+                    className="app-input w-full pl-11"
+                    placeholder="Your name"
+                    autoComplete="name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      if (!usernameTouched) setUsername(suggestUsername(e.target.value))
+                    }}
+                  />
+                </div>
 
-        {/* ============ email login / signup ============ */}
-        {step === 'email' && (
-          <div className="mt-8">
-            <div className="mb-5 flex rounded-2xl bg-cbg p-1">
-              {(['signup', 'login'] as const).map((t) => (
-                <button
-                  key={t}
-                  className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition ${
-                    emailTab === t ? 'bg-white text-cink shadow-sm' : 'text-cmut'
-                  }`}
-                  onClick={() => {
-                    setError('')
-                    setEmailTab(t)
-                  }}
-                >
-                  {t === 'signup' ? 'Create account' : 'Log in'}
-                </button>
-              ))}
-            </div>
-
-            {emailTab === 'signup' && (
-              <>
-                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Full name</label>
-                <input
-                  className="app-input"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value)
-                    if (!usernameTouched) setUsername(suggestUsername(e.target.value))
-                  }}
-                />
                 <div className="mt-4">
                   <UsernameField
                     value={username}
@@ -563,111 +659,282 @@ export function AuthScreen() {
                     }}
                   />
                 </div>
-              </>
+
+                <div className="mt-5">
+                  <div className="mb-2 grid grid-cols-2 gap-1.5 rounded-[16px] bg-cbg p-1.5">
+                    {(['phone', 'email'] as const).map((mth) => (
+                      <button
+                        key={mth}
+                        className={`flex h-10 items-center justify-center gap-1.5 rounded-[12px] text-[13px] font-bold transition-all ${
+                          signupMethod === mth
+                            ? 'bg-white text-cink shadow-[0_2px_8px_rgba(14,23,38,0.1)]'
+                            : 'text-cmut hover:text-cink'
+                        }`}
+                        onClick={() => {
+                          setError('')
+                          setSignupMethod(mth)
+                        }}
+                      >
+                        {mth === 'phone' ? <Phone size={14} /> : <Mail size={14} />}
+                        {mth === 'phone' ? 'Phone' : 'Email'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {signupMethod === 'phone' ? (
+                    <div className="flex gap-2.5">
+                      <select
+                        className="app-input w-[106px] flex-none appearance-none px-2 text-center"
+                        value={country}
+                        onChange={(e) => setCountry(e.target.value)}
+                        aria-label="Country code"
+                      >
+                        {COUNTRIES.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.label} {c.code}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                          <Smartphone size={18} />
+                        </span>
+                        <input
+                          className="app-input w-full pl-11"
+                          inputMode="tel"
+                          placeholder="3XX 1234567"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && signupPhoneReady && !busy)
+                              void requestOtp(signupPhone())
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                          <Mail size={18} />
+                        </span>
+                        <input
+                          className="app-input w-full pl-11"
+                          type="email"
+                          inputMode="email"
+                          autoCapitalize="none"
+                          autoComplete="email"
+                          placeholder="you@example.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                        />
+                      </div>
+                      <div className="relative mt-4">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                          <Lock size={18} />
+                        </span>
+                        <input
+                          className="app-input w-full pl-11 pr-12"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          placeholder="At least 8 characters"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && signupEmailReady && !busy) void submitSignupEmail()
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                          onClick={() => setShowPw((v) => !v)}
+                          aria-label={showPw ? 'Hide password' : 'Show password'}
+                        >
+                          {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || (signupMethod === 'phone' ? !signupPhoneReady : !signupEmailReady)}
+                  onClick={() => {
+                    if (signupMethod === 'phone') void requestOtp(signupPhone())
+                    else void submitSignupEmail()
+                  }}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Please wait…
+                    </>
+                  ) : signupMethod === 'phone' ? (
+                    <>
+                      <Phone size={18} /> Send code
+                    </>
+                  ) : (
+                    'Create my account'
+                  )}
+                </button>
+
+                <div className="my-5 flex items-center gap-3 text-[12.5px] text-cmut">
+                  <div className="h-px flex-1 bg-cline" /> or <div className="h-px flex-1 bg-cline" />
+                </div>
+
+                <button
+                  className="btn-p flex w-full items-center justify-center gap-2.5 border border-cline bg-white text-cink shadow-[0_1px_2px_rgba(14,23,38,0.08)]"
+                  onClick={() => {
+                    setError('')
+                    setStep('google')
+                  }}
+                >
+                  <GoogleG /> Continue with Google
+                </button>
+
+                <p className="mt-5 text-center text-[11.5px] leading-4 text-[#9AA8C7]">
+                  By continuing you agree to CALL&apos;s Terms of Service and Privacy Policy.
+                </p>
+              </div>
             )}
 
-            <div className="mt-4">
-              <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Email</label>
-              <input
-                className="app-input"
-                type="email"
-                inputMode="email"
-                autoCapitalize="none"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="mt-4">
-              <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Password</label>
-              <input
-                className="app-input"
-                type="password"
-                placeholder={emailTab === 'signup' ? 'At least 8 characters' : 'Your password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && email && password && (emailTab === 'login' || name.trim().length >= 2))
-                    void submitEmail()
-                }}
-              />
-            </div>
-            <button
-              className="btn-p mt-6 w-full disabled:opacity-50"
-              disabled={busy || !email || password.length < (emailTab === 'signup' ? 8 : 1) || (emailTab === 'signup' && name.trim().length < 2)}
-              onClick={() => void submitEmail()}
-            >
-              {busy ? 'Please wait…' : emailTab === 'signup' ? 'Create my account' : 'Log in'}
-            </button>
-          </div>
-        )}
-
-        {/* ============ email verification ============ */}
-        {step === 'verify' && (
-          <div className="mt-8">
-            {emailDevCode && (
-              <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-4">
-                <KeyRound size={20} className="flex-none text-[#B45309]" />
-                <div className="text-[13px] leading-5 text-[#7A5B16]">
-                  Sandbox code (free mode):{' '}
-                  <button
-                    className="font-bold tracking-widest text-[#B45309] underline decoration-dotted"
-                    onClick={() => setEmailCode(emailDevCode)}
-                  >
-                    {emailDevCode}
-                  </button>
+            {/* ================= phone OTP ================= */}
+            {step === 'otp' && (
+              <div className="mt-6">
+                {devCode && <SandboxBanner code={devCode} onFill={() => setOtp(devCode)} />}
+                <OtpSlots value={otp} onChange={setOtp} />
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || otp.length < 6}
+                  onClick={() => void verifyOtp()}
+                >
+                  <ShieldCheck size={18} /> {busy ? 'Verifying…' : 'Verify & continue'}
+                </button>
+                <div className="mt-4 text-center text-sm text-cmut">
+                  {resendIn > 0 ? (
+                    <span>
+                      Resend code in <b className="text-cbrand">{resendIn}s</b>
+                    </span>
+                  ) : (
+                    <button
+                      className="font-semibold text-cbrand"
+                      onClick={() => void requestOtp(activePhone, true)}
+                    >
+                      Resend code
+                    </button>
+                  )}
                 </div>
               </div>
             )}
-            <InputOTP maxLength={6} value={emailCode} onChange={setEmailCode}>
-              <InputOTPGroup className="gap-2">
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <InputOTPSlot key={i} index={i} className="h-14 w-12 rounded-2xl border-[1.5px] border-[#DDE3EE] text-lg font-bold shadow-none" />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-            <button
-              className="btn-p mt-6 w-full disabled:opacity-50"
-              disabled={busy || emailCode.length < 6}
-              onClick={() => void verifyEmailCode()}
-            >
-              <ShieldCheck size={18} /> {busy ? 'Verifying…' : 'Verify & continue'}
-            </button>
-            <button className="mt-4 w-full text-center text-sm font-semibold text-cmut" onClick={() => void skipVerify()}>
-              Skip for now
-            </button>
-          </div>
-        )}
 
-        {/* ============ google ============ */}
-        {step === 'google' && (
-          <div className="mt-10">
-            <div className="flex min-h-[120px] flex-col items-center justify-center gap-4 rounded-3xl border border-cline bg-cbg p-6">
-              <AtSign size={26} className="text-cbrand" />
-              <p className="max-w-[300px] text-center text-[13px] leading-5 text-cmut">
-                A unique username is generated from your Google name automatically. You can change it later from
-                your profile.
-              </p>
-              <div ref={googleHostRef} className="flex min-h-[44px] items-center justify-center" />
-              {busy && (
-                <div className="flex items-center gap-2 text-sm text-cmut">
-                  <Loader2 size={16} className="animate-spin" /> Signing you in…
+            {/* ================= profile after phone OTP ================= */}
+            {step === 'name' && (
+              <div className="mt-6">
+                <FieldLabel>Full name</FieldLabel>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                    <User size={18} />
+                  </span>
+                  <input
+                    className="app-input w-full pl-11"
+                    placeholder="Your name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      if (!usernameTouched) setUsername(suggestUsername(e.target.value))
+                    }}
+                    autoFocus
+                  />
                 </div>
-              )}
-            </div>
-            <div className="mt-4 flex items-start gap-2 rounded-2xl bg-cbg p-4 text-[12px] leading-5 text-cmut">
-              <Info size={15} className="mt-0.5 flex-none text-cbrand" />
-              <span>
-                Google sign-in needs a Google Client ID configured by the admin (Admin panel → Settings → Auth).
-                Until then, use phone or email.
-              </span>
-            </div>
+                <div className="mt-4">
+                  <UsernameField
+                    value={username}
+                    onChange={(v) => {
+                      setUsernameTouched(true)
+                      setUsername(v)
+                    }}
+                  />
+                </div>
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || name.trim().length < 2}
+                  onClick={() => {
+                    setBusy(true)
+                    setError('')
+                    api
+                      .verifyOtp(activePhone, otp, name.trim(), username.trim().toLowerCase())
+                      .then((res) => {
+                        if (res.token && res.user) loginSuccess(res.token, res.user)
+                      })
+                      .catch((e) => setError((e as Error).message))
+                      .finally(() => setBusy(false))
+                  }}
+                >
+                  {busy ? 'Creating account…' : 'Create my account'}
+                </button>
+              </div>
+            )}
+
+            {/* ================= email verification ================= */}
+            {step === 'verify' && (
+              <div className="mt-6">
+                {emailDevCode && <SandboxBanner code={emailDevCode} onFill={() => setEmailCode(emailDevCode)} />}
+                <OtpSlots value={emailCode} onChange={setEmailCode} />
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || emailCode.length < 6}
+                  onClick={() => void verifyEmailCode()}
+                >
+                  <ShieldCheck size={18} /> {busy ? 'Verifying…' : 'Verify & continue'}
+                </button>
+                <button
+                  className="mt-4 w-full text-center text-sm font-semibold text-cmut"
+                  onClick={() => void skipVerify()}
+                >
+                  Skip for now
+                </button>
+              </div>
+            )}
+
+            {/* ================= google ================= */}
+            {step === 'google' && (
+              <div className="mt-7">
+                <div className="flex min-h-[130px] flex-col items-center justify-center gap-4 rounded-3xl border border-cline bg-cbg p-6">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm">
+                    <GoogleG size={24} />
+                  </span>
+                  <p className="max-w-[300px] text-center text-[13px] leading-5 text-cmut">
+                    A unique username is generated from your Google name automatically. You can change it later
+                    from your profile.
+                  </p>
+                  <div ref={googleHostRef} className="flex min-h-[44px] items-center justify-center" />
+                  {busy && (
+                    <div className="flex items-center gap-2 text-sm text-cmut">
+                      <Loader2 size={16} className="animate-spin" /> Signing you in…
+                    </div>
+                  )}
+                </div>
+                <div className="mt-4 flex items-start gap-2 rounded-2xl bg-cbg p-4 text-[12px] leading-5 text-cmut">
+                  <Info size={15} className="mt-0.5 flex-none text-cbrand" />
+                  <span>
+                    Google sign-in needs a Google Client ID configured by the admin (Admin panel → Settings →
+                    Auth). Until then, use phone or email.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* ---------- error ---------- */}
+            {error && (
+              <div className="mt-4 flex items-start gap-2.5 rounded-2xl bg-[#FEF0EF] p-3.5">
+                <AlertCircle size={17} className="mt-0.5 flex-none text-cred" />
+                <p className="text-[13px] font-medium leading-5 text-cred">{error}</p>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
-        {error && <p className="mt-4 rounded-xl bg-[#FEF0EF] p-3 text-sm font-medium text-cred">{error}</p>}
-
-        <p className="mt-auto pt-8 text-center text-[13px] text-cmut">
+        <p className="mt-auto pt-8 text-center text-[12.5px] text-cmut md:pt-6">
           Secure peer-to-peer calls · Free &amp; unlimited
         </p>
       </div>
