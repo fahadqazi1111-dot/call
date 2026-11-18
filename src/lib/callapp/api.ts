@@ -94,6 +94,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+  passwordForgot: (email: string) =>
+    request<{ ok: boolean; delivered: boolean; devCode?: string }>('/api/auth/password/forgot', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  passwordReset: (email: string, code: string, newPassword: string) =>
+    request<{ ok: boolean; token: string; user: Me }>('/api/auth/password/reset', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, newPassword }),
+    }),
   googleSignIn: (credential: string) =>
     request<{ ok: boolean; token: string; user: Me }>('/api/auth/google', {
       method: 'POST',
@@ -303,6 +313,11 @@ export const api = {
   adminSettings: () => request<{ settings: Record<string, unknown> }>('/api/admin/settings'),
   adminSaveSettings: (key: string, value: unknown) =>
     request<{ ok: boolean }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify({ key, value }) }),
+  adminSmtpTest: (config?: Record<string, unknown>, to?: string) =>
+    request<{ ok: boolean; to?: string; message?: string }>('/api/admin/settings/smtp/test', {
+      method: 'POST',
+      body: JSON.stringify({ config, to }),
+    }),
   adminUsers: (q?: string) => request<{ users: Array<Me & { role: string; blocked: boolean; coins: number; earnings: number }> }>(`/api/admin/users?q=${encodeURIComponent(q || '')}`),
   adminUserAction: (targetId: string, action: string, value?: number) =>
     request<{ ok: boolean }>('/api/admin/users', { method: 'POST', body: JSON.stringify({ targetId, action, value }) }),

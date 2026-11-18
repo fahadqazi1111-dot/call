@@ -53,6 +53,7 @@ model EmailOtp {
   id        String   @id @default(cuid())
   email     String
   code      String
+  purpose   String   @default("verify") // verify | reset
   expiresAt DateTime
   consumed  Boolean  @default(false)
   createdAt DateTime @default(now())

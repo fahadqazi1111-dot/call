@@ -1,15 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import {
   X, Users, Gift, Package, Gem, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
-  Loader2, Ban, Coins, Crown, Radio, Clapperboard, Trash2, Plus, Lock,
+  Loader2, Ban, Coins, Crown, Radio, Clapperboard, Trash2, Plus, Lock, Mail, Send,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import type { GiftItem, CoinPackage } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'gifts' | 'packages' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast'
+type Section = 'overview' | 'users' | 'gifts' | 'packages' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
 
 /** In-app admin panel — role-gated (role === 'admin'), all data server-authoritative. */
 export function AdminPanel({ onClose }: { onClose: () => void }) {
@@ -87,6 +88,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
               { id: 'ai', label: 'CALL AI', Icon: Bot },
               { id: 'ads', label: 'Ads', Icon: ImageIcon },
               { id: 'broadcast', label: 'Broadcast', Icon: Megaphone },
+              { id: 'smtp', label: 'Email / SMTP', Icon: Mail },
             ] as const
           ).map(({ id, label, Icon }) => (
             <button
@@ -112,6 +114,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
           {section === 'ai' && <AiSection />}
           {section === 'ads' && <AdsSection />}
           {section === 'broadcast' && <BroadcastSection />}
+          {section === 'smtp' && <SmtpSection />}
         </div>
       </div>
     </div>
@@ -723,5 +726,189 @@ function BroadcastSection() {
         {sending ? <Loader2 className="mx-auto animate-spin" size={18} /> : 'Send broadcast'}
       </button>
     </div>
+  )
+}
+
+/* ================= Email / SMTP ================= */
+
+interface SmtpForm {
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  pass: string
+  from: string
+}
+
+const SMTP_EMPTY: SmtpForm = { host: '', port: 587, secure: false, user: '', pass: '', from: '' }
+const SMTP_GMAIL: SmtpForm = { host: 'smtp.gmail.com', port: 465, secure: true, user: '', pass: '', from: '' }
+
+function SmtpSection() {
+  const [form, setForm] = useState<SmtpForm | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testTo, setTestTo] = useState('')
+  const [configured, setConfigured] = useState(false)
+
+  useEffect(() => {
+    queueMicrotask(async () => {
+      try {
+        const res = await api.adminSettings()
+        const s = (res.settings.smtp ?? {}) as Partial<SmtpForm>
+        setForm({
+          host: String(s.host ?? ''),
+          port: Number(s.port ?? 587),
+          secure: Boolean(s.secure ?? false),
+          user: String(s.user ?? ''),
+          pass: String(s.pass ?? ''),
+          from: String(s.from ?? ''),
+        })
+        setConfigured(Boolean(s.host && s.user && s.pass && s.from))
+      } catch {
+        setForm(SMTP_EMPTY)
+      }
+    })
+  }, [])
+
+  if (!form) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+
+  const set = <K extends keyof SmtpForm>(k: K, v: SmtpForm[K]) => setForm({ ...form, [k]: v })
+  const complete = form.host && form.user && form.pass && form.from
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.adminSaveSettings('smtp', { ...form, port: Number(form.port) || 587 })
+      setConfigured(complete)
+      toast.success('SMTP settings saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const runTest = async () => {
+    setTesting(true)
+    try {
+      // pass the unsaved form values so the admin can test before saving
+      const res = await api.adminSmtpTest({ ...form, port: Number(form.port) || 587 }, testTo.trim() || undefined)
+      if (res.ok) toast.success(res.message || 'Test email sent')
+      else toast.error(res.message || 'Test failed')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div className="max-w-xl">
+      <div className="flex flex-wrap items-center gap-2 pb-1">
+        <h3 className="text-[15px] font-extrabold text-cink">Email delivery (SMTP)</h3>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+            configured ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'
+          }`}
+        >
+          {configured ? 'Connected' : 'Not configured'}
+        </span>
+      </div>
+      <p className="pb-4 text-[12px] leading-5 text-cmut">
+        Used for email verification codes and OTP-based password reset emails. Credentials are stored
+        server-side only.
+      </p>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-[14px] bg-cbg p-3 text-[12px] leading-5 text-cmut">
+        <Mail size={15} className="flex-none text-cbrand" />
+        <span className="flex-1">
+          <b>Gmail:</b> use host <b>smtp.gmail.com</b>, port <b>465</b>, and an <b>App Password</b> (Google
+          Account → Security → 2-Step Verification → App passwords). Normal passwords do not work.
+        </span>
+        <button
+          className="flex-none rounded-full bg-white px-3 py-1.5 text-[11.5px] font-bold text-cbrand shadow-sm"
+          onClick={() => setForm({ ...SMTP_GMAIL, user: form.user, pass: form.pass, from: form.from })}
+        >
+          Use Gmail preset
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <SmtpField label="SMTP host" value={form.host} onChange={(v) => set('host', v)} placeholder="smtp.gmail.com" />
+        <SmtpField label="Port" value={String(form.port)} onChange={(v) => set('port', Number(v) || 0)} placeholder="465" type="number" />
+        <SmtpField label="Username (email)" value={form.user} onChange={(v) => set('user', v)} placeholder="you@gmail.com" />
+        <SmtpField label="App password" value={form.pass} onChange={(v) => set('pass', v)} placeholder="16-character app password" type="password" />
+        <SmtpField label="From address" value={form.from} onChange={(v) => set('from', v)} placeholder="CALL <you@gmail.com> — just the email" />
+        <label className="flex items-center gap-2.5 rounded-[12px] bg-[#F0F3FA] px-4 text-[13px] font-semibold text-cink sm:mt-0">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[#2f5bea]"
+            checked={form.secure}
+            onChange={(e) => set('secure', e.target.checked)}
+          />
+          Use SSL/TLS (port 465)
+        </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <button
+          className="h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+          disabled={saving || !complete}
+          onClick={() => void save()}
+        >
+          {saving ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save settings'}
+        </button>
+      </div>
+
+      <div className="mt-7 rounded-[16px] border border-cline p-4">
+        <h4 className="text-[13.5px] font-extrabold text-cink">Test connection</h4>
+        <p className="pb-3 pt-1 text-[12px] text-cmut">
+          Verifies the login and sends a real test email. Tests the values in this form, even if not saved yet.
+        </p>
+        <div className="flex flex-col gap-2.5 sm:flex-row">
+          <input
+            className="h-11 flex-1 rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] outline-none placeholder:text-[#8a94a8]"
+            placeholder="Send test to… (default: SMTP username)"
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+          />
+          <button
+            className="flex h-11 items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-5 text-[13.5px] font-bold text-cink shadow-sm disabled:opacity-50"
+            disabled={testing || !complete}
+            onClick={() => void runTest()}
+          >
+            {testing ? <Loader2 className="animate-spin" size={16} /> : <Send size={15} className="text-cbrand" />}
+            Send test email
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SmtpField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">{label}</span>
+      <input
+        className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] font-medium outline-none placeholder:text-[#8a94a8]"
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
   )
 }

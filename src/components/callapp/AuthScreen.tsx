@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CallWordmark } from './CallLogo'
+import { CountryPicker } from './CountryPicker'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
   AlertCircle,
@@ -23,22 +24,7 @@ import {
 import { api, setToken } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 
-const COUNTRIES = [
-  { code: '+92', label: 'PK' },
-  { code: '+91', label: 'IN' },
-  { code: '+1', label: 'US' },
-  { code: '+44', label: 'UK' },
-  { code: '+971', label: 'AE' },
-  { code: '+966', label: 'SA' },
-  { code: '+62', label: 'ID' },
-  { code: '+880', label: 'BD' },
-  { code: '+234', label: 'NG' },
-  { code: '+212', label: 'MA' },
-  { code: '+90', label: 'TR' },
-  { code: '+20', label: 'EG' },
-]
-
-type Step = 'start' | 'otp' | 'name' | 'verify' | 'google'
+type Step = 'start' | 'otp' | 'name' | 'verify' | 'forgot' | 'reset' | 'google'
 type Mode = 'login' | 'signup'
 type SignupMethod = 'phone' | 'email'
 
@@ -180,7 +166,7 @@ function UsernameField({
       <div className="relative">
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] font-bold text-cmut">@</span>
         <input
-          className="app-input w-full pl-9 pr-10"
+          className="app-input w-full has-icon has-trailing"
           placeholder="yourname"
           value={value}
           autoCapitalize="none"
@@ -227,6 +213,7 @@ export function AuthScreen() {
   const [devCode, setDevCode] = useState('')
   const [resendIn, setResendIn] = useState(0)
   const [showPw, setShowPw] = useState(false)
+  const [showPw2, setShowPw2] = useState(false)
   const resendTimer = useRef<number | null>(null)
 
   // login: one smart identifier — email or phone
@@ -248,6 +235,14 @@ export function AuthScreen() {
   const [emailCode, setEmailCode] = useState('')
   const [emailDevCode, setEmailDevCode] = useState('')
 
+  // forgot / reset password
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetCode, setResetCode] = useState('')
+  const [resetDevCode, setResetDevCode] = useState('')
+  const [resetPw, setResetPw] = useState('')
+  const [resetDelivered, setResetDelivered] = useState(false)
+  const [resetResendIn, setResetResendIn] = useState(0)
+
   const googleHostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -257,6 +252,12 @@ export function AuthScreen() {
       if (resendTimer.current) window.clearTimeout(resendTimer.current)
     }
   }, [resendIn])
+
+  useEffect(() => {
+    if (resetResendIn <= 0) return
+    const t = window.setTimeout(() => setResetResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [resetResendIn])
 
   const signupPhone = () => `${country}${phone.replace(/\D/g, '')}`
   const loginPhone = () => `${country}${idDigits}`
@@ -337,7 +338,7 @@ export function AuthScreen() {
       // session starts right away; verify the email with a code next
       setPendingToken(res.token)
       const codeRes = await api.emailRequestCode(email.trim().toLowerCase())
-      setEmailDevCode(codeRes.devCode)
+      setEmailDevCode(codeRes.devCode ?? '')
       setStep('verify')
     } catch (e) {
       setError((e as Error).message)
@@ -369,6 +370,37 @@ export function AuthScreen() {
       loginSuccess(pendingToken, me.user)
     } catch {
       setError('Could not start the session — please log in again')
+    }
+  }
+
+  /* ---------- forgot / reset password ---------- */
+
+  const submitForgot = async (resend = false) => {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.passwordForgot(resetEmail.trim().toLowerCase())
+      setResetDevCode(res.devCode ?? '')
+      setResetDelivered(res.delivered)
+      setResetResendIn(45)
+      if (!resend) setStep('reset')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitReset = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.passwordReset(resetEmail.trim().toLowerCase(), resetCode, resetPw)
+      if (res.token && res.user) loginSuccess(res.token, res.user)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -447,6 +479,9 @@ export function AuthScreen() {
   const signupPhoneReady = name.trim().length >= 2 && phone.replace(/\D/g, '').length >= 7
   const signupEmailReady = name.trim().length >= 2 && EMAIL_RE.test(email.trim()) && password.length >= 8
 
+  const resetReady = EMAIL_RE.test(resetEmail.trim())
+  const submitResetReady = resetCode.length === 6 && resetPw.length >= 8
+
   /* ---------- header copy ---------- */
 
   const header = (() => {
@@ -456,6 +491,13 @@ export function AuthScreen() {
       return { t: 'Set up your profile', s: 'Choose the name and username your contacts will see.' }
     if (step === 'verify')
       return { t: 'Verify your email', s: `Enter the 6-digit code sent to ${email}` }
+    if (step === 'forgot')
+      return { t: 'Reset your password', s: 'Enter your account email — we will send you a 6-digit code.' }
+    if (step === 'reset')
+      return {
+        t: 'Check your email',
+        s: `Enter the 6-digit code we sent to ${resetEmail} and pick a new password.`,
+      }
     if (step === 'google')
       return { t: 'Continue with Google', s: 'A unique username is created from your Google name automatically.' }
     return mode === 'login'
@@ -469,9 +511,19 @@ export function AuthScreen() {
     setStep('start')
   }
 
+  const openForgot = () => {
+    setError('')
+    setResetEmail(idIsEmail ? identifier.trim().toLowerCase() : '')
+    setResetCode('')
+    setResetDevCode('')
+    setResetPw('')
+    setStep('forgot')
+  }
+
   const back = () => {
     setError('')
     if (step === 'name') setStep('otp')
+    else if (step === 'reset') setStep('forgot')
     else goStart()
   }
 
@@ -482,7 +534,7 @@ export function AuthScreen() {
     <div className="app-scroll absolute inset-0 overflow-y-auto bg-white md:bg-page-grad">
       <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col px-5 pb-8 pt-14 sm:px-6 md:pb-9 md:pt-10">
         <div className="md:my-auto">
-          <div className="md:rounded-[30px] md:border md:border-white md:bg-white/95 md:p-9 md:shadow-[0_36px_90px_-45px_rgba(14,23,38,0.45)]">
+          <div className="md:rounded-[30px] md:border md:border-white md:bg-white/95 md:p-8 md:shadow-[0_36px_90px_-45px_rgba(14,23,38,0.45)] lg:p-9">
             {/* ---------- header ---------- */}
             <div>
               {showBack && (
@@ -527,26 +579,13 @@ export function AuthScreen() {
               <div className="mt-6">
                 <FieldLabel>Email or phone</FieldLabel>
                 <div className="flex gap-2.5">
-                  {!idIsEmail && (
-                    <select
-                      className="app-input w-[106px] flex-none appearance-none px-2 text-center"
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                      aria-label="Country code"
-                    >
-                      {COUNTRIES.map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.label} {c.code}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  {!idIsEmail && <CountryPicker value={country} onChange={setCountry} />}
                   <div className="relative min-w-0 flex-1">
                     <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
                       {idIsEmail ? <Mail size={18} /> : <Smartphone size={18} />}
                     </span>
                     <input
-                      className="app-input w-full pl-11"
+                      className="app-input w-full has-icon"
                       inputMode={idIsEmail ? 'email' : 'tel'}
                       autoCapitalize="none"
                       autoComplete="email"
@@ -569,7 +608,7 @@ export function AuthScreen() {
                         <Lock size={18} />
                       </span>
                       <input
-                        className="app-input w-full pl-11 pr-12"
+                        className="app-input w-full has-icon has-trailing"
                         type={showPw ? 'text' : 'password'}
                         autoComplete="current-password"
                         placeholder="Your password"
@@ -586,11 +625,20 @@ export function AuthScreen() {
                         {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
                       </button>
                     </div>
+                    <div className="mt-2 text-right">
+                      <button
+                        type="button"
+                        className="text-[13px] font-semibold text-cbrand hover:underline"
+                        onClick={openForgot}
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 <button
-                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  className="btn-p mt-4 w-full disabled:opacity-50"
                   disabled={busy || !loginReady}
                   onClick={submitLogin}
                 >
@@ -639,7 +687,7 @@ export function AuthScreen() {
                     <User size={18} />
                   </span>
                   <input
-                    className="app-input w-full pl-11"
+                    className="app-input w-full has-icon"
                     placeholder="Your name"
                     autoComplete="name"
                     value={name}
@@ -683,24 +731,13 @@ export function AuthScreen() {
 
                   {signupMethod === 'phone' ? (
                     <div className="flex gap-2.5">
-                      <select
-                        className="app-input w-[106px] flex-none appearance-none px-2 text-center"
-                        value={country}
-                        onChange={(e) => setCountry(e.target.value)}
-                        aria-label="Country code"
-                      >
-                        {COUNTRIES.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {c.label} {c.code}
-                          </option>
-                        ))}
-                      </select>
+                      <CountryPicker value={country} onChange={setCountry} />
                       <div className="relative min-w-0 flex-1">
                         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
                           <Smartphone size={18} />
                         </span>
                         <input
-                          className="app-input w-full pl-11"
+                          className="app-input w-full has-icon"
                           inputMode="tel"
                           placeholder="3XX 1234567"
                           value={phone}
@@ -719,7 +756,7 @@ export function AuthScreen() {
                           <Mail size={18} />
                         </span>
                         <input
-                          className="app-input w-full pl-11"
+                          className="app-input w-full has-icon"
                           type="email"
                           inputMode="email"
                           autoCapitalize="none"
@@ -734,7 +771,7 @@ export function AuthScreen() {
                           <Lock size={18} />
                         </span>
                         <input
-                          className="app-input w-full pl-11 pr-12"
+                          className="app-input w-full has-icon has-trailing"
                           type={showPw ? 'text' : 'password'}
                           autoComplete="new-password"
                           placeholder="At least 8 characters"
@@ -836,7 +873,7 @@ export function AuthScreen() {
                     <User size={18} />
                   </span>
                   <input
-                    className="app-input w-full pl-11"
+                    className="app-input w-full has-icon"
                     placeholder="Your name"
                     value={name}
                     onChange={(e) => {
@@ -893,6 +930,105 @@ export function AuthScreen() {
                 >
                   Skip for now
                 </button>
+              </div>
+            )}
+
+            {/* ================= forgot password ================= */}
+            {step === 'forgot' && (
+              <div className="mt-6">
+                <FieldLabel>Account email</FieldLabel>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                    <Mail size={18} />
+                  </span>
+                  <input
+                    className="app-input w-full has-icon"
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    placeholder="you@example.com"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && resetReady && !busy) void submitForgot()
+                    }}
+                    autoFocus
+                  />
+                </div>
+                <p className="mt-2 text-[12px] leading-5 text-cmut">
+                  We email a 6-digit code to this address. Set a new password with it — takes less than a minute.
+                </p>
+                <button
+                  className="btn-p mt-5 w-full disabled:opacity-50"
+                  disabled={busy || !resetReady}
+                  onClick={() => void submitForgot()}
+                >
+                  <Mail size={18} /> {busy ? 'Sending…' : 'Email me a code'}
+                </button>
+              </div>
+            )}
+
+            {/* ================= reset password ================= */}
+            {step === 'reset' && (
+              <div className="mt-6">
+                {resetDevCode ? (
+                  <SandboxBanner code={resetDevCode} onFill={() => setResetCode(resetDevCode)} />
+                ) : (
+                  resetDelivered && (
+                    <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#12B76A33] bg-[#EDFAF3] p-4">
+                      <CheckCircle2 size={20} className="flex-none text-[#067647]" />
+                      <div className="text-[13px] leading-5 text-[#0B5B38]">
+                        Code emailed to <b>{resetEmail}</b>. Check your inbox (and spam folder).
+                      </div>
+                    </div>
+                  )
+                )}
+                <OtpSlots value={resetCode} onChange={setResetCode} />
+                <div className="mt-5">
+                  <FieldLabel>New password</FieldLabel>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                      <Lock size={18} />
+                    </span>
+                    <input
+                      className="app-input w-full has-icon has-trailing"
+                      type={showPw2 ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                      value={resetPw}
+                      onChange={(e) => setResetPw(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && submitResetReady && !busy) void submitReset()
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                      onClick={() => setShowPw2((v) => !v)}
+                      aria-label={showPw2 ? 'Hide password' : 'Show password'}
+                    >
+                      {showPw2 ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  className="btn-p mt-5 w-full disabled:opacity-50"
+                  disabled={busy || !submitResetReady}
+                  onClick={() => void submitReset()}
+                >
+                  <ShieldCheck size={18} /> {busy ? 'Saving…' : 'Set new password'}
+                </button>
+                <div className="mt-4 text-center text-sm text-cmut">
+                  {resetResendIn > 0 ? (
+                    <span>
+                      Resend email in <b className="text-cbrand">{resetResendIn}s</b>
+                    </span>
+                  ) : (
+                    <button className="font-semibold text-cbrand" onClick={() => void submitForgot(true)}>
+                      Resend email
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

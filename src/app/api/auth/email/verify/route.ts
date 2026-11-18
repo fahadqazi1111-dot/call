@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 })
     }
     const otp = await db.emailOtp.findFirst({
-      where: { email, consumed: false, code },
+      where: { email, consumed: false, code, purpose: 'verify' },
       orderBy: { createdAt: 'desc' },
     })
     if (!otp || otp.expiresAt.getTime() < Date.now()) {

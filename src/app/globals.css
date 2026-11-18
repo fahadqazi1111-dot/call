@@ -264,6 +264,16 @@
   border-color: #2f5bea;
   box-shadow: 0 0 0 4px #e3ebff;
 }
+/* Leading icon: reserve room so the icon never sits on the text.
+   (Two-class specificity beats the base padding above; Tailwind pl-*
+   utilities are layered and would lose to unlayered .app-input.) */
+.app-input.has-icon {
+  padding-left: 46px;
+}
+/* Trailing affordance (show/hide password, status tick) */
+.app-input.has-trailing {
+  padding-right: 48px;
+}
 
 .btn-p {
   height: 56px;
