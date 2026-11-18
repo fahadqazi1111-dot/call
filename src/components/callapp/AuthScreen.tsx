@@ -80,7 +80,8 @@ export function AuthScreen() {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col overflow-y-auto bg-white px-6 pb-8 app-scroll">
+    <div className="app-scroll absolute inset-0 flex flex-col overflow-y-auto bg-white px-6 pb-8">
+      <div className="mx-auto flex min-h-full w-full max-w-[460px] flex-1 flex-col">
       <div className="pt-16">
         {step !== 'phone' ? (
           <button
@@ -217,8 +218,9 @@ export function AuthScreen() {
       {error && <p className="mt-4 rounded-xl bg-[#FEF0EF] p-3 text-sm font-medium text-cred">{error}</p>}
 
       <p className="mt-auto pt-8 text-center text-[13px] text-cmut">
-        Secure peer-to-peer calls · Free & unlimited
+        Secure peer-to-peer calls · Free &amp; unlimited
       </p>
+      </div>
     </div>
   )
 }

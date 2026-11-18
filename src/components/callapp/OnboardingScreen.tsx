@@ -72,13 +72,17 @@ export function OnboardingScreen() {
 }
 
 function SlideFrame({ children }: { children: React.ReactNode }) {
-  return <div className="relative flex h-full w-full flex-none snap-center flex-col items-center">{children}</div>
+  return (
+    <div className="relative flex h-full w-full flex-none snap-center flex-col items-center justify-start min-[768px]:justify-center min-[768px]:pb-20">
+      {children}
+    </div>
+  )
 }
 
 function Slide1() {
   return (
     <SlideFrame>
-      <div className="relative mt-[110px] h-[330px] w-[300px] min-[768px]:mt-14">
+      <div className="relative mt-[110px] h-[330px] w-[300px] min-[768px]:mt-0">
         <div className="bg-dark-grad absolute inset-0 flex flex-col items-center rounded-[32px] shadow-[0_14px_34px_rgba(14,23,38,0.14)]">
           <div className="relative mt-[52px]">
             <div className="ring-anim absolute -inset-2 rounded-full border-2 border-[#3D6BFF]" />
@@ -104,7 +108,7 @@ function Slide1() {
           Hey! Free to talk?
         </div>
       </div>
-      <div className="mt-12 px-8 text-center">
+      <div className="mt-12 px-8 text-center min-[768px]:mt-10 min-[768px]:max-w-[520px]">
         <h1 className="text-[31px] font-extrabold leading-tight tracking-tight text-cink">Crystal-clear HD calls</h1>
         <p className="mt-3 text-base leading-6 text-cmut">
           Video and voice calls with friends and family — free, unlimited and always smooth.
@@ -117,7 +121,7 @@ function Slide1() {
 function Slide2() {
   return (
     <SlideFrame>
-      <div className="mt-[110px] flex w-[330px] flex-col gap-3 rounded-[32px] bg-white p-6 shadow-[0_14px_34px_rgba(14,23,38,0.14)] min-[768px]:mt-14">
+      <div className="mt-[110px] flex w-[330px] flex-col gap-3 rounded-[32px] bg-white p-6 shadow-[0_14px_34px_rgba(14,23,38,0.14)] min-[768px]:mt-0">
         <div className="rounded-[20px] rounded-bl-md bg-[#F1F4FA] px-4 py-2.5 text-[15px] text-cink">
           Did you see the photos?
         </div>
@@ -141,7 +145,7 @@ function Slide2() {
           <Lock size={15} /> End-to-end encrypted
         </div>
       </div>
-      <div className="mt-12 px-8 text-center">
+      <div className="mt-12 px-8 text-center min-[768px]:mt-10 min-[768px]:max-w-[520px]">
         <h1 className="text-[31px] font-extrabold leading-tight tracking-tight text-cink">
           Chats & voice notes that stay private
         </h1>
@@ -163,7 +167,7 @@ function Slide3() {
   ] as const
   return (
     <SlideFrame>
-      <div className="relative mt-[80px] h-[330px] w-[330px] min-[768px]:mt-12">
+      <div className="relative mt-[80px] h-[330px] w-[330px] min-[768px]:mt-0">
         <div className="absolute inset-[20px] rounded-full bg-[#E3EBFF]" />
         {items.map(([t, k, pos, s], i) => (
           <div
@@ -178,7 +182,7 @@ function Slide3() {
           Free · Unlimited · Always
         </div>
       </div>
-      <div className="mt-10 px-8 text-center">
+      <div className="mt-10 px-8 text-center min-[768px]:mt-8 min-[768px]:max-w-[520px]">
         <h1 className="text-[31px] font-extrabold leading-tight tracking-tight text-cink">Your contacts, one tap away</h1>
         <p className="mt-3 text-base leading-6 text-cmut">
           Import your phone contacts instantly and start talking to anyone, anywhere in the world.
@@ -197,13 +201,13 @@ function Slide4() {
   ] as const
   return (
     <SlideFrame>
-      <div className="mt-[84px] px-8 min-[768px]:mt-8">
+      <div className="mt-[84px] px-8 min-[768px]:mt-0 min-[768px]:max-w-[560px]">
         <div className="flex h-[72px] w-[72px] items-center justify-center rounded-[20px] bg-white shadow-[0_12px_28px_rgba(47,91,234,0.2)]">
           <CallLogoMark size={46} />
         </div>
         <h1 className="mt-6 text-[34px] font-extrabold leading-tight tracking-tight text-cink">Welcome to CALL</h1>
         <p className="mt-2 text-base text-cmut">Free, private and beautifully simple.</p>
-        <div className="mt-8 flex flex-col gap-3.5 min-[768px]:mt-6 min-[768px]:gap-3">
+        <div className="mt-8 flex flex-col gap-3.5 min-[768px]:mt-6 min-[768px]:grid min-[768px]:grid-cols-2 min-[768px]:gap-3">
           {features.map(([Icon, a, b], i) => (
             <div
               key={i}

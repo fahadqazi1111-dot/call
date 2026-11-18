@@ -55,6 +55,17 @@ export function AppRoot() {
 
   const inMain = phase === 'main' && !!me
 
+  /* ---------- splash: always full-bleed, every device ---------- */
+  if (phase === 'splash') {
+    return (
+      <div className="bg-dark-grad relative h-[100dvh] w-full overflow-hidden">
+        <SplashScreen />
+        {call && <CallOverlay state={call} />}
+        <Toaster position="top-center" richColors />
+      </div>
+    )
+  }
+
   /* ---------- desktop / tablet: WhatsApp-Web style shell ---------- */
   if (isDesktop && inMain) {
     return (
@@ -66,60 +77,44 @@ export function AppRoot() {
     )
   }
 
-  /* ---------- desktop / tablet: auth & onboarding stage card ---------- */
+  /* ---------- desktop / tablet: onboarding & login, full-viewport split ---------- */
   if (isDesktop) {
-    // splash: full-window brand moment
-    if (phase === 'splash') {
-      return (
-        <div className="relative h-[100dvh] w-full">
-          <SplashScreen />
-          {call && <CallOverlay state={call} />}
-          <Toaster position="top-center" richColors />
-        </div>
-      )
-    }
-
-    // onboarding / login: split card — branding left, form right
     return (
-      <div className="bg-page-grad flex min-h-[100dvh] w-full items-center justify-center p-6">
-        <div className="relative grid h-[min(720px,100dvh-48px)] w-full max-w-[520px] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-[32px] bg-white shadow-[0_40px_100px_rgba(14,23,38,0.4)] lg:h-[min(760px,100dvh-48px)] lg:max-w-[1060px] lg:grid-cols-[1fr_520px]">
+      <div className="relative h-[100dvh] w-full overflow-hidden">
+        <div className="grid h-full w-full grid-rows-[1fr] grid-cols-1 bg-white md:grid-cols-[minmax(300px,44%)_1fr] lg:grid-cols-[minmax(0,1fr)_minmax(500px,640px)]">
           <AuthBranding />
-          <div className="relative h-full">
+          <div className="relative h-full min-h-0">
             {phase === 'auth' ? <AuthScreen /> : <OnboardingScreen />}
             {call && <CallOverlay state={call} />}
           </div>
-          <Toaster position="top-center" richColors />
         </div>
+        <Toaster position="top-center" richColors />
       </div>
     )
   }
 
   /* ---------- mobile: original phone layout ---------- */
   return (
-    <div className="bg-page-grad flex min-h-[100dvh] w-full justify-center">
-      <div className="relative flex h-[100dvh] w-full max-w-[430px] flex-col overflow-hidden bg-white sm:my-4 sm:h-[calc(100dvh-32px)] sm:rounded-[36px] sm:shadow-[0_30px_80px_rgba(14,23,38,0.35)]">
-        {inMain ? (
-          <>
-            <div className="flex-1 overflow-hidden">
-              {tab === 'chats' && <ChatsTab />}
-              {tab === 'calls' && <CallsTab />}
-              {tab === 'contacts' && <ContactsTab />}
-              {tab === 'profile' && <ProfileTab />}
-            </div>
-            {openPeerId && <ChatScreen peerId={openPeerId} />}
-            <TabBar />
-          </>
-        ) : phase === 'auth' ? (
-          <AuthScreen />
-        ) : phase === 'onboarding' ? (
-          <OnboardingScreen />
-        ) : (
-          <SplashScreen />
-        )}
+    <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-white">
+      {inMain ? (
+        <>
+          <div className="flex-1 overflow-hidden">
+            {tab === 'chats' && <ChatsTab />}
+            {tab === 'calls' && <CallsTab />}
+            {tab === 'contacts' && <ContactsTab />}
+            {tab === 'profile' && <ProfileTab />}
+          </div>
+          {openPeerId && <ChatScreen peerId={openPeerId} />}
+          <TabBar />
+        </>
+      ) : phase === 'auth' ? (
+        <AuthScreen />
+      ) : (
+        <OnboardingScreen />
+      )}
 
-        {call && <CallOverlay state={call} />}
-        <Toaster position="top-center" richColors />
-      </div>
+      {call && <CallOverlay state={call} />}
+      <Toaster position="top-center" richColors />
     </div>
   )
 }
