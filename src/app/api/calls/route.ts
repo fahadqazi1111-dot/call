@@ -28,6 +28,7 @@ export async function GET(req: Request) {
         id: peer.id,
         name: peer.name,
         avatarKey: peer.avatarKey,
+        avatarUrl: peer.avatarUrl,
         phone: peer.phone,
       },
     }

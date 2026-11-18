@@ -38,7 +38,7 @@ export const api = {
       body: JSON.stringify({ phone, code, name }),
     }),
   me: () => request<{ user: Me }>('/api/me'),
-  updateMe: (patch: { name?: string; about?: string }) =>
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null }) =>
     request<{ user: Me }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
   chats: () => request<{ chats: ChatSummary[] }>('/api/chats'),
   messages: (peerId: string) =>
@@ -73,6 +73,12 @@ export const api = {
   uploadVoice: async (blob: Blob) => {
     const form = new FormData()
     form.append('file', blob, 'voice.webm')
+    return request<{ ok: boolean; id: string; mime: string }>('/api/upload', { method: 'POST', body: form })
+  },
+  uploadAvatar: async (blob: Blob, mime: string) => {
+    const ext = mime === 'image/png' ? 'avatar.png' : mime === 'image/webp' ? 'avatar.webp' : 'avatar.jpg'
+    const form = new FormData()
+    form.append('file', blob, ext)
     return request<{ ok: boolean; id: string; mime: string }>('/api/upload', { method: 'POST', body: form })
   },
 }

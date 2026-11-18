@@ -32,13 +32,14 @@ export function normalizePhone(raw: string): string | null {
   return digits
 }
 
-export function publicUser(u: { id: string; name: string; phone: string; about: string; avatarKey: number; lastSeen: Date }) {
+export function publicUser(u: { id: string; name: string; phone: string; about: string; avatarKey: number; avatarUrl: string | null; lastSeen: Date }) {
   return {
     id: u.id,
     name: u.name,
     phone: u.phone,
     about: u.about,
     avatarKey: u.avatarKey,
+    avatarUrl: u.avatarUrl,
     lastSeen: u.lastSeen.toISOString(),
   }
 }

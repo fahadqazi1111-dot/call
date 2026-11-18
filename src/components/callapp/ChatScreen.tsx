@@ -32,7 +32,13 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
     if (fromChat) return fromChat
     const fromContact = contacts.find((c) => c.user?.id === peerId)?.user
     if (fromContact)
-      return { id: fromContact.id, name: fromContact.name, avatarKey: fromContact.avatarKey, lastSeen: fromContact.lastSeen }
+      return {
+        id: fromContact.id,
+        name: fromContact.name,
+        avatarKey: fromContact.avatarKey,
+        avatarUrl: fromContact.avatarUrl,
+        lastSeen: fromContact.lastSeen,
+      }
     return undefined
   }, [chats, contacts, peerId])
   const [draft, setDraft] = useState('')
@@ -130,7 +136,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         >
           <ChevronLeft size={22} />
         </button>
-        <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} />
+        <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</div>
           <div className={`text-xs font-semibold ${typing ? 'text-cgreen' : online[peer.id] ? 'text-cgreen' : 'text-cmut'}`}>
@@ -160,7 +166,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       >
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
-            <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} />
+            <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} src={peer.avatarUrl} />
             <p className="mt-4 text-lg font-bold text-cink">{peer.name}</p>
             <p className="mt-1 px-12 text-sm text-cmut">
               Messages and calls are peer-to-peer. Start the conversation — it&apos;s free.

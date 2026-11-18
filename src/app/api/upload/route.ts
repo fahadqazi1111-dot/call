@@ -14,9 +14,12 @@ const EXT_BY_MIME: Record<string, string> = {
   'audio/mpeg': 'mp3',
   'audio/wav': 'wav',
   'audio/aac': 'aac',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
 }
 
-/** POST: upload a voice note (multipart 'file'). Returns a media id served at /api/media/{id}. */
+/** POST: upload a media file — voice note or profile image (multipart 'file'). Served at /api/media/{id}. */
 export async function POST(req: Request) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,7 +33,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'File too large (max 25MB)' }, { status: 400 })
     }
     const mime = file.type || 'audio/webm'
-    const ext = EXT_BY_MIME[mime] || 'webm'
+    const ext = EXT_BY_MIME[mime]
+    if (!ext) {
+      return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 })
+    }
     const id = crypto.randomUUID().replace(/-/g, '')
     await fs.mkdir(UPLOAD_DIR, { recursive: true })
     const buf = Buffer.from(await file.arrayBuffer())

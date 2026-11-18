@@ -144,7 +144,7 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
               }`}
               onClick={() => openChat(c.peer.id)}
             >
-              <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} />
+              <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} src={c.peer.avatarUrl} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-[16px] font-bold text-cink">
                   <span className="truncate">{c.peer.name}</span>

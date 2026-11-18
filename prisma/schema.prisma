@@ -13,6 +13,7 @@ model User {
   name       String
   about      String   @default("Available on CALL")
   avatarKey  Int      @default(0)
+  avatarUrl  String?
   createdAt  DateTime @default(now())
   lastSeen   DateTime @default(now())
   contacts   Contact[]       @relation("ContactOwner")

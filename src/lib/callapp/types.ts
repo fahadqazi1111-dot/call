@@ -4,6 +4,7 @@ export interface Me {
   phone: string
   about: string
   avatarKey: number
+  avatarUrl: string | null
   lastSeen: string
 }
 
@@ -48,7 +49,7 @@ export interface CallRecord {
   missed: boolean
   durationSec: number
   startedAt: string
-  peer: { id: string; name: string; avatarKey: number; phone: string }
+  peer: { id: string; name: string; avatarKey: number; avatarUrl: string | null; phone: string }
 }
 
 export type CallPhase = 'idle' | 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended'

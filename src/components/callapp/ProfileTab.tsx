@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Avatar } from './Avatar'
 import { CallLogoMark } from './CallLogo'
 import { useApp } from '@/lib/callapp/store'
@@ -18,16 +18,60 @@ import {
   Globe2,
   Wifi,
   BadgeCheck,
+  Loader2,
 } from 'lucide-react'
+
+/** Center-crop an image file to a square and downscale to max 512px (jpeg). */
+function fileToSizedBlob(file: File, max = 512): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const side = Math.min(img.width, img.height)
+        const scale = Math.min(1, max / side)
+        const w = Math.max(1, Math.round(side * scale))
+        const sx = (img.width - side) / 2
+        const sy = (img.height - side) / 2
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = w
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('canvas unavailable')
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, w, w)
+        canvas.toBlob(
+          (b) => {
+            URL.revokeObjectURL(url)
+            if (b) resolve(b)
+            else reject(new Error('encode failed'))
+          },
+          'image/jpeg',
+          0.9,
+        )
+      } catch (e) {
+        URL.revokeObjectURL(url)
+        reject(e as Error)
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('invalid image'))
+    }
+    img.src = url
+  })
+}
 
 export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
   const updateMe = useApp((s) => s.updateMe)
+  const updateAvatar = useApp((s) => s.updateAvatar)
   const logout = useApp((s) => s.logout)
   const [showEdit, setShowEdit] = useState(false)
   const [editName, setEditName] = useState(me?.name ?? '')
   const [editAbout, setEditAbout] = useState(me?.about ?? '')
   const [busy, setBusy] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const desk = variant === 'desktop'
 
   if (!me) return null
@@ -46,6 +90,30 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     }
   }
 
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file')
+      return
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('Image is too large (max 20MB)')
+      return
+    }
+    setPhotoBusy(true)
+    try {
+      const blob = await fileToSizedBlob(file)
+      await updateAvatar(blob, 'image/jpeg')
+      toast.success('Profile photo updated')
+    } catch {
+      toast.error('Could not update photo — try another image')
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
   const enableNotifications = async () => {
     if (!('Notification' in window)) {
       toast.error('Notifications are not supported in this browser')
@@ -60,25 +128,30 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     else toast.error('Notifications blocked')
   }
 
+  const openEdit = () => {
+    setEditName(me.name)
+    setEditAbout(me.about)
+    setShowEdit(true)
+  }
+
   return (
     <div
-      className={`app-scroll flex h-full flex-col overflow-y-auto ${
-        desk ? 'desk-scroll mx-auto w-full max-w-xl pb-10 pt-10' : 'pb-[96px] pt-0'
+      className={`app-scroll h-full overflow-y-auto ${
+        desk ? 'desk-scroll mx-auto w-full max-w-xl pb-10 pt-10' : 'pb-[96px]'
       }`}
     >
-      <div className={`flex flex-col items-center px-6 text-center ${desk ? 'pt-2' : 'pt-16'}`}>
+      <div className={`flex flex-col items-center px-6 text-center ${desk ? 'pt-2' : 'pt-14'}`}>
         <div className="relative">
-          <Avatar name={me.name} avatarKey={me.avatarKey} size={104} />
+          <Avatar name={me.name} avatarKey={me.avatarKey} size={104} src={me.avatarUrl} />
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onPickFile(e)} />
           <button
-            className="absolute -bottom-0 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-2 border-cbg bg-white text-cbrand shadow"
-            aria-label="Edit profile"
-            onClick={() => {
-              setEditName(me.name)
-              setEditAbout(me.about)
-              setShowEdit(true)
-            }}
+            className="absolute -bottom-0 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-2 border-cbg bg-white text-cbrand shadow transition hover:bg-csoft disabled:opacity-60"
+            aria-label="Change profile photo"
+            title="Change profile photo"
+            disabled={photoBusy}
+            onClick={() => fileRef.current?.click()}
           >
-            <Camera size={16} />
+            {photoBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
           </button>
         </div>
         <h1 className="mt-3.5 text-2xl font-extrabold text-cink">{me.name}</h1>
@@ -86,16 +159,20 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         <span className="mt-3 inline-block rounded-[20px] bg-[#E3EBFF] px-4 py-1.5 text-[13px] font-semibold text-cbrand-deep">
           {me.about}
         </span>
-        <button
-          className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-cbrand"
-          onClick={() => {
-            setEditName(me.name)
-            setEditAbout(me.about)
-            setShowEdit(true)
-          }}
-        >
-          <Pencil size={14} /> Edit profile
-        </button>
+        <div className="mt-3 flex items-center gap-4">
+          <button
+            className="flex items-center gap-1.5 text-sm font-semibold text-cbrand transition hover:opacity-80"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Camera size={14} /> Change photo
+          </button>
+          <button
+            className="flex items-center gap-1.5 text-sm font-semibold text-cbrand transition hover:opacity-80"
+            onClick={openEdit}
+          >
+            <Pencil size={14} /> Edit profile
+          </button>
+        </div>
       </div>
 
       <div className="mx-6 mt-6 overflow-hidden rounded-[20px] border border-cline bg-white">

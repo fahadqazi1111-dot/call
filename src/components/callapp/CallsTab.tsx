@@ -102,7 +102,7 @@ export function CallsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
             const isVideo = c.type === 'video'
             return (
               <div key={c.id} className={`flex items-center gap-3.5 py-3 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
-                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 46 : 52} />
+                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 46 : 52} src={c.peer.avatarUrl} />
                 <button
                   className="min-w-0 flex-1 text-left"
                   onClick={() => openChat(c.peer.id)}

@@ -193,6 +193,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
                     avatarKey={c.user?.avatarKey ?? 0}
                     size={desk ? 42 : 46}
                     online={c.user ? online[c.user.id] : undefined}
+                    src={c.user?.avatarUrl ?? null}
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[15px] font-bold text-cink">

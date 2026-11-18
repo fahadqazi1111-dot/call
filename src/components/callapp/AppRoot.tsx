@@ -16,6 +16,7 @@ import { ProfileTab } from './ProfileTab'
 import { TabBar } from './TabBar'
 import { CallOverlay } from './CallOverlay'
 import { DesktopShell } from './DesktopShell'
+import { AuthBranding } from './AuthBranding'
 import { useIsDesktop } from './useMediaQuery'
 
 let handlersBound = false
@@ -67,17 +68,26 @@ export function AppRoot() {
 
   /* ---------- desktop / tablet: auth & onboarding stage card ---------- */
   if (isDesktop) {
+    // splash: full-window brand moment
+    if (phase === 'splash') {
+      return (
+        <div className="relative h-[100dvh] w-full">
+          <SplashScreen />
+          {call && <CallOverlay state={call} />}
+          <Toaster position="top-center" richColors />
+        </div>
+      )
+    }
+
+    // onboarding / login: split card — branding left, form right
     return (
       <div className="bg-page-grad flex min-h-[100dvh] w-full items-center justify-center p-6">
-        <div className="relative h-[min(760px,100dvh-48px)] w-full max-w-[500px] overflow-hidden rounded-[32px] bg-white shadow-[0_40px_100px_rgba(14,23,38,0.4)]">
-          {phase === 'auth' ? (
-            <AuthScreen />
-          ) : phase === 'onboarding' ? (
-            <OnboardingScreen />
-          ) : (
-            <SplashScreen />
-          )}
-          {call && <CallOverlay state={call} />}
+        <div className="relative grid h-[min(720px,100dvh-48px)] w-full max-w-[520px] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-[32px] bg-white shadow-[0_40px_100px_rgba(14,23,38,0.4)] lg:h-[min(760px,100dvh-48px)] lg:max-w-[1060px] lg:grid-cols-[1fr_520px]">
+          <AuthBranding />
+          <div className="relative h-full">
+            {phase === 'auth' ? <AuthScreen /> : <OnboardingScreen />}
+            {call && <CallOverlay state={call} />}
+          </div>
           <Toaster position="top-center" richColors />
         </div>
       </div>

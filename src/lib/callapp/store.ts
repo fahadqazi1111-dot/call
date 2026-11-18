@@ -64,7 +64,8 @@ interface AppState {
   setTab: (t: AppTab) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
-  updateMe: (patch: { name?: string; about?: string }) => Promise<void>
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null }) => Promise<void>
+  updateAvatar: (blob: Blob, mime: string) => Promise<void>
   logout: () => void
 
   loadChats: () => Promise<void>
@@ -151,6 +152,16 @@ export const useApp = create<AppState>((set, get) => ({
     set({ me: user })
     const s = loadSession()
     if (s) saveSession({ ...s, user })
+  },
+
+  updateAvatar: async (blob, mime) => {
+    const up = await api.uploadAvatar(blob, mime)
+    const { user } = await api.updateMe({ avatarUrl: `/api/media/${up.id}` })
+    set({ me: user })
+    const s = loadSession()
+    if (s) saveSession({ ...s, user })
+    // refresh chats so peers that mirror my profile pick up the new photo
+    void get().loadChats()
   },
 
   logout: () => {

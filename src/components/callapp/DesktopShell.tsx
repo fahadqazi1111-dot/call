@@ -53,7 +53,7 @@ export function DesktopShell() {
             aria-label="Open my profile"
             title="My profile"
           >
-            <Avatar name={me.name} avatarKey={me.avatarKey} size={42} />
+            <Avatar name={me.name} avatarKey={me.avatarKey} size={42} src={me.avatarUrl} />
             <span className="max-w-[60px] truncate text-[10px] font-semibold text-cmut group-hover:text-cbrand">
               {me.name}
             </span>
@@ -256,7 +256,7 @@ function ProfileListPanel() {
 
       <div className="desk-scroll flex flex-1 flex-col overflow-y-auto px-5 pb-4 pt-6">
         <div className="flex flex-col items-center text-center">
-          <Avatar name={me.name} avatarKey={me.avatarKey} size={88} />
+          <Avatar name={me.name} avatarKey={me.avatarKey} size={88} src={me.avatarUrl} />
           <div className="mt-3.5 text-lg font-extrabold text-cink">{me.name}</div>
           <div className="mt-0.5 text-sm text-cmut">+{me.phone}</div>
           <span className="mt-2.5 inline-block rounded-[20px] bg-[#E3EBFF] px-3.5 py-1.5 text-[12px] font-semibold text-cbrand-deep">

@@ -30,10 +30,17 @@ export function CallOverlay({ state }: { state: CallState }) {
 
   const peerInfo = useMemo(() => {
     const fromChats = chats.find((c) => c.peer.id === state.peerId)?.peer
-    if (fromChats) return { name: fromChats.name, avatarKey: fromChats.avatarKey, lastSeen: fromChats.lastSeen }
+    if (fromChats)
+      return { name: fromChats.name, avatarKey: fromChats.avatarKey, avatarUrl: fromChats.avatarUrl, lastSeen: fromChats.lastSeen }
     const fromContacts = contacts.find((c) => c.user?.id === state.peerId)?.user
-    if (fromContacts) return { name: fromContacts.name, avatarKey: fromContacts.avatarKey, lastSeen: fromContacts.lastSeen }
-    return { name: state.peerName || 'Unknown', avatarKey: state.peerAvatarKey, lastSeen: null }
+    if (fromContacts)
+      return {
+        name: fromContacts.name,
+        avatarKey: fromContacts.avatarKey,
+        avatarUrl: fromContacts.avatarUrl,
+        lastSeen: fromContacts.lastSeen,
+      }
+    return { name: state.peerName || 'Unknown', avatarKey: state.peerAvatarKey, avatarUrl: null, lastSeen: null }
   }, [chats, contacts, state.peerId, state.peerName, state.peerAvatarKey])
 
   /** Robust media binding: muted autoplay, then unmute once playing (tap unlocks if blocked). */
@@ -142,7 +149,7 @@ export function CallOverlay({ state }: { state: CallState }) {
                   style={{ animationDelay: `${i}s` }}
                 />
               ))}
-            <Avatar name={peerInfo.name} avatarKey={peerInfo.avatarKey} size={160} />
+            <Avatar name={peerInfo.name} avatarKey={peerInfo.avatarKey} size={160} src={peerInfo.avatarUrl} />
           </div>
           <h1 className="mt-8 text-[32px] font-extrabold tracking-tight">{peerInfo.name}</h1>
           <p className="mt-2.5 flex items-center gap-2 text-[16px] text-[#A9B6D3]">

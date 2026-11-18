@@ -9,6 +9,7 @@ export function Avatar({
   online,
   className = '',
   ring = false,
+  src,
 }: {
   name: string
   avatarKey?: number
@@ -16,17 +17,28 @@ export function Avatar({
   online?: boolean
   className?: string
   ring?: boolean
+  src?: string | null
 }) {
   return (
     <div className={`relative flex-none ${className}`} style={{ width: size, height: size }}>
       <div
-        className={`flex h-full w-full items-center justify-center rounded-full font-bold text-white select-none ${
+        className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full font-bold text-white select-none ${
           ring ? 'ring-2 ring-white' : ''
         }`}
         style={{ background: avatarGradient(avatarKey), fontSize: size * 0.36 }}
         aria-hidden="true"
       >
-        {initialsOf(name)}
+        {src ? (
+          <img
+            src={src}
+            alt=""
+            className="h-full w-full object-cover"
+            loading="lazy"
+            draggable={false}
+          />
+        ) : (
+          initialsOf(name)
+        )}
       </div>
       {online !== undefined && online && (
         <span

@@ -11,6 +11,9 @@ const MIME_BY_EXT: Record<string, string> = {
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   aac: 'audio/aac',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
 }
 
 const EXT_LIST = Object.keys(MIME_BY_EXT)
