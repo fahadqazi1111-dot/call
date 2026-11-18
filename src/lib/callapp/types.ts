@@ -11,6 +11,7 @@ export interface Me {
   email?: string | null
   emailVerified?: boolean
   role?: string
+  isOfficial?: boolean
   createdAt?: string | null
 }
 
@@ -45,7 +46,7 @@ export interface ContactItem {
   id: string
   name: string
   phone: string
-  user: Me | null
+  user: (Pick<Me, 'id' | 'name' | 'about' | 'avatarKey' | 'lastSeen'> & { avatarUrl?: string | null; role?: string; isOfficial?: boolean }) | null
 }
 
 export interface CallRecord {

@@ -22,8 +22,17 @@ export async function GET(req: Request) {
       id: c.id,
       name: c.name,
       phone: c.phone,
-      user: u
-        ? { id: u.id, name: u.name, about: u.about, avatarKey: u.avatarKey, lastSeen: u.lastSeen.toISOString() }
+      user: u && u.id !== me.id
+        ? {
+            id: u.id,
+            name: u.name,
+            about: u.about,
+            avatarKey: u.avatarKey,
+            avatarUrl: u.avatarUrl,
+            lastSeen: u.lastSeen.toISOString(),
+            role: u.role,
+            isOfficial: u.isOfficial,
+          }
         : null,
     }
   })
@@ -54,7 +63,16 @@ export async function POST(req: Request) {
         name: contact.name,
         phone: contact.phone,
         user: u && u.id !== me.id
-          ? { id: u.id, name: u.name, about: u.about, avatarKey: u.avatarKey, lastSeen: u.lastSeen.toISOString() }
+          ? {
+              id: u.id,
+              name: u.name,
+              about: u.about,
+              avatarKey: u.avatarKey,
+              avatarUrl: u.avatarUrl,
+              lastSeen: u.lastSeen.toISOString(),
+              role: u.role,
+              isOfficial: u.isOfficial,
+            }
           : null,
       },
     })

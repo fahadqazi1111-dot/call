@@ -13,6 +13,11 @@ export async function POST(req: Request) {
     if (!normalized) {
       return NextResponse.json({ error: 'Enter a valid phone number' }, { status: 400 })
     }
+    // Placeholder numbers (staff/official accounts created with 000… numbers)
+    // can never be used for OTP login — they authenticate by email + password.
+    if (/^0{5}/.test(normalized)) {
+      return NextResponse.json({ error: 'Enter a valid phone number' }, { status: 400 })
+    }
     // Invalidate previous unconsumed codes
     await db.otp.updateMany({
       where: { phone: normalized, consumed: false },

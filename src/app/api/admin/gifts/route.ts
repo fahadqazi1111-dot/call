@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireAdmin } from '@/lib/callapp/server'
+import { requireAdmin, requireStaff } from '@/lib/callapp/server'
 
 /** GET: full gift catalog (admin view). */
 export async function GET(req: Request) {
-  const admin = await requireAdmin(req)
+  const admin = await requireStaff(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const gifts = await db.gift.findMany({ orderBy: { sortOrder: 'asc' } })
   return NextResponse.json({ gifts })

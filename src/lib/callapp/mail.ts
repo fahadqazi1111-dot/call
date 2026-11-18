@@ -85,6 +85,40 @@ export async function sendCodeEmail(
   })
 }
 
+/** Branded welcome email for newly registered users (no code block). */
+export async function sendWelcomeEmail(
+  cfg: SmtpSettings,
+  to: string,
+  name: string
+): Promise<void> {
+  const transport = makeTransport(cfg)
+  const first = (name || 'there').trim().split(/\s+/)[0] || 'there'
+  await transport.sendMail({
+    from: `"CALL" <${cfg.from}>`,
+    to,
+    subject: 'Welcome to CALL — one world, one call',
+    html: `<!doctype html><html><body style="margin:0;background:#eef1f8;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">
+  <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 10px 40px rgba(14,23,38,.12)">
+    <div style="background:linear-gradient(135deg,#4a74ff,#2f5bea);padding:28px 32px;color:#fff">
+      <div style="font-size:24px;font-weight:800;letter-spacing:1px">CALL</div>
+      <div style="font-size:13px;opacity:.85;margin-top:2px">One World. One Call.</div>
+    </div>
+    <div style="padding:32px">
+      <h1 style="margin:0 0 10px;font-size:20px;color:#0e1726">Welcome, ${first}!</h1>
+      <p style="margin:0 0 16px;font-size:14px;line-height:22px;color:#5b6577">Your CALL account is ready. Voice and video calls, chats and stories are completely free — add your contacts and start talking.</p>
+      <div style="background:#f5f7fc;border-radius:14px;padding:16px;font-size:13px;line-height:21px;color:#3c4a63">
+        <b>What you can do next</b><br/>
+        · Add contacts and start free calls<br/>
+        · Try voice rooms, stories and the CALL AI<br/>
+        · The CALL team will always message you from the official CALL account
+      </div>
+      <p style="margin:22px 0 0;font-size:12px;color:#9aa8c7">You received this email because this address is registered on CALL.</p>
+    </div>
+  </div>
+  </body></html>`,
+  })
+}
+
 /** Quick connectivity check used by the admin "test connection" button. */
 export async function verifySmtpConnection(cfg: SmtpSettings): Promise<void> {
   const transport = makeTransport(cfg)

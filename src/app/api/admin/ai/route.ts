@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireAdmin, setSetting, getSetting } from '@/lib/callapp/server'
+import { requireAdmin, requireStaff, setSetting, getSetting } from '@/lib/callapp/server'
 
 /** GET: AI config + usage statistics. Credentials NEVER leave the backend. */
 export async function GET(req: Request) {
-  const admin = await requireAdmin(req)
+  const admin = await requireStaff(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const cfg = await getSetting<Record<string, unknown>>('ai', {})
   const auth = await getSetting<{ googleClientId?: string }>('auth', {})

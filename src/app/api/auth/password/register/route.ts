@@ -8,6 +8,7 @@ import {
   normalizeUsername,
   usernameError,
 } from '@/lib/callapp/server'
+import { sendWelcomeToUser } from '@/lib/callapp/official'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
@@ -55,6 +56,8 @@ export async function POST(req: Request) {
       },
     })
     await ensureWallet(user.id)
+    // New account: greeting from the official CALL account + welcome email.
+    void sendWelcomeToUser({ id: user.id, name: user.name, email: user.email })
     return NextResponse.json({ ok: true, token: signToken(user.id), needEmailVerification: true })
   } catch {
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })

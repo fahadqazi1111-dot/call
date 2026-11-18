@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireAdmin, applyWalletDelta } from '@/lib/callapp/server'
+import { requireAdmin, requireStaff, applyWalletDelta } from '@/lib/callapp/server'
 
 /** GET ?status= — withdrawal requests with user info. */
 export async function GET(req: Request) {
-  const admin = await requireAdmin(req)
+  const admin = await requireStaff(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const status = new URL(req.url).searchParams.get('status')
   const withdrawals = await db.withdrawal.findMany({

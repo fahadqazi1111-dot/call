@@ -4,93 +4,121 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
   X, Users, Gift, Package, Gem, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
-  Loader2, Ban, Coins, Crown, Radio, Clapperboard, Trash2, Plus, Lock, Mail, Send,
+  Loader2, Ban, Coins, Radio, Clapperboard, Trash2, Plus, Mail, Send,
+  LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
+import { StaffTick } from './StaffTick'
 import type { GiftItem, CoinPackage } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'gifts' | 'packages' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'packages' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
 
-/** In-app admin panel — role-gated (role === 'admin'), all data server-authoritative. */
-export function AdminPanel({ onClose }: { onClose: () => void }) {
+interface StaffMember {
+  id: string
+  name: string
+  username: string
+  email: string
+  role: string
+  blocked: boolean
+  createdAt: string
+  lastSeen: string
+}
+
+interface SenderOptions {
+  official: { id: string; name: string; username: string; role: string }
+  staff: Array<{ id: string; name: string; username: string; role: string }>
+}
+
+/**
+ * Admin panel / staff console. Staff (admins + team members) log in with their
+ * email + password on the normal login screen and land straight here —
+ * no separate URL and no setup code.
+ *  - admins (blue tick): full control incl. team management, broadcasts, SMTP
+ *  - team members (yellow tick): read-mostly operations
+ */
+export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void; mode?: 'overlay' | 'console' }) {
   const me = useApp((s) => s.me)
+  const setStaffView = useApp((s) => s.setStaffView)
+  const isAdmin = me?.role === 'admin'
+  const isStaff = isAdmin || me?.role === 'team'
   const [section, setSection] = useState<Section>('overview')
-  const [isAdmin, setIsAdmin] = useState(me?.role === 'admin')
-  const [setupCode, setSetupCode] = useState('')
-  const [bootErr, setBootErr] = useState('')
-  const [booting, setBooting] = useState(false)
 
-  const bootstrap = async () => {
-    setBooting(true)
-    setBootErr('')
-    try {
-      await api.adminBootstrap(setupCode.trim())
-      await useApp.getState().loadNotifications()
-      setIsAdmin(true)
-    } catch (e) {
-      setBootErr((e as Error).message)
-    } finally {
-      setBooting(false)
-    }
-  }
-
-  if (!isAdmin) {
+  if (!isStaff) {
     return (
       <div className="fixed inset-0 z-[88] flex items-center justify-center bg-white px-6">
         <div className="w-full max-w-sm text-center">
-          <Lock size={34} className="mx-auto text-cmut" />
-          <h2 className="pt-3 text-lg font-extrabold text-cink">Admin access</h2>
-          <p className="pt-1 text-[13px] text-cmut">Enter the one-time setup code (shown in the deploy notes) to claim admin.</p>
-          <input
-            className="mt-4 h-12 w-full rounded-[14px] bg-[#F0F3FA] px-4 text-center text-[15px] font-bold outline-none"
-            placeholder="Setup code"
-            value={setupCode}
-            onChange={(e) => setSetupCode(e.target.value)}
-          />
-          {bootErr && <p className="pt-2 text-[12px] font-semibold text-cred">{bootErr}</p>}
-          <button
-            className="mt-3 h-12 w-full rounded-[14px] bg-brand-grad font-bold text-white disabled:opacity-40"
-            disabled={!setupCode.trim() || booting}
-            onClick={() => void bootstrap()}
-          >
-            {booting ? <Loader2 className="mx-auto animate-spin" size={18} /> : 'Unlock admin panel'}
-          </button>
-          <button className="mt-3 text-[13px] font-semibold text-cmut" onClick={onClose}>
-            Back to app
-          </button>
+          <ShieldCheck size={34} className="mx-auto text-cmut" />
+          <h2 className="pt-3 text-lg font-extrabold text-cink">Staff access only</h2>
+          <p className="pt-1 text-[13px] leading-5 text-cmut">
+            Log in on the normal login screen with an admin or team member email and password to open
+            the CALL control center.
+          </p>
+          {mode === 'overlay' && (
+            <button className="mt-3 text-[13px] font-semibold text-cmut" onClick={onClose}>
+              Back to app
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
+  const navItems = (
+    [
+      { id: 'overview', label: 'Overview', Icon: ShieldAlert, adminOnly: false },
+      { id: 'users', label: 'Users', Icon: Users, adminOnly: false },
+      { id: 'team', label: 'Team', Icon: UserPlus, adminOnly: true },
+      { id: 'gifts', label: 'Gifts', Icon: Gift, adminOnly: false },
+      { id: 'packages', label: 'Coin packages', Icon: Package, adminOnly: false },
+      { id: 'withdrawals', label: 'Withdrawals', Icon: Gem, adminOnly: false },
+      { id: 'moderation', label: 'Moderation', Icon: Radio, adminOnly: false },
+      { id: 'ai', label: 'CALL AI', Icon: Bot, adminOnly: false },
+      { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
+      { id: 'broadcast', label: 'Messages', Icon: Megaphone, adminOnly: true },
+      { id: 'smtp', label: 'Email / SMTP', Icon: Mail, adminOnly: true },
+    ] as const
+  ).filter((item) => isAdmin || !item.adminOnly)
+
   return (
     <div className="fixed inset-0 z-[88] flex flex-col bg-white">
       <header className="flex items-center gap-3 border-b border-cline px-4 py-3.5">
-        <button className="rounded-full bg-cbg p-2 text-cmut hover:text-cbrand" onClick={onClose} aria-label="Close admin">
-          <X size={20} />
+        {mode === 'overlay' ? (
+          <button className="rounded-full bg-cbg p-2 text-cmut hover:text-cbrand" onClick={onClose} aria-label="Close admin">
+            <X size={20} />
+          </button>
+        ) : (
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-csoft text-cbrand">
+            <LayoutDashboard size={19} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-1.5 text-[16px] font-extrabold text-cink">
+            CALL Control Center
+            <StaffTick role={me?.role} isOfficial={me?.isOfficial} size={15} />
+          </h2>
+          <p className="truncate text-[11.5px] text-cmut">
+            {me?.name} · {isAdmin ? 'Admin (blue tick)' : 'Team member (yellow tick)'}
+          </p>
+        </div>
+        <button
+          className="rounded-full bg-csoft px-4 py-2 text-[12.5px] font-bold text-cbrand transition hover:bg-[#e2e9fb]"
+          onClick={() => setStaffView('app')}
+        >
+          Open user app
         </button>
-        <h2 className="flex-1 text-[16px] font-extrabold text-cink">Admin Panel</h2>
-        <span className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand">CALL control center</span>
+        <button
+          className="flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-[12.5px] font-bold text-cred transition hover:bg-red-100"
+          onClick={() => useApp.getState().logout()}
+        >
+          <LogOut size={14} /> Log out
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
         {/* section rail */}
         <nav className="app-scroll w-[52px] shrink-0 overflow-y-auto border-r border-cline py-3 md:w-[200px] md:px-3">
-          {(
-            [
-              { id: 'overview', label: 'Overview', Icon: ShieldAlert },
-              { id: 'users', label: 'Users', Icon: Users },
-              { id: 'gifts', label: 'Gifts', Icon: Gift },
-              { id: 'packages', label: 'Coin packages', Icon: Package },
-              { id: 'withdrawals', label: 'Withdrawals', Icon: Gem },
-              { id: 'moderation', label: 'Moderation', Icon: Radio },
-              { id: 'ai', label: 'CALL AI', Icon: Bot },
-              { id: 'ads', label: 'Ads', Icon: ImageIcon },
-              { id: 'broadcast', label: 'Broadcast', Icon: Megaphone },
-              { id: 'smtp', label: 'Email / SMTP', Icon: Mail },
-            ] as const
-          ).map(({ id, label, Icon }) => (
+          {navItems.map(({ id, label, Icon }) => (
             <button
               key={id}
               className={`mb-1.5 flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13px] font-semibold ${
@@ -107,14 +135,15 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
         <div className="app-scroll flex-1 overflow-y-auto px-4 py-4">
           {section === 'overview' && <OverviewSection />}
           {section === 'users' && <UsersSection />}
+          {section === 'team' && isAdmin && <TeamSection />}
           {section === 'gifts' && <GiftsSection />}
           {section === 'packages' && <PackagesSection />}
           {section === 'withdrawals' && <WithdrawalsSection />}
           {section === 'moderation' && <ModerationSection />}
           {section === 'ai' && <AiSection />}
           {section === 'ads' && <AdsSection />}
-          {section === 'broadcast' && <BroadcastSection />}
-          {section === 'smtp' && <SmtpSection />}
+          {section === 'broadcast' && isAdmin && <BroadcastSection />}
+          {section === 'smtp' && isAdmin && <SmtpSection />}
         </div>
       </div>
     </div>
@@ -160,6 +189,8 @@ function OverviewSection() {
 }
 
 function UsersSection() {
+  const me = useApp((s) => s.me)
+  const isAdmin = me?.role === 'admin'
   const [users, setUsers] = useState<Array<{ id: string; name: string; phone: string; role: string; blocked: boolean; coins: number; earnings: number }>>([])
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
@@ -206,44 +237,62 @@ function UsersSection() {
           <div key={u.id} className="flex flex-wrap items-center gap-2 rounded-[14px] border border-cline px-3.5 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 text-[14px] font-bold text-cink">
-                {u.name} {u.role === 'admin' && <Crown size={13} className="text-[#B7791F]" />}
+                {u.name}
+                <StaffTick role={u.role} size={14} />
                 {u.blocked && <Ban size={13} className="text-cred" />}
               </p>
               <p className="text-[11px] text-cmut">
-                +{u.phone} · 🪙 {u.coins} · 💎 {u.earnings}
+                {u.email ? `${u.email} · ` : ''}+{u.phone} · 🪙 {u.coins} · 💎 {u.earnings}
               </p>
             </div>
-            <input
-              type="number"
-              placeholder="coins"
-              className="h-9 w-20 rounded-[10px] bg-[#F0F3FA] px-2 text-[12px] outline-none"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const v = Number((e.target as HTMLInputElement).value)
-                  if (v > 0) void act(u.id, 'grant_coins', v)
-                }
-              }}
-            />
-            <button className="rounded-full bg-green-50 px-3 py-1.5 text-[11px] font-bold text-green-700" onClick={() => void act(u.id, 'grant_coins', Number(prompt('Grant how many coins?')))}>
-              <Coins size={12} className="mr-1 inline" /> Grant
-            </button>
-            {u.blocked ? (
-              <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void act(u.id, 'unblock')}>
-                Unblock
-              </button>
-            ) : (
-              <button className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(u.id, 'block')}>
-                Block
+            {isAdmin && (
+              <input
+                type="number"
+                placeholder="coins"
+                className="h-9 w-20 rounded-[10px] bg-[#F0F3FA] px-2 text-[12px] outline-none"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const v = Number((e.target as HTMLInputElement).value)
+                    if (v > 0) void act(u.id, 'grant_coins', v)
+                  }
+                }}
+              />
+            )}
+            {isAdmin && (
+              <button className="rounded-full bg-green-50 px-3 py-1.5 text-[11px] font-bold text-green-700" onClick={() => void act(u.id, 'grant_coins', Number(prompt('Grant how many coins?')))}>
+                <Coins size={12} className="mr-1 inline" /> Grant
               </button>
             )}
-            {u.role === 'admin' ? (
-              <button className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut" onClick={() => void act(u.id, 'make_user')}>
-                Demote
-              </button>
-            ) : (
-              <button className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-[#B7791F]" onClick={() => void act(u.id, 'make_admin')}>
-                Make admin
-              </button>
+            {isAdmin && (
+              u.blocked ? (
+                <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void act(u.id, 'unblock')}>
+                  Unblock
+                </button>
+              ) : (
+                <button className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(u.id, 'block')}>
+                  Block
+                </button>
+              )
+            )}
+            {isAdmin && (
+              u.role === 'admin' ? (
+                <button className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut" onClick={() => void act(u.id, 'make_user')}>
+                  Demote
+                </button>
+              ) : u.role === 'team' ? (
+                <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void act(u.id, 'make_admin')}>
+                  Make admin
+                </button>
+              ) : (
+                <>
+                  <button className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-[#B7791F]" onClick={() => void act(u.id, 'make_team')}>
+                    <KeyRound size={12} className="mr-1 inline" /> Team
+                  </button>
+                  <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void act(u.id, 'make_admin')}>
+                    Make admin
+                  </button>
+                </>
+              )
             )}
           </div>
         ))}
@@ -687,44 +736,353 @@ function AdsSection() {
   )
 }
 
+const SENDER_LABEL = (s: { name: string; role: string }) =>
+  s.role === 'official' ? `${s.name} (Official)` : `${s.name} (${s.role === 'admin' ? 'Admin' : 'Team'})`
+
+/** Mirrors DEFAULT_WELCOME_TEXT on the server — shown until the admin saves a custom one. */
+const WELCOME_TEMPLATE_DEFAULT =
+  'Welcome to CALL, {name}! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video calls. If you ever need help, this official account is where the CALL team will reach you.'
+
 function BroadcastSection() {
+  // ---- broadcast form ----
+  const [senders, setSenders] = useState<SenderOptions | null>(null)
+  const [senderId, setSenderId] = useState('')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [msg, setMsg] = useState('')
+  // ---- automated welcome ----
+  const [welcomeSenderId, setWelcomeSenderId] = useState('')
+  const [welcomeText, setWelcomeText] = useState(WELCOME_TEMPLATE_DEFAULT)
+  const [welcomeLoading, setWelcomeLoading] = useState(true)
+  const [savingWelcome, setSavingWelcome] = useState(false)
+
+  const load = async () => {
+    try {
+      const res = await api.adminTeam()
+      setSenders(res.senders)
+      setSenderId((prev) => prev || res.senders.official.id)
+      setWelcomeSenderId((prev) => prev || res.senders.official.id)
+    } catch {}
+    try {
+      const s = await api.adminSettings()
+      const m = (s.settings.messaging ?? {}) as { welcomeSenderId?: string; welcomeText?: string }
+      if (m.welcomeSenderId) setWelcomeSenderId(m.welcomeSenderId)
+      setWelcomeText(typeof m.welcomeText === 'string' && m.welcomeText.trim() ? m.welcomeText : WELCOME_TEMPLATE_DEFAULT)
+    } catch {}
+    setWelcomeLoading(false)
+  }
+  useEffect(() => {
+    queueMicrotask(() => void load())
+  }, [])
+
   const send = async () => {
     setSending(true)
+    setMsg('')
     try {
-      const res = await api.adminBroadcast(title, body)
-      setMsg(`Sent to ${res.delivered} users`)
+      const res = await api.adminBroadcast(title, body, senderId || undefined)
+      setMsg(`Delivered to ${res.delivered} users as "${res.senderName}"`)
       setTitle('')
       setBody('')
+      toast.success(`Broadcast sent to ${res.delivered} users`)
     } catch (e) {
       setMsg((e as Error).message)
     } finally {
       setSending(false)
     }
   }
+
+  const saveWelcome = async () => {
+    setSavingWelcome(true)
+    try {
+      await api.adminSaveSettings('messaging', {
+        welcomeSenderId: welcomeSenderId || null,
+        welcomeText: welcomeText.trim(),
+      })
+      toast.success('Automated welcome message saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingWelcome(false)
+    }
+  }
+
+  const senderList = senders ? [senders.official, ...senders.staff] : []
+
   return (
-    <div className="max-w-xl">
-      <h3 className="pb-1 text-[15px] font-extrabold text-cink">Broadcast notification</h3>
-      <p className="pb-3 text-[12px] text-cmut">Send an announcement to every user (appears in their notification center).</p>
-      <input
-        className="h-12 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] outline-none"
-        placeholder="Title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <textarea
-        className="mt-2 h-24 w-full resize-none rounded-[12px] bg-[#F0F3FA] px-4 py-3 text-[14px] outline-none"
-        placeholder="Body (optional)"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-      />
-      {msg && <p className="pt-2 text-[13px] font-semibold text-cbrand">{msg}</p>}
-      <button className="mt-3 h-12 rounded-[14px] bg-brand-grad px-8 text-[14px] font-bold text-white disabled:opacity-50" disabled={!title.trim() || sending} onClick={() => void send()}>
-        {sending ? <Loader2 className="mx-auto animate-spin" size={18} /> : 'Send broadcast'}
-      </button>
+    <div className="max-w-2xl space-y-6">
+      {/* ---------- automated messages ---------- */}
+      <div className="rounded-[16px] border border-cline p-4">
+        <h3 className="text-[15px] font-extrabold text-cink">Automated messages</h3>
+        <p className="pb-3 pt-1 text-[12px] leading-5 text-cmut">
+          Every new user is welcomed automatically with this message (plus a welcome email when the
+          account has an email address and SMTP is configured). Pick which account sends it — users can
+          never reply to the official account.
+        </p>
+        {welcomeLoading ? (
+          <Loader2 className="animate-spin text-cbrand" size={20} />
+        ) : (
+          <>
+            <label className="block">
+              <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Sent from</span>
+              <select
+                className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] font-medium outline-none"
+                value={welcomeSenderId}
+                onChange={(e) => setWelcomeSenderId(e.target.value)}
+              >
+                {senderList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {SENDER_LABEL(s)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">
+                Welcome message · {'{name}'} becomes the user&apos;s first name
+              </span>
+              <textarea
+                className="h-28 w-full resize-none rounded-[12px] bg-[#F0F3FA] px-4 py-3 text-[14px] outline-none"
+                value={welcomeText}
+                placeholder={WELCOME_TEMPLATE_DEFAULT}
+                onChange={(e) => setWelcomeText(e.target.value)}
+              />
+            </label>
+            <button
+              className="mt-3 h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+              disabled={savingWelcome || !welcomeText.trim()}
+              onClick={() => void saveWelcome()}
+            >
+              {savingWelcome ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save automated message'}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* ---------- manual broadcast ---------- */}
+      <div className="rounded-[16px] border border-cline p-4">
+        <h3 className="text-[15px] font-extrabold text-cink">Broadcast to all users</h3>
+        <p className="pb-3 pt-1 text-[12px] leading-5 text-cmut">
+          One message, delivered to every user&apos;s chat from the account you pick below — official
+          CALL by default, or any admin / team member. A notification is created as well.
+        </p>
+        {senders && (
+          <label className="mb-3 block">
+            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Send as</span>
+            <select
+              className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] font-medium outline-none"
+              value={senderId}
+              onChange={(e) => setSenderId(e.target.value)}
+            >
+              {senderList.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {SENDER_LABEL(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <input
+          className="h-12 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] outline-none"
+          placeholder="Title (first line of the message)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <textarea
+          className="mt-2 h-24 w-full resize-none rounded-[12px] bg-[#F0F3FA] px-4 py-3 text-[14px] outline-none"
+          placeholder="Body (optional)"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
+        {msg && <p className="pt-2 text-[13px] font-semibold text-cbrand">{msg}</p>}
+        <button
+          className="mt-3 h-12 rounded-[14px] bg-brand-grad px-8 text-[14px] font-bold text-white disabled:opacity-50"
+          disabled={!title.trim() || sending}
+          onClick={() => void send()}
+        >
+          {sending ? (
+            <>
+              <Loader2 size={17} className="mr-2 inline animate-spin" /> Sending…
+            </>
+          ) : (
+            <>
+              <Send size={16} className="mr-2 inline" /> Send broadcast
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ================= Team management ================= */
+
+function TeamSection() {
+  const me = useApp((s) => s.me)
+  const [staff, setStaff] = useState<StaffMember[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'team' as 'admin' | 'team' })
+  const [creating, setCreating] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await api.adminTeam()
+      setStaff(res.staff)
+    } catch {}
+    setLoading(false)
+  }
+  useEffect(() => {
+    queueMicrotask(() => void load())
+  }, [])
+
+  const create = async () => {
+    setCreating(true)
+    setErr('')
+    try {
+      await api.adminTeamCreate({ ...form, email: form.email.trim().toLowerCase() })
+      toast.success(`${form.name} added to the team`)
+      setForm({ name: '', email: '', password: '', role: 'team' })
+      setShowForm(false)
+      await load()
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const setRole = async (m: StaffMember, role: 'admin' | 'team' | 'user') => {
+    try {
+      await api.adminTeamUpdate(m.id, { role })
+      toast.success(role === 'user' ? `${m.name} removed from the team` : `${m.name} is now ${role === 'admin' ? 'an admin' : 'a team member'}`)
+      await load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  const resetPassword = async (m: StaffMember) => {
+    const password = prompt(`New password for ${m.name} (min 8 characters):`)
+    if (!password) return
+    try {
+      await api.adminTeamUpdate(m.id, { password })
+      toast.success(`Password updated for ${m.name}`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex flex-wrap items-center gap-2 pb-1">
+        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Team members</h3>
+        <button
+          className="flex items-center gap-1.5 rounded-full bg-cbrand px-4 py-2 text-[12.5px] font-bold text-white"
+          onClick={() => setShowForm((v) => !v)}
+        >
+          <Plus size={14} /> New member
+        </button>
+      </div>
+      <p className="pb-4 text-[12px] leading-5 text-cmut">
+        Admins get the blue tick, team members the yellow tick. Staff log in on the normal login screen
+        with their email + password and land in this control center.
+      </p>
+
+      {showForm && (
+        <div className="mb-5 rounded-[16px] border border-cline bg-[#F8FAFF] p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input
+              className="h-11 rounded-[12px] bg-white px-3.5 text-[14px] outline-none"
+              placeholder="Full name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+            <input
+              className="h-11 rounded-[12px] bg-white px-3.5 text-[14px] outline-none"
+              placeholder="Email (used to log in)"
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+            <input
+              className="h-11 rounded-[12px] bg-white px-3.5 text-[14px] outline-none"
+              placeholder="Password (min 8 characters)"
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+            <select
+              className="h-11 rounded-[12px] bg-white px-3 text-[14px] font-medium outline-none"
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value as 'admin' | 'team' })}
+            >
+              <option value="team">Team member (yellow tick)</option>
+              <option value="admin">Admin (blue tick)</option>
+            </select>
+          </div>
+          {err && <p className="pt-2 text-[12.5px] font-semibold text-cred">{err}</p>}
+          <button
+            className="mt-3 h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+            disabled={creating || form.name.trim().length < 2 || !form.email.trim() || form.password.length < 8}
+            onClick={() => void create()}
+          >
+            {creating ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Create member'}
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+      ) : (
+        <div className="space-y-2">
+          {staff.map((m) => (
+            <div key={m.id} className="flex flex-wrap items-center gap-2 rounded-[14px] border border-cline px-3.5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1.5 text-[14px] font-bold text-cink">
+                  {m.name}
+                  <StaffTick role={m.role} size={15} />
+                  {m.id === me?.id && <span className="rounded-full bg-csoft px-2 py-0.5 text-[10px] font-bold text-cbrand">You</span>}
+                </p>
+                <p className="truncate text-[11px] text-cmut">
+                  {m.email} · @{m.username} · joined {new Date(m.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+              {m.id !== me?.id && (
+                <>
+                  <select
+                    className="h-9 rounded-[10px] bg-[#F0F3FA] px-2 text-[12px] font-semibold outline-none"
+                    value={m.role}
+                    onChange={(e) => void setRole(m, e.target.value as 'admin' | 'team' | 'user')}
+                  >
+                    <option value="admin">Admin (blue)</option>
+                    <option value="team">Team (yellow)</option>
+                    <option value="user">Remove from team</option>
+                  </select>
+                  <button
+                    className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut"
+                    onClick={() => void resetPassword(m)}
+                    aria-label={`Reset password for ${m.name}`}
+                  >
+                    <KeyRound size={12} className="mr-1 inline" /> Password
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+          {staff.length === 0 && <p className="pt-4 text-center text-[13px] text-cmut">No team members yet</p>}
+        </div>
+      )}
+
+      <div className="mt-6 flex items-start gap-2.5 rounded-[14px] bg-cbg p-4 text-[12px] leading-5 text-cmut">
+        <Smartphone size={15} className="mt-0.5 flex-none text-cbrand" />
+        <span>
+          Staff accounts have no phone number — they always log in with their email + password. OTP
+          codes and calls are disabled for them.
+        </span>
+      </div>
     </div>
   )
 }

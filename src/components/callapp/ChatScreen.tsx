@@ -7,7 +7,8 @@ import { useRecorder } from './useRecorder'
 import { useApp } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
-import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react'
+import { StaffTick } from './StaffTick'
+import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck } from 'lucide-react'
 import type { Message } from '@/lib/callapp/types'
 
 const EMOJIS = ['😀', '😂', '🥰', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😭', '😮', '🤝']
@@ -49,6 +50,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const typingLast = useRef(0)
   const recorder = useRecorder()
   const desk = variant === 'desktop'
+  const official = !!peer?.isOfficial
 
   useEffect(() => {
     if (peer) {
@@ -138,25 +140,36 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         </button>
         <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</span>
+            <StaffTick role={peer.role} isOfficial={peer.isOfficial} />
+          </div>
           <div className={`text-xs font-semibold ${typing ? 'text-cgreen' : online[peer.id] ? 'text-cgreen' : 'text-cmut'}`}>
-            {typing ? 'typing…' : lastSeenLabel(peer.lastSeen, online[peer.id])}
+            {official ? 'Official account' : typing ? 'typing…' : lastSeenLabel(peer.lastSeen, online[peer.id])}
           </div>
         </div>
-        <button
-          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
-          aria-label="Video call"
-          onClick={() => startCall(peer, 'video')}
-        >
-          <Video size={22} />
-        </button>
-        <button
-          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
-          aria-label="Voice call"
-          onClick={() => startCall(peer, 'voice')}
-        >
-          <Phone size={21} />
-        </button>
+        {official ? (
+          <span className="mr-1 flex items-center gap-1.5 rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand">
+            <ShieldCheck size={13} /> Official
+          </span>
+        ) : (
+          <>
+            <button
+              className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
+              aria-label="Video call"
+              onClick={() => startCall(peer, 'video')}
+            >
+              <Video size={22} />
+            </button>
+            <button
+              className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
+              aria-label="Voice call"
+              onClick={() => startCall(peer, 'voice')}
+            >
+              <Phone size={21} />
+            </button>
+          </>
+        )}
       </header>
 
       {/* messages */}
@@ -167,21 +180,32 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
             <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} src={peer.avatarUrl} />
-            <p className="mt-4 text-lg font-bold text-cink">{peer.name}</p>
-            <p className="mt-1 px-12 text-sm text-cmut">
-              Messages and calls are peer-to-peer. Start the conversation — it&apos;s free.
+            <p className="mt-4 flex items-center gap-1.5 text-lg font-bold text-cink">
+              {peer.name}
+              <StaffTick role={peer.role} isOfficial={peer.isOfficial} size={17} />
             </p>
-            <div className="mt-5 flex flex-wrap justify-center gap-2">
-              {['Assalam-o-Alaikum!', 'Hey, free to talk?', 'Call me when free'].map((q) => (
-                <button
-                  key={q}
-                  className="rounded-full bg-white px-4 py-2 text-sm font-medium text-cbrand shadow-sm"
-                  onClick={() => void sendText(peerId, q)}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
+            {official ? (
+              <p className="mt-1 px-12 text-sm text-cmut">
+                This is the official CALL account. Announcements from the CALL team arrive here — replies are not available.
+              </p>
+            ) : (
+              <>
+                <p className="mt-1 px-12 text-sm text-cmut">
+                  Messages and calls are peer-to-peer. Start the conversation — it&apos;s free.
+                </p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {['Assalam-o-Alaikum!', 'Hey, free to talk?', 'Call me when free'].map((q) => (
+                    <button
+                      key={q}
+                      className="rounded-full bg-white px-4 py-2 text-sm font-medium text-cbrand shadow-sm"
+                      onClick={() => void sendText(peerId, q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -220,7 +244,16 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       </div>
 
       {/* composer / recorder */}
-      {recorder.status === 'recording' ? (
+      {official ? (
+        <div className={`border-t border-cline bg-white px-4 ${desk ? 'pb-3.5 pt-3' : 'pb-[92px] pt-3'}`}>
+          <div className="flex items-center justify-center gap-2 rounded-[16px] bg-cbg px-4 py-3 text-center">
+            <ShieldCheck size={16} className="flex-none text-cbrand" />
+            <span className="text-[12.5px] font-medium leading-5 text-cmut">
+              You can&apos;t reply to {peer.name} — messages from the CALL team are one-way.
+            </span>
+          </div>
+        </div>
+      ) : recorder.status === 'recording' ? (
         <div className={`flex items-center gap-3 border-t border-cline bg-white px-4 ${desk ? 'h-[84px] py-4' : 'h-[92px] pb-4'}`}>
           <button
             className="flex h-12 w-12 flex-none items-center justify-center rounded-full text-cred hover:bg-[#FEF0EF]"

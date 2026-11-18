@@ -24,6 +24,8 @@ import type {
 export type AppPhase = 'splash' | 'onboarding' | 'auth' | 'main'
 export type AppTab = 'chats' | 'calls' | 'rooms' | 'live' | 'contacts' | 'profile'
 export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'story-composer' | null
+/** Staff members land in the console; they can switch to the normal user app. */
+export type StaffView = 'console' | 'app'
 
 const SESSION_KEY = 'call.session.v1'
 
@@ -65,6 +67,7 @@ interface AppState {
   token: string | null
   tab: AppTab
   overlay: AppOverlay
+  staffView: StaffView
   openPeerId: string | null
   chats: ChatSummary[]
   messages: Record<string, Message[]>
@@ -86,6 +89,7 @@ interface AppState {
   setPhase: (p: AppPhase) => void
   setTab: (t: AppTab) => void
   setOverlay: (o: AppOverlay) => void
+  setStaffView: (v: StaffView) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
   updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string }) => Promise<void>
@@ -127,6 +131,7 @@ export const useApp = create<AppState>((set, get) => ({
   token: null,
   tab: 'chats',
   overlay: null,
+  staffView: 'app',
   openPeerId: null,
   chats: [],
   messages: {},
@@ -148,6 +153,7 @@ export const useApp = create<AppState>((set, get) => ({
   setPhase: (p) => set({ phase: p }),
   setTab: (t) => set({ tab: t }),
   setOverlay: (o) => set({ overlay: o }),
+  setStaffView: (v) => set({ staffView: v, openPeerId: null }),
 
   bootstrap: async () => {
     const s = loadSession()
@@ -158,7 +164,15 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       persistToken(s.token)
       const { user, wallet } = await api.me()
-      set({ token: s.token, me: user, phase: 'main', booted: true, wallet: wallet ?? null })
+      const staff = user.role === 'admin' || user.role === 'team'
+      set({
+        token: s.token,
+        me: user,
+        phase: 'main',
+        booted: true,
+        wallet: wallet ?? null,
+        staffView: staff ? 'console' : 'app',
+      })
       socketClient.connect(user.id, user.name)
       callManager.setMe({ id: user.id, name: user.name })
       void get().loadChats()
@@ -178,7 +192,8 @@ export const useApp = create<AppState>((set, get) => ({
   loginSuccess: (token, user) => {
     persistToken(token)
     saveSession({ token, user })
-    set({ token, me: user, phase: 'main' })
+    const staff = user.role === 'admin' || user.role === 'team'
+    set({ token, me: user, phase: 'main', staffView: staff ? 'console' : 'app' })
     socketClient.connect(user.id, user.name)
     callManager.setMe({ id: user.id, name: user.name })
     void get().loadChats()
@@ -233,6 +248,7 @@ export const useApp = create<AppState>((set, get) => ({
       notifications: [],
       unreadNotifs: 0,
       overlay: null,
+      staffView: 'app',
     })
   },
 

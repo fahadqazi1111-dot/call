@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireAdmin, applyWalletDelta } from '@/lib/callapp/server'
+import { requireAdmin, requireStaff, applyWalletDelta } from '@/lib/callapp/server'
 
 /** GET ?q=&limit=100 — user management list with wallet info. */
 export async function GET(req: Request) {
-  const admin = await requireAdmin(req)
+  const admin = await requireStaff(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const url = new URL(req.url)
   const q = (url.searchParams.get('q') || '').trim().toLowerCase()
@@ -51,6 +51,9 @@ export async function POST(req: Request) {
         break
       case 'make_admin':
         await db.user.update({ where: { id: targetId }, data: { role: 'admin' } })
+        break
+      case 'make_team':
+        await db.user.update({ where: { id: targetId }, data: { role: 'team' } })
         break
       case 'make_user':
         if (target.id === admin.id) {

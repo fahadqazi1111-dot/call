@@ -50,7 +50,7 @@ export function DesktopShell() {
         <RailButton label="CALL AI" Icon={Bot} onClick={() => setOverlay('ai')} />
         <RailButton label="Wallet" Icon={Coins} onClick={() => setOverlay('wallet')} />
         <RailButton label="Notifications" Icon={Bell} onClick={() => setOverlay('notifications')} badge={unreadNotifs} />
-        {me.role === 'admin' && <RailButton label="Admin" Icon={Shield} onClick={() => setOverlay('admin')} />}
+        {(me.role === 'admin' || me.role === 'team') && <RailButton label="Admin" Icon={Shield} onClick={() => setOverlay('admin')} />}
         <RailButton active={tab === 'profile'} label="Profile" Icon={User} onClick={() => setTab('profile')} />
 
         <div className="mt-auto">

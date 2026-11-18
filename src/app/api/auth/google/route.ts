@@ -8,6 +8,7 @@ import {
   rateLimit,
   generateUniqueUsername,
 } from '@/lib/callapp/server'
+import { sendWelcomeToUser } from '@/lib/callapp/official'
 
 interface GoogleTokenInfo {
   aud?: string
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
     // 1) match by googleId, 2) by verified email, 3) create new account.
     let user = await db.user.findUnique({ where: { googleId: info.sub } })
     if (!user && email) user = await db.user.findUnique({ where: { email } })
+    let isNew = false
     if (!user) {
       let phone = `0${String(Math.floor(100000000 + Math.random() * 899999999))}`
       while (await db.user.findUnique({ where: { phone } })) {
@@ -76,12 +78,17 @@ export async function POST(req: Request) {
           avatarKey: Math.floor(Math.random() * 8),
         },
       })
+      isNew = true
     } else if (!user.googleId) {
       user = await db.user.update({ where: { id: user.id }, data: { googleId: info.sub } })
     }
     if (user.blocked) return NextResponse.json({ error: 'This account is blocked' }, { status: 403 })
     await db.user.update({ where: { id: user.id }, data: { lastSeen: new Date() } })
     await ensureWallet(user.id)
+    // New account: greeting from the official CALL account + welcome email.
+    if (isNew) {
+      void sendWelcomeToUser({ id: user.id, name: user.name, email: user.email })
+    }
     return NextResponse.json({ ok: true, token: signToken(user.id), user: publicUser(user) })
   } catch {
     return NextResponse.json({ error: 'Google sign-in failed' }, { status: 500 })

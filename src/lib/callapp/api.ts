@@ -64,10 +64,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ phone }),
     }),
-  verifyOtp: (phone: string, code: string, name?: string, username?: string) =>
+  verifyOtp: (phone: string, code: string, name?: string, username?: string, email?: string) =>
     request<{ ok?: boolean; needName?: boolean; token?: string; user?: Me; error?: string }>('/api/auth/verify', {
       method: 'POST',
-      body: JSON.stringify({ phone, code, name, username }),
+      body: JSON.stringify({ phone, code, name, username, email }),
     }),
   usernameCheck: (username: string) =>
     request<{ ok: boolean; available: boolean; reason?: string; mine?: boolean }>(
@@ -109,11 +109,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ credential }),
     }),
-  adminBootstrap: (code: string) =>
-    request<{ ok: boolean; role: string }>('/api/admin/bootstrap', {
-      method: 'POST',
-      body: JSON.stringify({ code }),
-    }),
+
+  /* ---------- team (admin panel staff management) ---------- */
+  adminTeam: () =>
+    request<{
+      staff: Array<{ id: string; name: string; username: string; email: string; role: string; blocked: boolean; createdAt: string; lastSeen: string }>
+      senders: {
+        official: { id: string; name: string; username: string; role: string }
+        staff: Array<{ id: string; name: string; username: string; role: string }>
+      }
+    }>('/api/admin/team'),
+  adminTeamCreate: (payload: { name: string; email: string; password: string; role: 'admin' | 'team' }) =>
+    request<{ ok: boolean }>('/api/admin/team', { method: 'POST', body: JSON.stringify(payload) }),
+  adminTeamUpdate: (id: string, patch: { role?: string; password?: string }) =>
+    request<{ ok: boolean }>('/api/admin/team', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
+  adminTeamRemove: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/team?id=${id}`, { method: 'DELETE' }),
 
   /* ---------- me ---------- */
   me: () => request<{ user: Me; wallet?: { coins: number; earnings: number } }>('/api/me'),
@@ -347,8 +358,11 @@ export const api = {
     }>('/api/admin/moderation'),
   adminModerate: (type: 'room' | 'live' | 'story', id: string) =>
     request<{ ok: boolean }>('/api/admin/moderation', { method: 'POST', body: JSON.stringify({ type, id }) }),
-  adminBroadcast: (title: string, body: string) =>
-    request<{ ok: boolean; delivered: number }>('/api/admin/broadcast', { method: 'POST', body: JSON.stringify({ title, body }) }),
+  adminBroadcast: (title: string, body: string, senderId?: string) =>
+    request<{ ok: boolean; delivered: number; senderName: string }>('/api/admin/broadcast', {
+      method: 'POST',
+      body: JSON.stringify({ title, body, senderId }),
+    }),
   adminAi: () =>
     request<{
       config: Record<string, unknown>

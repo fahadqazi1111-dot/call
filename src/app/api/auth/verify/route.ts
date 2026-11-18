@@ -9,12 +9,16 @@ import {
   usernameError,
   generateUniqueUsername,
 } from '@/lib/callapp/server'
+import { sendWelcomeToUser } from '@/lib/callapp/official'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /**
  * Verify OTP. If the phone is not registered yet, respond { needName: true } so
  * the client collects the display name + username, then resend with { name }
- * (and optional { username }) to finish signup. When username is omitted on
- * signup, one is auto-generated from the display name.
+ * (and optional { username, email }) to finish signup. When username is omitted
+ * on signup, one is auto-generated from the display name. The email is an
+ * optional field so the CALL team can reach the user by email too.
  */
 export async function POST(req: Request) {
   try {
@@ -36,6 +40,7 @@ export async function POST(req: Request) {
     }
 
     let user = await db.user.findUnique({ where: { phone: normalized } })
+    let isNew = false
     if (!user) {
       const name = String(body.name || '').trim()
       if (!name) {
@@ -59,15 +64,34 @@ export async function POST(req: Request) {
       } else {
         username = await generateUniqueUsername(name)
       }
+      // Optional email (used for email communication — verification codes,
+      // password reset, the welcome mail). Must not belong to another account.
+      let signupEmail: string | null = null
+      const rawEmail = String(body.email || '').trim().toLowerCase()
+      if (rawEmail) {
+        if (!EMAIL_RE.test(rawEmail)) {
+          return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
+        }
+        const emailOwner = await db.user.findUnique({ where: { email: rawEmail } })
+        if (emailOwner) {
+          return NextResponse.json(
+            { error: 'This email is already used by another CALL account' },
+            { status: 400 }
+          )
+        }
+        signupEmail = rawEmail
+      }
       await db.otp.update({ where: { id: otp.id }, data: { consumed: true } })
       user = await db.user.create({
         data: {
           phone: normalized,
           name: name.slice(0, 40),
           username,
+          email: signupEmail,
           avatarKey: Math.floor(Math.random() * 8),
         },
       })
+      isNew = true
     } else {
       await db.otp.update({ where: { id: otp.id }, data: { consumed: true } })
       if (body.name && body.name.trim() && body.name.trim() !== user.name) {
@@ -76,6 +100,10 @@ export async function POST(req: Request) {
     }
     await db.user.update({ where: { id: user.id }, data: { lastSeen: new Date() } })
     await ensureWallet(user.id)
+    // New account: greeting from the official CALL account + welcome email.
+    if (isNew) {
+      void sendWelcomeToUser({ id: user.id, name: user.name, email: user.email })
+    }
     return NextResponse.json({
       ok: true,
       token: signToken(user.id),

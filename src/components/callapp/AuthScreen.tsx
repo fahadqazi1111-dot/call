@@ -229,6 +229,8 @@ export function AuthScreen() {
   const [username, setUsername] = useState('')
   const [usernameTouched, setUsernameTouched] = useState(false)
   const [email, setEmail] = useState('')
+  // optional email on phone signup — used only for email communication
+  const [signupEmail, setSignupEmail] = useState('')
 
   // email verification
   const [pendingToken, setPendingToken] = useState('')
@@ -291,7 +293,13 @@ export function AuthScreen() {
     setError('')
     try {
       const res = isSignupPhone
-        ? await api.verifyOtp(activePhone, otp, name.trim(), username.trim().toLowerCase())
+        ? await api.verifyOtp(
+            activePhone,
+            otp,
+            name.trim(),
+            username.trim().toLowerCase(),
+            signupEmail.trim().toLowerCase() || undefined
+          )
         : await api.verifyOtp(activePhone, otp)
       if (res.needName) {
         setStep('name')
@@ -730,22 +738,38 @@ export function AuthScreen() {
                   </div>
 
                   {signupMethod === 'phone' ? (
-                    <div className="flex gap-2.5">
-                      <CountryPicker value={country} onChange={setCountry} />
-                      <div className="relative min-w-0 flex-1">
+                    <div>
+                      <div className="flex gap-2.5">
+                        <CountryPicker value={country} onChange={setCountry} />
+                        <div className="relative min-w-0 flex-1">
+                          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                            <Smartphone size={18} />
+                          </span>
+                          <input
+                            className="app-input w-full has-icon"
+                            inputMode="tel"
+                            placeholder="3XX 1234567"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && signupPhoneReady && !busy)
+                                void requestOtp(signupPhone())
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="relative mt-3">
                         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                          <Smartphone size={18} />
+                          <Mail size={18} />
                         </span>
                         <input
                           className="app-input w-full has-icon"
-                          inputMode="tel"
-                          placeholder="3XX 1234567"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && signupPhoneReady && !busy)
-                              void requestOtp(signupPhone())
-                          }}
+                          type="email"
+                          inputMode="email"
+                          autoCapitalize="none"
+                          placeholder="Email (optional — for updates & recovery)"
+                          value={signupEmail}
+                          onChange={(e) => setSignupEmail(e.target.value)}
                         />
                       </div>
                     </div>
@@ -892,6 +916,20 @@ export function AuthScreen() {
                     }}
                   />
                 </div>
+                <div className="relative mt-4">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                    <Mail size={18} />
+                  </span>
+                  <input
+                    className="app-input w-full has-icon"
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    placeholder="Email (optional — for updates & recovery)"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                  />
+                </div>
                 <button
                   className="btn-p mt-6 w-full disabled:opacity-50"
                   disabled={busy || name.trim().length < 2}
@@ -899,7 +937,13 @@ export function AuthScreen() {
                     setBusy(true)
                     setError('')
                     api
-                      .verifyOtp(activePhone, otp, name.trim(), username.trim().toLowerCase())
+                      .verifyOtp(
+                        activePhone,
+                        otp,
+                        name.trim(),
+                        username.trim().toLowerCase(),
+                        signupEmail.trim().toLowerCase() || undefined
+                      )
                       .then((res) => {
                         if (res.token && res.user) loginSuccess(res.token, res.user)
                       })

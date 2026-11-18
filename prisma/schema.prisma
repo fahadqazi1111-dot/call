@@ -14,7 +14,8 @@ model User {
   emailVerified Boolean        @default(false)
   passwordHash  String?
   googleId      String?        @unique
-  role          String         @default("user") // user | admin
+  role          String         @default("user") // user | admin | team
+  isOfficial    Boolean        @default(false) // CALL Official system account (welcome messages, broadcasts)
   blocked       Boolean        @default(false)
   name          String
   username      String         @unique // globally unique handle, lowercase a-z0-9_ (3-20 chars)

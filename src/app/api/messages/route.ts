@@ -19,6 +19,17 @@ export async function POST(req: Request) {
 
     const peer = await db.user.findUnique({ where: { id: to } })
     if (!peer) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    // CALL Official is one-way: it messages users, users can never reply to it.
+    if (peer.isOfficial) {
+      return NextResponse.json(
+        { error: 'You cannot reply to CALL Official. Messages from the CALL team are one-way.' },
+        { status: 403 }
+      )
+    }
+    // The official account itself never sends user-to-user messages from the app.
+    if (me.isOfficial) {
+      return NextResponse.json({ error: 'The official account cannot send chat messages' }, { status: 403 })
+    }
 
     if (type === 'text' && content.length > 4000) content = content.slice(0, 4000)
     const duration = typeof body.duration === 'number' ? Math.max(0, Math.round(body.duration)) : null

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Avatar } from './Avatar'
 import { StoriesTray } from './StoriesTray'
+import { StaffTick } from './StaffTick'
 import { Search, Plus, Mic, Video, Phone, Check, CheckCheck, MessageSquare, Camera } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { fmtChatListTime, fmtDuration } from '@/lib/callapp/utils'
@@ -154,6 +155,7 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-[16px] font-bold text-cink">
                   <span className="truncate">{c.peer.name}</span>
+                  <StaffTick role={c.peer.role} isOfficial={c.peer.isOfficial} />
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-[#4A5568]">
                   <PreviewIcon chat={c} />

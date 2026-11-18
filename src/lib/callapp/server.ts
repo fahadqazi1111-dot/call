@@ -32,6 +32,13 @@ export async function requireAdmin(req: Request) {
   return user
 }
 
+/** Staff = full admins + team members (yellow tick). Both reach the admin panel. */
+export async function requireStaff(req: Request) {
+  const user = await requireUser(req)
+  if (!user || (user.role !== 'admin' && user.role !== 'team')) return null
+  return user
+}
+
 /* ---------------- signed media URLs ----------------
  * Media files are private (chat voice notes, images, story media).
  * They are only reachable with a short-lived HMAC token scoped to
@@ -208,6 +215,8 @@ export interface MatchableUser {
   avatarKey: number
   avatarUrl: string | null
   lastSeen: Date
+  role?: string
+  isOfficial?: boolean
 }
 
 /**
@@ -237,7 +246,7 @@ export async function matchRegisteredUsers(
 ): Promise<Map<string, MatchableUser>> {
   const users = await db.user.findMany({
     where: { NOT: { id: excludeUserId } },
-    select: { id: true, phone: true, name: true, about: true, avatarKey: true, avatarUrl: true, lastSeen: true },
+    select: { id: true, phone: true, name: true, about: true, avatarKey: true, avatarUrl: true, lastSeen: true, role: true, isOfficial: true },
   })
 
   const exact = new Map<string, MatchableUser>()
@@ -289,6 +298,7 @@ export function publicUser(u: {
   email?: string | null
   emailVerified?: boolean
   role?: string
+  isOfficial?: boolean
   createdAt?: Date
 }) {
   return {
@@ -304,6 +314,7 @@ export function publicUser(u: {
     email: u.email ?? null,
     emailVerified: u.emailVerified ?? false,
     role: u.role ?? 'user',
+    isOfficial: u.isOfficial ?? false,
     createdAt: u.createdAt ? u.createdAt.toISOString() : null,
   }
 }

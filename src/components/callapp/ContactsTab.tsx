@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar } from './Avatar'
+import { StaffTick } from './StaffTick'
 import {
   Search,
   Plus,
@@ -341,6 +342,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[15px] font-bold text-cink">
                       <span className="truncate">{c.name}</span>
+                      {c.user && <StaffTick role={c.user.role} isOfficial={c.user.isOfficial} size={14} />}
                       {c.user && (
                         <span className="flex-none rounded-full bg-[#E3EBFF] px-2 py-0.5 text-[10px] font-bold text-cbrand-deep">
                           ON CALL

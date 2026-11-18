@@ -66,6 +66,7 @@ export function AppRoot() {
   const openPeerId = useApp((s) => s.openPeerId)
   const call = useApp((s) => s.call)
   const me = useApp((s) => s.me)
+  const staffView = useApp((s) => s.staffView)
   const isDesktop = useIsDesktop()
 
   useEffect(() => {
@@ -92,7 +93,20 @@ export function AppRoot() {
     return () => window.clearInterval(t)
   }, [me])
 
+  const isStaff = !!me && (me.role === 'admin' || me.role === 'team')
   const inMain = phase === 'main' && !!me
+  const inConsole = inMain && isStaff && staffView === 'console'
+
+  /* ---------- staff console: admin/team land here straight after login ---------- */
+  if (inConsole) {
+    return (
+      <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-white">
+        <AdminPanel mode="console" />
+        {call && <CallOverlay state={call} />}
+        <Toaster position="top-center" richColors />
+      </div>
+    )
+  }
 
   /* ---------- splash: always full-bleed, every device ---------- */
   if (phase === 'splash') {

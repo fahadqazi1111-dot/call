@@ -291,7 +291,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         <Row Icon={Coins} label="Wallet & coins" sub={wallet ? `🪙 ${wallet.coins} coins · 💎 ${wallet.earnings} diamonds` : 'Coins, gifts & withdrawals'} onClick={() => setOverlay('wallet')} />
         <Row Icon={Bot} label="CALL AI Assistant" sub="Chat, voice & image intelligence" onClick={() => setOverlay('ai')} />
         <Row Icon={Bell} label="Notifications" sub="Messages, gifts & battles" onClick={() => setOverlay('notifications')} />
-        {me.role === 'admin' && <Row Icon={Shield} label="Admin panel" sub="Manage the CALL platform" onClick={() => setOverlay('admin')} />}
+        {(me.role === 'admin' || me.role === 'team') && <Row Icon={Shield} label="Admin panel" sub="Manage the CALL platform" onClick={() => setOverlay('admin')} />}
       </div>
 
       <div className="mx-6 mt-3 overflow-hidden rounded-[20px] border border-cline bg-white">
