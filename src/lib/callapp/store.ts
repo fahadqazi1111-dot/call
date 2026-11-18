@@ -1,0 +1,375 @@
+'use client'
+
+import { create } from 'zustand'
+import { api, setToken as persistToken } from './api'
+import { socketClient } from './socket'
+import { callManager } from './callManager'
+import { soundKit } from './sound'
+import type { CallRecord, CallState, ChatSummary, ContactItem, Me, Message } from './types'
+
+export type AppPhase = 'splash' | 'onboarding' | 'auth' | 'main'
+export type AppTab = 'chats' | 'calls' | 'contacts' | 'profile'
+
+const SESSION_KEY = 'call.session.v1'
+
+interface SessionPersist {
+  token: string
+  user: Me
+}
+
+function loadSession(): SessionPersist | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    const s = JSON.parse(raw) as SessionPersist
+    return s.token && s.user?.id ? s : null
+  } catch {
+    return null
+  }
+}
+
+function saveSession(s: SessionPersist | null) {
+  if (typeof window === 'undefined') return
+  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s))
+  else localStorage.removeItem(SESSION_KEY)
+}
+
+function notifyDesktop(title: string, body: string) {
+  if (typeof document === 'undefined') return
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, { body })
+    } catch {}
+  }
+}
+
+interface AppState {
+  phase: AppPhase
+  me: Me | null
+  token: string | null
+  tab: AppTab
+  openPeerId: string | null
+  chats: ChatSummary[]
+  messages: Record<string, Message[]>
+  contacts: ContactItem[]
+  calls: CallRecord[]
+  online: Record<string, boolean>
+  typing: Record<string, boolean>
+  call: CallState | null
+  booted: boolean
+  chatsLoaded: boolean
+
+  setPhase: (p: AppPhase) => void
+  setTab: (t: AppTab) => void
+  bootstrap: () => Promise<void>
+  loginSuccess: (token: string, user: Me) => void
+  updateMe: (patch: { name?: string; about?: string }) => Promise<void>
+  logout: () => void
+
+  loadChats: () => Promise<void>
+  openChat: (peerId: string | null) => void
+  closeChat: () => void
+  loadMessages: (peerId: string) => Promise<void>
+  sendText: (peerId: string, text: string) => Promise<void>
+  sendVoice: (peerId: string, blob: Blob, durationSec: number) => Promise<void>
+  markReadIfOpen: (peerId: string) => Promise<void>
+  handleIncomingMessage: (fromId: string | null, message: Message) => Promise<void>
+
+  loadContacts: () => Promise<void>
+  addContact: (name: string, phone: string) => Promise<boolean>
+  syncDeviceContacts: (list: { name: string; phone: string }[]) => Promise<{ saved: number; matched: number } | null>
+  deleteContact: (id: string) => Promise<void>
+
+  loadCalls: () => Promise<void>
+  startCall: (peer: { id: string; name: string; avatarKey: number }, type: 'voice' | 'video') => void
+  acceptCall: () => void
+  declineCall: () => void
+  hangup: () => void
+}
+
+export const useApp = create<AppState>((set, get) => ({
+  phase: 'splash',
+  me: null,
+  token: null,
+  tab: 'chats',
+  openPeerId: null,
+  chats: [],
+  messages: {},
+  contacts: [],
+  calls: [],
+  online: {},
+  typing: {},
+  call: null,
+  booted: false,
+  chatsLoaded: false,
+
+  setPhase: (p) => set({ phase: p }),
+  setTab: (t) => set({ tab: t }),
+
+  bootstrap: async () => {
+    const s = loadSession()
+    if (!s) {
+      set({ phase: 'onboarding', booted: true })
+      return
+    }
+    try {
+      persistToken(s.token)
+      const { user } = await api.me()
+      set({ token: s.token, me: user, phase: 'main', booted: true })
+      socketClient.connect(user.id, user.name)
+      callManager.setMe({ id: user.id, name: user.name })
+      void get().loadChats()
+      void get().loadContacts()
+      void get().loadCalls()
+      if ('Notification' in window && Notification.permission === 'default') {
+        void Notification.requestPermission()
+      }
+    } catch {
+      persistToken(null)
+      saveSession(null)
+      set({ phase: 'onboarding', booted: true })
+    }
+  },
+
+  loginSuccess: (token, user) => {
+    persistToken(token)
+    saveSession({ token, user })
+    set({ token, me: user, phase: 'main' })
+    socketClient.connect(user.id, user.name)
+    callManager.setMe({ id: user.id, name: user.name })
+    void get().loadChats()
+    void get().loadContacts()
+    void get().loadCalls()
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission()
+    }
+  },
+
+  updateMe: async (patch) => {
+    const { user } = await api.updateMe(patch)
+    set({ me: user })
+    const s = loadSession()
+    if (s) saveSession({ ...s, user })
+  },
+
+  logout: () => {
+    if (get().call) callManager.hangup()
+    callManager.setMe(null)
+    socketClient.disconnectAll()
+    persistToken(null)
+    saveSession(null)
+    set({
+      phase: 'auth',
+      me: null,
+      token: null,
+      chats: [],
+      messages: {},
+      contacts: [],
+      calls: [],
+      openPeerId: null,
+      chatsLoaded: false,
+    })
+  },
+
+  loadChats: async () => {
+    try {
+      const { chats } = await api.chats()
+      set({ chats, chatsLoaded: true })
+    } catch {}
+  },
+
+  openChat: (peerId) => {
+    set({ openPeerId: peerId })
+    if (peerId) {
+      void get().loadMessages(peerId).then(() => get().markReadIfOpen(peerId))
+    }
+  },
+
+  closeChat: () => set({ openPeerId: null }),
+
+  loadMessages: async (peerId) => {
+    try {
+      const { messages } = await api.messages(peerId)
+      set((st) => ({ messages: { ...st.messages, [peerId]: messages } }))
+    } catch {}
+  },
+
+  sendText: async (peerId, text) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    try {
+      const { message } = await api.sendMessage({ to: peerId, type: 'text', content: trimmed })
+      set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
+      socketClient.emit('msg:new', { to: peerId, message })
+      soundKit.pop(true)
+      get().loadChats()
+    } catch (e) {
+      throw e
+    }
+  },
+
+  sendVoice: async (peerId, blob, durationSec) => {
+    try {
+      const up = await api.uploadVoice(blob)
+      const { message } = await api.sendMessage({
+        to: peerId,
+        type: 'voice',
+        content: up.id,
+        duration: durationSec,
+      })
+      set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
+      socketClient.emit('msg:new', { to: peerId, message })
+      get().loadChats()
+    } catch (e) {
+      throw e
+    }
+  },
+
+  markReadIfOpen: async (peerId) => {
+    try {
+      await api.markRead(peerId)
+      socketClient.emit('msg:read', { to: peerId, peerId: get().me?.id })
+      set((st) => ({
+        chats: st.chats.map((c) => (c.peer.id === peerId ? { ...c, unread: 0 } : c)),
+        messages: {
+          ...st.messages,
+          [peerId]: (st.messages[peerId] ?? []).map((m) => (m.mine ? m : { ...m, readAt: m.readAt ?? new Date().toISOString() })),
+        },
+      }))
+    } catch {}
+  },
+
+  handleIncomingMessage: async (fromId, message) => {
+    if (!fromId) return
+    const incoming: Message = { ...message, mine: false }
+    const st = get()
+    const isOpen = st.openPeerId === fromId
+    set((s) => {
+      const msgs = { ...s.messages, [fromId]: [...(s.messages[fromId] ?? []), incoming] }
+      const chats = [...s.chats]
+      const idx = chats.findIndex((c) => c.peer.id === fromId)
+      const payload = {
+        id: message.id,
+        type: message.type,
+        content: message.content,
+        duration: message.duration,
+        createdAt: message.createdAt,
+        mine: false,
+        senderName: '',
+      }
+      if (idx >= 0) {
+        const c = chats[idx]
+        chats[idx] = {
+          ...c,
+          lastMessage: { ...payload, senderName: c.peer.name },
+          lastActivity: message.createdAt,
+          unread: isOpen ? 0 : c.unread + 1,
+        }
+        chats.unshift(...chats.splice(idx, 1))
+      }
+      return { messages: msgs, chats }
+    })
+    if (!st.chats.some((c) => c.peer.id === fromId)) void get().loadChats()
+    soundKit.pop(false)
+    const peer = st.chats.find((c) => c.peer.id === fromId)?.peer
+    notifyDesktop(peer?.name ?? 'New message', message.type === 'text' ? message.content : message.type === 'voice' ? 'Voice message' : 'Call log')
+    if (isOpen) void get().markReadIfOpen(fromId)
+  },
+
+  loadContacts: async () => {
+    try {
+      const { contacts } = await api.contacts()
+      set({ contacts })
+    } catch {}
+  },
+
+  addContact: async (name, phone) => {
+    try {
+      await api.addContact(name, phone)
+      await get().loadContacts()
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  syncDeviceContacts: async (list) => {
+    try {
+      const res = await api.syncContacts(list)
+      await get().loadContacts()
+      return res
+    } catch {
+      return null
+    }
+  },
+
+  deleteContact: async (id) => {
+    try {
+      await api.deleteContact(id)
+      await get().loadContacts()
+    } catch {}
+  },
+
+  loadCalls: async () => {
+    try {
+      const { calls } = await api.calls()
+      set({ calls })
+    } catch {}
+  },
+
+  startCall: (peer, type) => void callManager.startCall(peer, type),
+  acceptCall: () => void callManager.acceptCall(),
+  declineCall: () => callManager.declineCall(),
+  hangup: () => callManager.hangup(),
+}))
+
+/** Global socket wiring: presence, incoming messages, read receipts, typing, call events. */
+export function bindGlobalSocketHandlers() {
+  callManager.bindSocket()
+  callManager.setCallMessageHandler((peerId, message) => {
+    // Append the call summary to my own chat and push it to the peer in realtime.
+    const msg = message as Message
+    useApp.setState((st) => ({
+      messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), msg] },
+    }))
+    socketClient.emit('msg:new', { to: peerId, message: msg })
+  })
+  socketClient.on('presence', (p) => {
+    const { userId, online } = p as { userId: string; online: boolean }
+    useApp.setState((st) => ({ online: { ...st.online, [userId]: online } }))
+  })
+  socketClient.on('presence:list', (p) => {
+    const ids = (p as { ids: string[] }).ids
+    const map: Record<string, boolean> = {}
+    ids.forEach((id) => (map[id] = true))
+    useApp.setState((st) => ({ online: { ...st.online, ...map } }))
+  })
+  socketClient.on('msg:incoming', (p) => {
+    const { message, from } = p as { message: Message; from: string | null }
+    void useApp.getState().handleIncomingMessage(from, message)
+  })
+  socketClient.on('msg:read', (p) => {
+    const { peerId, at } = p as { peerId: string; at: string }
+    useApp.setState((st) => ({
+      messages: {
+        ...st.messages,
+        [peerId]: (st.messages[peerId] ?? []).map((m) => (m.mine ? { ...m, readAt: m.readAt ?? at } : m)),
+      },
+    }))
+  })
+  socketClient.on('typing', (p) => {
+    const { peerId, isTyping } = p as { peerId: string; isTyping: boolean }
+    useApp.setState((st) => ({ typing: { ...st.typing, [peerId]: isTyping } }))
+    if (isTyping) {
+      window.setTimeout(() => {
+        useApp.setState((st) => ({ typing: { ...st.typing, [peerId]: false } }))
+      }, 3000)
+    }
+  })
+  socketClient.on('connect', () => {
+    const me = useApp.getState().me
+    if (me) socketClient.emit('register', { userId: me.id, name: me.name })
+  })
+  callManager.subscribe((s) => useApp.setState({ call: s }))
+}

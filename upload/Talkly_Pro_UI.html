@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Talkly – Pro Messaging App UI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--b:#2F5BEA;--bd:#1B3FBF;--ink:#0E1726;--mut:#5B6577;--ln:#E6EAF2;--bg:#F5F7FC;--g:#12B76A;--r:#F04438}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#E4E9F4;font-family:Inter,system-ui,sans-serif;color:var(--ink);padding:56px 32px;display:flex;flex-wrap:wrap;gap:56px 44px;justify-content:center}
+.bd h2{font:600 13px Inter;color:#5B6577;margin:0 0 18px 4px}
+.ph{width:390px;height:844px;position:relative;overflow:hidden;background:#fff;border-radius:46px;box-shadow:0 0 0 10px #0E1726,0 30px 60px rgba(14,23,38,.28)}
+.a{position:absolute}.c{display:flex;align-items:center;justify-content:center}
+.i{flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sb{position:absolute;top:0;left:0;right:0;height:50px;padding:16px 30px 0;display:flex;justify-content:space-between;font:600 15px Inter;z-index:20}
+.sb span{display:flex;gap:6px;align-items:center}
+.dk{background:linear-gradient(170deg,#0B1B40,#0A1630 55%,#101F4A);color:#fff}
+.btn{height:56px;border-radius:16px;border:0;font:600 16px Inter;width:100%;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.p{background:linear-gradient(135deg,#4A74FF,#2F5BEA);color:#fff;box-shadow:0 10px 24px rgba(47,91,234,.32)}
+.g{background:#EEF2FB;color:var(--bd)}.o{background:#fff;color:var(--ink);border:1.5px solid #DDE3EE}
+.in{height:56px;border:1.5px solid #DDE3EE;border-radius:16px;padding:0 16px;font:500 16px Inter;width:100%;background:#fff;color:var(--ink)}
+.in:focus{border-color:var(--b);outline:0;box-shadow:0 0 0 4px #E3EBFF}
+.lb{font:600 13px Inter;color:#4A5568;margin:0 0 8px;display:block}
+.av{border-radius:50%;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;position:relative;flex:none}
+.on{position:absolute;right:0;bottom:1px;width:14px;height:14px;border-radius:50%;background:var(--g);border:2.5px solid #fff}
+.ic{width:44px;height:44px;border-radius:50%;border:0;background:#EEF2FB;color:var(--bd);display:flex;align-items:center;justify-content:center;cursor:pointer}
+h1{font-weight:800;letter-spacing:-.7px}
+.sl{width:390px;height:844px;flex:none;scroll-snap-align:start;position:relative}
+.sh{box-shadow:0 14px 34px rgba(14,23,38,.14)}
+.row{display:flex;align-items:center;gap:14px;padding:11px 24px}
+.row b{font-size:16px;font-weight:700}.row p{font-size:14px;color:#4A5568;margin-top:3px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.tm{font-size:12px;color:var(--mut);text-align:right}
+.bdg{min-width:22px;height:22px;border-radius:11px;background:var(--b);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:6px 0 0 auto;padding:0 6px}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:88px;padding-bottom:14px;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-top:1px solid var(--ln);display:flex;justify-content:space-around;align-items:center;z-index:10}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;font:600 11px Inter;color:#7A8499;position:relative}
+.tab.x{color:var(--b)}.tab.x:before{content:"";position:absolute;top:-14px;width:28px;height:3px;border-radius:3px;background:var(--b)}
+.hd{padding:62px 24px 0;display:flex;align-items:center;gap:10px}.hd h1{flex:1;font-size:32px}
+.srch{margin:18px 24px 0;height:46px;border-radius:14px;background:#F0F3FA;display:flex;align-items:center;gap:10px;padding:0 14px;color:#7A8499;font-size:15px}
+.chip{padding:8px 16px;border-radius:20px;background:#F0F3FA;font:600 13px Inter;color:#4A5568}.chip.x{background:var(--b);color:#fff}
+.ch{background:var(--bg)}
+.bub{border-radius:20px;padding:10px 14px 8px;font-size:15px;line-height:21px;max-width:272px;position:relative}
+.bub small{display:block;text-align:right;font-size:11px;margin-top:2px;opacity:.7;display:flex;justify-content:flex-end;gap:4px;align-items:center}
+.rc{background:#fff;align-self:flex-start;border-bottom-left-radius:6px;box-shadow:0 2px 8px rgba(14,23,38,.06)}
+.sn{background:linear-gradient(135deg,#4A74FF,#2F5BEA);color:#fff;align-self:flex-end;border-bottom-right-radius:6px}
+.vm{display:flex;align-items:center;gap:10px;width:252px;padding-bottom:4px}
+.pl{width:40px;height:40px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;border:0;cursor:pointer}
+.rc .pl{background:var(--b);color:#fff}.sn .pl{background:#fff;color:var(--b)}
+.wv{display:flex;align-items:center;gap:2.5px;height:32px;flex:1}
+.wv i{width:3px;border-radius:2px;background:currentColor;opacity:.3}.wv i.f{opacity:1}
+.rc .wv{color:var(--b)}.sn .wv{color:#fff}
+.vt{font:600 12px Inter;opacity:.85;min-width:30px;text-align:right}
+.bar{position:absolute;left:0;right:0;bottom:0;height:96px;background:#fff;border-top:1px solid var(--ln);padding:14px 16px;display:flex;gap:10px;align-items:flex-start}
+.fld{flex:1;height:48px;border-radius:24px;background:#F0F3FA;display:flex;align-items:center;padding:0 16px;color:#7A8499;font-size:15px;gap:8px}
+.mic{width:48px;height:48px;border-radius:50%;border:0;background:linear-gradient(135deg,#4A74FF,#2F5BEA);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 6px 16px rgba(47,91,234,.35);cursor:pointer}
+.rg{position:absolute;border-radius:50%;border:2px solid #3D6BFF;animation:ring 3s linear infinite}
+@keyframes ring{0%{transform:scale(.7);opacity:.55}100%{transform:scale(2.4);opacity:0}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes ld{from{width:0}to{width:100%}}
+@keyframes bl{50%{opacity:.2}}
+.set{margin:0 24px;border:1px solid var(--ln);border-radius:20px;overflow:hidden;background:#fff}
+.set div{display:flex;align-items:center;gap:14px;padding:12px 16px;font:600 15px Inter}
+.set div+div{border-top:1px solid var(--ln)}.set div>svg:last-child{margin-left:auto;color:#9AA8C7}
+.ib{width:38px;height:38px;border-radius:12px;background:#EEF2FB;color:var(--b);display:flex;align-items:center;justify-content:center;flex:none}
+.cb{display:flex;flex-direction:column;align-items:center;gap:8px;font:600 13px Inter;color:#C9D3EC}
+.cb button{width:68px;height:68px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;color:#fff;background:rgba(255,255,255,.14);cursor:pointer}
+#dots i{height:6px;width:6px;border-radius:6px;background:#C5CFE6;transition:.3s}#dots i.x{width:26px;background:var(--b)}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+<symbol id="phone" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></symbol>
+<symbol id="video" viewBox="0 0 24 24"><path d="M15 8v8H3V8z"/><path d="M15 11l6-3v8l-6-3"/></symbol>
+<symbol id="users" viewBox="0 0 24 24"><path d="M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1a4 4 0 0 0-3-3.9M16 4.1a3.5 3.5 0 0 1 0 6.8"/></symbol>
+<symbol id="user" viewBox="0 0 24 24"><path d="M20 21v-1a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v1M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14M21 21l-4.3-4.3"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="mic" viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM19 11a7 7 0 0 1-14 0M12 18v3"/></symbol>
+<symbol id="micoff" viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM19 11a7 7 0 0 1-14 0M12 18v3M3 3l18 18"/></symbol>
+<symbol id="send" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+<symbol id="clip" viewBox="0 0 24 24"><path d="M21 11l-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/></symbol>
+<symbol id="cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7"/></symbol>
+<symbol id="lock" viewBox="0 0 24 24"><path d="M5 11h14v9H5zM8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+<symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+<symbol id="spk" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6"/></symbol>
+<symbol id="out" viewBox="0 0 24 24"><path d="M7 17L17 7M9 7h8v8"/></symbol>
+<symbol id="inn" viewBox="0 0 24 24"><path d="M17 7L7 17M7 9v8h8"/></symbol>
+<symbol id="end" viewBox="0 0 24 24"><path d="M3 14c5-5 13-5 18 0l-2.5 3-3-1.5v-2.5a9 9 0 0 0-7 0v2.5L5.5 17z"/></symbol>
+<symbol id="dots" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></symbol>
+<symbol id="gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-1-3-2 .5-1.5-1.5.5-2-3-1-1 2h-2l-1-2-3 1 .5 2L5.5 8.500 3.500 8l-1 3 2 1v1l-2 1 1 3 2-.5L7 18.500l-.5 2 3 1 1-2h2l1 2 3-1-.5-2L18.500 17l2 .5 1-3-2-1z"/></symbol>
+<symbol id="help" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.500 9.500a2.500 2.500 0 1 1 3.500 2.300c-.7.4-1 .9-1 1.700M12 17h.01"/></symbol>
+<symbol id="tk" viewBox="0 0 24 24"><path d="M2 13l4 4 8-9M10 15l1.500 1.500L21 7"/></symbol>
+<symbol id="logo" viewBox="0 0 48 48"><path d="M24 8C14.600 8 7 14.500 7 22.600c0 4.400 2.300 8.400 6 11L11 41l7.400-3.900c1.800.5 3.700.8 5.600.8 9.400 0 17-6.500 17-14.600S33.400 8 24 8z" fill="#fff" stroke="none"/><g fill="#2F5BEA" stroke="none"><circle cx="16.500" cy="23" r="2.400"/><circle cx="24" cy="23" r="2.400"/><circle cx="31.500" cy="23" r="2.400"/></g></symbol>
+</defs></svg>
+<div id="board" style="display:contents"></div>
+<script>
+const I=(n,s=24,x='')=>`<svg class="i" width="${s}" height="${s}" ${x}><use href="#${n}"/></svg>`;
+const G={a:'#4A74FF,#2F5BEA',d:'#9F67FF,#7C3AED',t:'#1FB5A8,#0F766E',p:'#F0508F,#BE185D',o:'#F5A524,#B45309',s:'#64748B,#334155'};
+const av=(t,k='a',s=52,o)=>`<div class="av" style="width:${s}px;height:${s}px;font-size:${s*.36}px;background:linear-gradient(135deg,${G[k]})">${t}${o?'<i class="on"></i>':''}</div>`;
+const sb=l=>`<div class="sb" style="${l?'color:#fff':''}"><span>9:41</span><span><svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2.500" width="3" height="9.500" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg><svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.500" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="17" height="8" rx="2" fill="currentColor"/><rect x="24" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".4"/></svg></span></div>`;
+const tabs=a=>`<div class="tabs">${[['chat','Chats'],['phone','Calls'],['users','Contacts'],['user','Profile']].map(([n,t])=>`<div class="tab ${t==a?'x':''}">${I(n)}${t}</div>`).join('')}</div>`;
+const wave=(n,p)=>{let h='';for(let k=0;k<n;k++){const v=6+Math.abs(Math.sin(k*1.7)*Math.cos(k*.5))*22;h+=`<i class="${k<n*p?'f':''}" style="height:${v|0}px"></i>`}return `<div class="wv">${h}</div>`};
+const vm=(t,p,pl,type)=>`<div class="bub ${type}"><div class="vm"><button class="pl" onclick="tg(this)">${pl?'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.500"/><rect x="14" y="4" width="5" height="16" rx="1.500"/></svg>':'<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.500v15l13-7.500z"/></svg>'}</button>${wave(28,p)}<span class="vt">${t}</span></div></div>`;
+const tx=(m,t,s,k)=>`<div class="bub ${s?'sn':'rc'}">${m}<small>${t}${s?I('tk',14,'style="color:'+(k?'#9FE8C1':'#fff')+'"'):''}</small></div>`;
+
+const S={};
+S.splash=()=>`<div class="ph dk">${sb(1)}${[0,1,2].map(i=>`<div class="rg" style="left:50%;top:380px;width:110px;height:110px;margin:-55px 0 0 -55px;animation-delay:${i}s"></div>`).join('')}
+<div class="a c" style="left:50%;top:380px;margin:-50px 0 0 -50px;width:100px;height:100px;border-radius:28px;background:linear-gradient(135deg,#4A74FF,#2F5BEA);box-shadow:0 20px 50px rgba(47,91,234,.5)">${I('logo',60)}</div>
+<div class="a" style="left:0;right:0;top:472px;text-align:center"><h1 style="font-size:38px">Talkly</h1><p style="margin-top:8px;font-size:15px;color:#A9B6D3">Talk to anyone. Anywhere.</p></div>
+<div class="a" style="left:135px;bottom:96px;width:120px;height:4px;border-radius:4px;background:#1B2B52"><div style="height:4px;border-radius:4px;background:#3D6BFF;animation:ld 2.400s ease-in-out infinite"></div></div>
+<p class="a" style="left:0;right:0;bottom:48px;text-align:center;font-size:12px;color:#6F7FA6">End-to-end encrypted</p></div>`;
+
+const slides=[
+{t:'Crystal-clear HD calls',d:'Video and voice calls with friends and family, free and always smooth.',h:`<div class="a sh" style="left:55px;top:110px;width:280px;height:320px;border-radius:32px;background:linear-gradient(170deg,#0B1B40,#0A1630);color:#fff"><div class="a" style="left:50%;top:120px;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;border:2px solid #3D6BFF;animation:ring 3s linear infinite"></div><div class="a" style="left:88px;top:72px">${av('AS','a',104)}</div><div class="a" style="left:0;right:0;top:206px;text-align:center"><div style="font-size:19px;font-weight:700">Ananya Sharma</div><div style="font-size:13px;color:#A9B6D3;margin-top:4px">HD video call · 12:08</div></div><div class="a c" style="left:0;right:0;bottom:22px;gap:14px"><span class="ic" style="background:rgba(255,255,255,.14);color:#fff">${I('micoff',20)}</span><span class="ic" style="background:var(--r);color:#fff;width:52px;height:52px">${I('end',24)}</span><span class="ic" style="background:rgba(255,255,255,.14);color:#fff">${I('video',20)}</span></div></div><div class="a sh" style="right:22px;top:92px;background:#fff;border-radius:18px 18px 4px 18px;padding:11px 15px;font-size:14px;font-weight:600;animation:bob 4s ease-in-out infinite">Hey! Are you free?</div>`},
+{t:'Chats & voice notes that stay private',d:'Messages and voice messages are end-to-end encrypted. Only you and they can open them.',h:`<div class="a sh" style="left:30px;top:110px;width:330px;height:330px;border-radius:32px;background:#fff;padding:26px 20px;display:flex;flex-direction:column;gap:12px"><div class="bub rc" style="background:#F1F4FA;box-shadow:none">Did you see the photos?</div>${vm('0:24',.45,0,'sn')}<div class="bub rc" style="background:#F1F4FA;box-shadow:none">Send me the best one</div><div class="c" style="align-self:flex-end;gap:6px;font-size:12px;font-weight:600;color:#067647">${I('lock',18)} End-to-end encrypted</div></div>`},
+{t:'Groups made easy',d:'Bring everyone together in one room. Up to 50 people, no limits.',h:`<div class="a" style="left:50px;top:90px;width:290px;height:290px;border-radius:50%;background:#E3EBFF"></div>${[['SN','a',88,'left:150px;top:100px'],['KI','d',74,'left:50px;top:210px'],['PN','t',74,'left:262px;top:200px'],['VS','p',68,'left:105px;top:325px'],['AP','o',68,'left:222px;top:325px']].map(([t,k,s,p],i)=>`<div class="a" style="${p};border:4px solid #F4F7FE;border-radius:50%;animation:bob 4s ease-in-out ${i}s infinite">${av(t,k,s)}</div>`).join('')}`},
+{t:'Welcome to Talkly',d:'Free, private and beautifully simple.',f:1}];
+S.onboard=()=>`<div class="ph" style="background:#F4F7FE">${sb()}<div id="sc" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;height:100%">${slides.map(s=>s.f?`<div class="sl"><div class="a" style="left:24px;right:24px;top:100px"><div class="c" style="width:72px;height:72px;border-radius:20px;background:linear-gradient(135deg,#4A74FF,#2F5BEA);box-shadow:0 12px 28px rgba(47,91,234,.35)">${I('logo',44)}</div><h1 style="margin-top:26px;font-size:34px;line-height:40px">${s.t}</h1><p style="margin-top:8px;font-size:16px;color:#4A5568">${s.d}</p><div style="margin-top:34px;display:flex;flex-direction:column;gap:14px">${[['video','Free HD calls','Video and voice, no limits'],['mic','Voice messages','Record and send in one tap'],['lock','Private chats','End-to-end encrypted'],['users','Group rooms','Talk with up to 50 people']].map(([n,a,b])=>`<div style="display:flex;gap:14px;align-items:center;background:#fff;border-radius:18px;padding:12px 14px;box-shadow:0 2px 10px rgba(14,23,38,.05)"><span class="ib" style="width:46px;height:46px;border-radius:14px">${I(n)}</span><div><div style="font-size:16px;font-weight:700">${a}</div><div style="font-size:14px;color:#4A5568;margin-top:2px">${b}</div></div></div>`).join('')}</div></div></div>`:`<div class="sl">${s.h}<div class="a" style="left:24px;right:24px;top:500px"><h1 style="font-size:31px;line-height:37px">${s.t}</h1><p style="margin-top:12px;font-size:16px;line-height:24px;color:#4A5568">${s.d}</p></div></div>`).join('')}</div>
+<div class="a" id="sk" style="right:24px;top:62px;font:600 14px Inter;color:#4A5568;z-index:5">Skip</div>
+<div class="a" style="left:24px;right:24px;bottom:44px;z-index:5"><div id="dots" class="c" style="gap:6px;margin-bottom:22px;height:6px"><i class="x"></i><i></i><i></i><i></i></div><button class="btn p" id="nx">Next</button><button class="btn g" id="al" style="margin-top:12px;display:none">I already have an account</button><p id="tm" style="display:none;margin-top:14px;text-align:center;font-size:12px;color:var(--mut)">By continuing you agree to our Terms and Privacy Policy</p></div></div>`;
+
+const form=up=>`<div class="ph" style="padding:76px 24px 0">${sb()}<div class="c" style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#4A74FF,#2F5BEA)">${I('logo',34)}</div>
+<h1 style="margin-top:24px;font-size:32px">${up?'Create account':'Welcome back'}</h1><p style="margin-top:8px;font-size:15px;color:#4A5568">${up?'Join Talkly in less than a minute.':'Log in to continue your conversations.'}</p>
+${up?`<div style="margin-top:26px"><label class="lb">Full name</label><input class="in" placeholder="Your name"></div>`:''}
+<div style="margin-top:${up?16:30}px"><label class="lb">Phone number</label><div style="display:flex;gap:10px"><input class="in" style="width:92px" value="+91"><input class="in" placeholder="98765 43210"></div></div>
+<div style="margin-top:16px"><label class="lb">Password</label><input class="in" type="password" placeholder="${up?'Create a password':'Enter your password'}"></div>
+${up?'':'<p style="text-align:right;margin-top:14px;font-size:14px;font-weight:600;color:var(--b)">Forgot password?</p>'}
+<button class="btn p" style="margin-top:${up?26:22}px">${up?'Sign up':'Log in'}</button>
+<div class="c" style="gap:12px;margin:22px 0;font-size:13px;color:var(--mut)"><div style="flex:1;height:1px;background:var(--ln)"></div>or<div style="flex:1;height:1px;background:var(--ln)"></div></div>
+<div style="display:flex;gap:12px"><button class="btn o"><b style="color:#4285F4;font-size:18px">G</b> Google</button><button class="btn o">Apple</button></div>
+<p class="a" style="left:0;right:0;bottom:36px;text-align:center;font-size:14px;color:#4A5568">${up?'Already a member?':'New to Talkly?'} <b style="color:var(--b)">${up?'Log in':'Sign up'}</b></p></div>`;
+S.login=()=>form(0);S.signup=()=>form(1);
+
+S.chats=()=>{const L=[['AS','a','Ananya Sharma',`${I('tk',16,'style="color:#12B76A"')}Are we still on for tonight?`,'9:41',2,1],['DT','d','Design Team','<b style="color:var(--b);font-weight:600">Rohan:</b> Final files are ready','9:12',5,0],['RM','t','Rohan Mehta',`${I('mic',16,'style="color:var(--b)"')}Voice message · 0:24`,'8:50',1,1],['PN','p','Priya Nair',`${I('tk',16,'style="color:var(--b)"')}Thanks, talk tomorrow!`,'Yesterday',0,0],['VS','o','Vikram Singh',`${I('video',16,'style="color:var(--r)"')}Missed video call`,'Yesterday',1,0],['FM','s','Family','Mom: Dinner at 8','Mon',0,0]];
+return `<div class="ph">${sb()}<div class="hd"><h1>Chats</h1><button class="ic">${I('cam',22)}</button><button class="ic" style="background:var(--b);color:#fff">${I('plus',22)}</button></div><div class="srch">${I('search',20)}Search chats</div>
+<div style="display:flex;gap:16px;padding:18px 24px 4px">${[['You','s',1],['Sneha','d'],['Rohan','t'],['Priya','p'],['Vikram','o']].map(([n,k,m])=>`<div style="text-align:center;font:600 12px Inter;color:#4A5568"><div style="padding:3px;border:2.500px ${m?'dashed #9AA8C7':'solid var(--b)'};border-radius:50%;margin-bottom:6px">${av(n[0],k,50)}</div>${n}</div>`).join('')}</div>
+<div style="display:flex;gap:8px;padding:12px 24px 6px"><span class="chip x">All</span><span class="chip">Unread · 9</span><span class="chip">Groups</span><span class="chip">Voice</span></div>
+${L.slice(0,5).map(([t,k,n,m,tm,b,o])=>`<div class="row">${av(t,k,56,o)}<div style="flex:1;min-width:0"><b>${n}</b><p>${m}</p></div><div class="tm">${tm}${b?`<div class="bdg">${b}</div>`:''}</div></div>`).join('')}${tabs('Chats')}</div>`};
+
+const hdr=(s)=>`<div class="a" style="left:0;right:0;top:0;height:112px;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-bottom:1px solid var(--ln);padding:56px 12px 0;display:flex;align-items:center;gap:8px;z-index:9"><span style="width:32px;color:var(--ink)">${I('back')}</span>${av('AS','a',42,1)}<div style="flex:1;margin-left:2px"><div style="font-size:16px;font-weight:700">Ananya Sharma</div><div style="font-size:12px;color:#067647;font-weight:600">${s}</div></div><span style="color:var(--b);display:flex;gap:18px;padding-right:8px">${I('video')}${I('phone')}</span></div>`;
+S.chat=()=>`<div class="ph ch">${sb()}${hdr('Online')}<div class="a" style="left:16px;right:16px;top:132px;display:flex;flex-direction:column;gap:11px"><div class="c" style="font:600 12px Inter;color:var(--mut)"><span style="background:#E8ECF6;padding:4px 12px;border-radius:12px">Today</span></div>${tx('Are we still on for tonight?','9:38')}${tx('Yes! What time works for you?','9:39',1)}${vm('0:24',0,0,'rc')}${vm('0:12',.4,1,'sn')}${tx('Perfect, see you then 👍','9:41',1,1)}${tx('Can you send the address too?','9:42')}</div>
+<div class="bar"><span class="ic">${I('plus',22)}</span><div class="fld">Type a message<span style="margin-left:auto;color:#7A8499;display:flex">${I('clip',20)}</span></div><button class="mic">${I('mic',22)}</button></div></div>`;
+
+S.rec=()=>`<div class="ph ch">${sb()}${hdr('Online')}<div class="a" style="left:16px;right:16px;top:132px;display:flex;flex-direction:column;gap:11px"><div class="c" style="font:600 12px Inter;color:var(--mut)"><span style="background:#E8ECF6;padding:4px 12px;border-radius:12px">Today</span></div>${tx('Can you send the address too?','9:42')}${vm('0:12',1,0,'sn')}</div>
+<div class="a" style="right:16px;bottom:200px;width:44px;padding:10px 0;border-radius:22px;background:#fff;box-shadow:0 8px 24px rgba(14,23,38,.14);display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--mut);font-size:10px;font-weight:600">${I('lock',18)}<span style="writing-mode:vertical-rl">Lock</span></div>
+<div class="bar" style="height:112px;align-items:center;padding-bottom:16px"><span style="color:var(--r);display:flex">${I('trash',24)}</span><div class="fld" style="background:#FEF0EF;color:var(--r);font-weight:600"><i style="width:10px;height:10px;border-radius:50%;background:var(--r);animation:bl 1s infinite"></i>0:07<div class="wv" style="margin-left:6px;height:24px;color:var(--r)">${Array.from({length:16},(_,k)=>`<i class="f" style="height:${5+Math.abs(Math.sin(k*1.3))*16|0}px;opacity:${.4+k/26}"></i>`).join('')}</div><span style="margin-left:auto;font-size:12px;color:var(--mut);font-weight:500;white-space:nowrap">‹ Slide to cancel</span></div><div style="position:relative"><div class="rg" style="left:0;top:0;width:48px;height:48px;border-color:#F04438;animation-duration:1.800s"></div><button class="mic" style="transform:scale(1.15);background:linear-gradient(135deg,#4A74FF,#2F5BEA)">${I('mic',22)}</button></div></div></div>`;
+
+S.calls=()=>{const L=[['AS','a','Ananya Sharma','inn','Video · 9:20',0],['RM','t','Rohan Mehta','out','Voice · 8:05',0],['VS','o','Vikram Singh','inn','Missed · Yesterday',1],['PN','p','Priya Nair','out','Video · Yesterday',0],['DT','d','Design Team','inn','Group · Mon',0]];
+return `<div class="ph">${sb()}<div class="hd"><h1>Calls</h1><button class="ic">${I('search',22)}</button></div><div style="margin:18px 24px 0;padding:4px;border-radius:14px;background:#F0F3FA;display:flex;font:600 14px Inter;text-align:center"><span style="flex:1;padding:9px;border-radius:11px;background:#fff;box-shadow:0 2px 6px rgba(14,23,38,.08)">All</span><span style="flex:1;padding:9px;color:var(--mut)">Missed</span></div>
+<div class="row" style="margin-top:12px"><span class="ib" style="width:52px;height:52px;border-radius:50%;background:var(--b);color:#fff">${I('plus',24)}</span><div><b>Create call link</b><p>Share a link to invite anyone</p></div></div>
+${L.map(([t,k,n,d,m,x])=>`<div class="row">${av(t,k,52)}<div style="flex:1"><b style="${x?'color:var(--r)':''}">${n}</b><p>${I(d,15,'style="color:'+(x?'var(--r)':'#12B76A')+'"')}${m}</p></div><span style="color:var(--b)">${I(m.startsWith('Video')?'video':'phone',24)}</span></div>`).join('')}${tabs('Calls')}</div>`};
+
+S.contacts=()=>{const L=[['A',[['AS','a','Ananya Sharma',1],['AP','o','Arjun Patel',0]]],['B',[['RM','t','Rohan Mehta',1],['KI','d','Kavya Iyer',0]]],['H',[['PN','p','Priya Nair',0]]],['O',[['VS','o','Vikram Singh',1]]]];
+return `<div class="ph">${sb()}<div class="hd"><h1>Contacts</h1><button class="ic" style="background:var(--b);color:#fff">${I('plus',22)}</button></div><div class="srch">${I('search',20)}Search 128 contacts</div>
+<div class="row" style="margin-top:10px"><span class="ib" style="width:52px;height:52px;border-radius:50%">${I('users',24)}</span><div><b>New group</b><p>Up to 50 people</p></div></div>
+${L.map(([l,a])=>`<div style="padding:10px 24px 2px;font:700 12px Inter;color:var(--b)">${l}</div>${a.map(([t,k,n,o])=>`<div class="row" style="padding:8px 24px">${av(t,k,46,o)}<div style="flex:1"><b style="font-size:15px">${n}</b><p style="font-size:13px">${o?'Online':'Last seen recently'}</p></div></div>`).join('')}`).join('')}${tabs('Contacts')}</div>`};
+
+S.profile=()=>`<div class="ph" style="background:#F5F7FC">${sb()}<div style="padding:60px 24px 0;text-align:center"><div style="display:inline-block;position:relative">${av('AK','a',104)}<span class="c" style="position:absolute;right:-2px;bottom:0;width:34px;height:34px;border-radius:50%;background:#fff;border:2px solid #F5F7FC;color:var(--b);box-shadow:0 2px 8px rgba(14,23,38,.15)">${I('cam',17)}</span></div><h1 style="margin-top:14px;font-size:24px">Aarav Kapoor</h1><p style="margin-top:4px;font-size:14px;color:var(--mut)">+91 98765 43210</p><span class="chip" style="display:inline-block;margin-top:12px;background:#E3EBFF;color:var(--bd)">Available</span></div>
+<div class="set" style="margin-top:18px">${[['user','Account'],['lock','Privacy & security'],['bell','Notifications'],['mic','Voice & calls']].map(([n,t])=>`<div><span class="ib">${I(n,20)}</span>${t}${I('chev',18)}</div>`).join('')}</div>
+<div class="set" style="margin-top:12px">${[['gear','Storage & data'],['help','Help & support']].map(([n,t])=>`<div><span class="ib">${I(n,20)}</span>${t}${I('chev',18)}</div>`).join('')}</div>
+<p style="margin:16px 24px 0;text-align:center;font:600 15px Inter;color:var(--r)">Log out</p>${tabs('Profile')}</div>`;
+
+S.incoming=()=>`<div class="ph dk">${sb(1)}${[0,1,2].map(i=>`<div class="rg" style="left:50%;top:300px;width:150px;height:150px;margin:-75px 0 0 -75px;animation-delay:${i}s"></div>`).join('')}<div class="a" style="left:0;right:0;top:130px;text-align:center;font-size:14px;color:#A9B6D3;font-weight:600">${I('lock',14,'style="vertical-align:-2px"')} End-to-end encrypted</div><div class="a" style="left:115px;top:225px">${av('AS','a',160)}</div>
+<div class="a" style="left:0;right:0;top:420px;text-align:center"><h1 style="font-size:32px">Ananya Sharma</h1><p style="margin-top:8px;font-size:16px;color:#A9B6D3">Talkly HD video call…</p></div>
+<div class="a c" style="left:0;right:0;bottom:90px;gap:44px"><div class="cb"><button style="background:var(--r)">${I('end',30)}</button>Decline</div><div class="cb"><button>${I('chat',26)}</button>Message</div><div class="cb"><button style="background:var(--g);box-shadow:0 10px 28px rgba(18,183,106,.4)">${I('video',30)}</button>Accept</div></div></div>`;
+
+S.outgoing=()=>`<div class="ph dk">${sb(1)}<div class="a" style="left:0;right:0;top:130px;text-align:center;font-size:14px;color:#A9B6D3;font-weight:600">${I('lock',14,'style="vertical-align:-2px"')} End-to-end encrypted</div>${[0,1,2].map(i=>`<div class="rg" style="left:50%;top:300px;width:150px;height:150px;margin:-75px 0 0 -75px;animation-delay:${i}s"></div>`).join('')}<div class="a" style="left:115px;top:225px">${av('AS','a',160)}</div>
+<div class="a" style="left:0;right:0;top:420px;text-align:center"><h1 style="font-size:32px">Ananya Sharma</h1><p style="margin-top:8px;font-size:16px;color:#A9B6D3">Calling…</p></div>
+<div class="a c" style="left:0;right:0;bottom:170px;gap:30px"><div class="cb"><button>${I('micoff',26)}</button>Mute</div><div class="cb"><button>${I('spk',26)}</button>Speaker</div><div class="cb"><button>${I('video',26)}</button>Video</div></div>
+<div class="a c" style="left:0;right:0;bottom:70px"><button class="c" style="width:72px;height:72px;border-radius:50%;border:0;background:var(--r);color:#fff;box-shadow:0 10px 28px rgba(240,68,56,.45)">${I('end',32)}</button></div></div>`;
+
+const order=[['Splash','splash'],['Onboarding slider (Get Started merged as last slide)','onboard'],['Login','login'],['Sign Up','signup'],['Chats','chats'],['Chat · voice messages','chat'],['Chat · recording voice message','rec'],['Calls','calls'],['Contacts','contacts'],['Profile','profile'],['Incoming Call','incoming'],['Outgoing Call','outgoing']];
+document.getElementById('board').innerHTML=order.map(([t,k])=>`<section class="bd"><h2>${t}</h2>${S[k]()}</section>`).join('');
+
+/* interactions */
+function tg(b){const p=b.innerHTML.includes('rect');b.innerHTML=p?'<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.500v15l13-7.500z"/></svg>':'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.500"/><rect x="14" y="4" width="5" height="16" rx="1.500"/></svg>'}
+const sc=document.getElementById('sc'),nx=document.getElementById('nx'),dd=[...document.querySelectorAll('#dots i')];
+const idx=()=>Math.round(sc.scrollLeft/390);
+const upd=()=>{const n=idx(),l=n==3;dd.forEach((d,k)=>d.classList.toggle('x',k==n));nx.textContent=l?'Get started':'Next';document.getElementById('sk').style.display=l?'none':'';document.getElementById('al').style.display=l?'flex':'none';document.getElementById('tm').style.display=l?'block':'none'};
+sc.addEventListener('scroll',upd);
+nx.onclick=()=>{if(idx()<3)sc.scrollTo({left:(idx()+1)*390,behavior:'smooth'})};
+document.getElementById('sk').onclick=()=>sc.scrollTo({left:3*390,behavior:'smooth'});
+</script>
+</body></html>

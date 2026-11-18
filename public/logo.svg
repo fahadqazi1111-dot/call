@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="callG" x1="60" y1="18" x2="176" y2="242" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3EC0FF"/>
+      <stop offset="0.52" stop-color="#2273F2"/>
+      <stop offset="1" stop-color="#1443E4"/>
+    </linearGradient>
+    <linearGradient id="callG2" x1="88" y1="70" x2="170" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3AAEFF"/>
+      <stop offset="1" stop-color="#1B54EF"/>
+    </linearGradient>
+  </defs>
+  <!-- speech bubble ring shaped like a C (gap on the right) -->
+  <path fill="url(#callG)" d="M 200.6 53.7
+    A 100 100 0 1 0 200.6 182.3
+    L 171.5 157.9
+    A 62 62 0 1 1 171.5 78.1
+    Z"/>
+  <!-- bubble tail bottom-left -->
+  <path fill="url(#callG)" d="M 122 214 L 34 252 L 36 152 Z"/>
+  <!-- interior -->
+  <circle cx="124" cy="118" r="60" fill="#FFFFFF"/>
+  <!-- phone handset -->
+  <path fill="url(#callG2)" transform="translate(88 84) scale(3.05)" d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+</svg>

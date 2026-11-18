@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  phone      String   @unique
+  name       String
+  about      String   @default("Available on CALL")
+  avatarKey  Int      @default(0)
+  createdAt  DateTime @default(now())
+  lastSeen   DateTime @default(now())
+  contacts   Contact[]       @relation("ContactOwner")
+  convA      Conversation[]  @relation("ConvA")
+  convB      Conversation[]  @relation("ConvB")
+  messages   Message[]       @relation("MsgSender")
+  callsMade  Call[]          @relation("CallCaller")
+  callsRecv  Call[]          @relation("CallCallee")
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  ownerId   String
+  owner     User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  phone     String
+  createdAt DateTime @default(now())
+
+  @@unique([ownerId, phone])
+}
+
+model Conversation {
+  id            String   @id @default(cuid())
+  userAId       String
+  userA         User     @relation("ConvA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId       String
+  userB         User     @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime @default(now())
+  messages      Message[]
+
+  @@unique([userAId, userBId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("MsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+  type           String // text | voice | call
+  content        String // text body, media id, or call summary json
+  duration       Int? // voice seconds
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@index([conversationId, createdAt])
+}
+
+model Call {
+  id          String    @id @default(cuid())
+  callerId    String
+  caller      User      @relation("CallCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  calleeId    String
+  callee      User      @relation("CallCallee", fields: [calleeId], references: [id], onDelete: Cascade)
+  type        String // voice | video
+  status      String // answered | declined | missed | no-answer
+  durationSec Int       @default(0)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+
+  @@index([callerId, startedAt])
+  @@index([calleeId, startedAt])
+}
