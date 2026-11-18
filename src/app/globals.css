@@ -200,6 +200,35 @@
   scrollbar-width: none;
 }
 
+/* WhatsApp-Web style dotted canvas for the desktop chat area */
+.chat-canvas {
+  background-color: #eef1f8;
+  background-image: radial-gradient(#cdd6ea 1.1px, transparent 1.1px),
+    radial-gradient(#cdd6ea 1.1px, transparent 1.1px);
+  background-size: 28px 28px;
+  background-position: 0 0, 14px 14px;
+}
+
+/* Desktop shell scrollbars: slightly wider for pointer input */
+.desk-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #c9d3ec transparent;
+}
+.desk-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.desk-scroll::-webkit-scrollbar-thumb {
+  background: #c9d3ec;
+  border-radius: 4px;
+}
+.desk-scroll::-webkit-scrollbar-thumb:hover {
+  background: #b4c1e4;
+}
+.desk-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .app-scroll {
   scrollbar-width: thin;
   scrollbar-color: #c9d3ec transparent;

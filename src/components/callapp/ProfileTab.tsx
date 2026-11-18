@@ -20,7 +20,7 @@ import {
   BadgeCheck,
 } from 'lucide-react'
 
-export function ProfileTab() {
+export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
   const updateMe = useApp((s) => s.updateMe)
   const logout = useApp((s) => s.logout)
@@ -28,6 +28,7 @@ export function ProfileTab() {
   const [editName, setEditName] = useState(me?.name ?? '')
   const [editAbout, setEditAbout] = useState(me?.about ?? '')
   const [busy, setBusy] = useState(false)
+  const desk = variant === 'desktop'
 
   if (!me) return null
 
@@ -60,8 +61,12 @@ export function ProfileTab() {
   }
 
   return (
-    <div className="app-scroll flex h-full flex-col overflow-y-auto pb-[96px]">
-      <div className="flex flex-col items-center px-6 pt-16 text-center">
+    <div
+      className={`app-scroll flex h-full flex-col overflow-y-auto ${
+        desk ? 'desk-scroll mx-auto w-full max-w-xl pb-10 pt-10' : 'pb-[96px] pt-0'
+      }`}
+    >
+      <div className={`flex flex-col items-center px-6 text-center ${desk ? 'pt-2' : 'pt-16'}`}>
         <div className="relative">
           <Avatar name={me.name} avatarKey={me.avatarKey} size={104} />
           <button
@@ -127,14 +132,19 @@ export function ProfileTab() {
       </div>
 
       {showEdit && (
-        <div className="absolute inset-0 z-40 flex items-end bg-black/45" onClick={() => setShowEdit(false)}>
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${
+            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+          }`}
+          onClick={() => setShowEdit(false)}
+        >
           <div
-            className="w-full rounded-t-[28px] bg-white p-6 pb-8"
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Edit profile"
           >
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
             <h2 className="text-xl font-extrabold text-cink">Edit profile</h2>
             <div className="mt-5 space-y-3">
               <div>

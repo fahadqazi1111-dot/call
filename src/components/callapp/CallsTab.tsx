@@ -7,12 +7,14 @@ import { useApp } from '@/lib/callapp/store'
 import { callStatusText, fmtChatListTime } from '@/lib/callapp/utils'
 import type { CallRecord } from '@/lib/callapp/types'
 
-export function CallsTab() {
+export function CallsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const calls = useApp((s) => s.calls)
   const startCall = useApp((s) => s.startCall)
   const setTab = useApp((s) => s.setTab)
+  const openChat = useApp((s) => s.openChat)
   const [filter, setFilter] = useState<'all' | 'missed'>('all')
   const [query, setQuery] = useState('')
+  const desk = variant === 'desktop'
 
   const list = useMemo(() => {
     let arr = calls
@@ -29,11 +31,19 @@ export function CallsTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2.5 px-6 pt-14">
-        <h1 className="flex-1 text-[32px] font-extrabold tracking-tight text-cink">Calls</h1>
+      <header
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+      >
+        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
+          Calls
+        </h1>
       </header>
 
-      <div className="mx-6 mt-4 flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499]">
+      <div
+        className={`flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499] ${
+          desk ? 'mx-4 mt-4' : 'mx-6 mt-4'
+        }`}
+      >
         <Search size={19} />
         <input
           className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
@@ -43,7 +53,7 @@ export function CallsTab() {
         />
       </div>
 
-      <div className="mx-6 mt-4 flex rounded-[14px] bg-[#F0F3FA] p-1 text-center text-sm font-semibold">
+      <div className={`mt-4 flex rounded-[14px] bg-[#F0F3FA] p-1 text-center text-sm font-semibold ${desk ? 'mx-4' : 'mx-6'}`}>
         <button
           className={`flex-1 rounded-[11px] py-2.5 transition-all ${
             filter === 'all' ? 'bg-white text-cink shadow-[0_2px_6px_rgba(14,23,38,0.08)]' : 'text-cmut'
@@ -62,9 +72,9 @@ export function CallsTab() {
         </button>
       </div>
 
-      <div className="app-scroll mt-3 flex-1 overflow-y-auto pb-[96px]">
+      <div className={`app-scroll mt-3 flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
         <button
-          className="flex w-full items-center gap-3.5 px-6 py-3 text-left transition-colors hover:bg-cbg"
+          className={`flex w-full items-center gap-3.5 text-left transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'} py-3`}
           onClick={() => setTab('contacts')}
         >
           <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-cbrand text-white">
@@ -91,9 +101,13 @@ export function CallsTab() {
             const Icon = StatusIcon(c)
             const isVideo = c.type === 'video'
             return (
-              <div key={c.id} className="flex items-center gap-3.5 px-6 py-3 transition-colors hover:bg-cbg">
-                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={52} />
-                <div className="min-w-0 flex-1">
+              <div key={c.id} className={`flex items-center gap-3.5 py-3 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
+                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 46 : 52} />
+                <button
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => openChat(c.peer.id)}
+                  aria-label={`Open chat with ${c.peer.name}`}
+                >
                   <div className={`text-[16px] font-bold ${c.missed ? 'text-cred' : 'text-cink'}`}>{c.peer.name}</div>
                   <div className={`mt-0.5 flex items-center gap-1.5 text-sm ${c.missed ? 'text-cred' : 'text-[#4A5568]'}`}>
                     <Icon size={15} />
@@ -101,7 +115,7 @@ export function CallsTab() {
                       {isVideo ? 'Video' : 'Voice'} · {callStatusText(c)} · {fmtChatListTime(c.startedAt)}
                     </span>
                   </div>
-                </div>
+                </button>
                 <button
                   className="flex h-11 w-11 items-center justify-center rounded-full text-cbrand hover:bg-csoft"
                   aria-label={`Voice call ${c.peer.name}`}

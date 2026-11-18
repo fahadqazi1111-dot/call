@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Avatar } from './Avatar'
 import {
   Search,
@@ -21,18 +21,34 @@ interface PickerContact {
   tel: string[]
 }
 
-export function ContactsTab() {
+export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const contacts = useApp((s) => s.contacts)
   const online = useApp((s) => s.online)
   const openChat = useApp((s) => s.openChat)
   const startCall = useApp((s) => s.startCall)
   const addContact = useApp((s) => s.addContact)
   const syncDeviceContacts = useApp((s) => s.syncDeviceContacts)
+  const setTab = useApp((s) => s.setTab)
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [busy, setBusy] = useState(false)
+  const desk = variant === 'desktop'
+
+  /** Open a conversation and land on the chats section (required by the desktop shell). */
+  const messageUser = (id: string) => {
+    openChat(id)
+    setTab('chats')
+  }
+
+  /** Desktop shell: main panel CTA asks the list panel to open the add-contact dialog. */
+  useEffect(() => {
+    if (!desk) return
+    const open = () => setShowAdd(true)
+    window.addEventListener('call:open-add-contact', open)
+    return () => window.removeEventListener('call:open-add-contact', open)
+  }, [desk])
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -94,10 +110,16 @@ export function ContactsTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2.5 px-6 pt-14">
-        <h1 className="flex-1 text-[32px] font-extrabold tracking-tight text-cink">Contacts</h1>
+      <header
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+      >
+        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
+          Contacts
+        </h1>
         <button
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-cbrand text-white"
+          className={`flex items-center justify-center rounded-full bg-cbrand text-white transition hover:bg-cbrand-deep ${
+            desk ? 'h-10 w-10' : 'h-11 w-11'
+          }`}
           aria-label="New contact"
           onClick={() => setShowAdd(true)}
         >
@@ -105,7 +127,11 @@ export function ContactsTab() {
         </button>
       </header>
 
-      <div className="mx-6 mt-4 flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499]">
+      <div
+        className={`flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499] ${
+          desk ? 'mx-4 mt-4' : 'mx-6 mt-4'
+        }`}
+      >
         <Search size={19} />
         <input
           className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
@@ -115,7 +141,7 @@ export function ContactsTab() {
         />
       </div>
 
-      <div className="app-scroll mt-2 flex-1 overflow-y-auto pb-[96px]">
+      <div className={`app-scroll mt-2 flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
         <div className="px-4 py-2">
           <button
             className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
@@ -159,13 +185,13 @@ export function ContactsTab() {
         ) : (
           groups.map(([letter, arr]) => (
             <div key={letter}>
-              <div className="px-6 pb-1 pt-3 text-xs font-bold text-cbrand">{letter}</div>
+              <div className={`pb-1 pt-3 text-xs font-bold text-cbrand ${desk ? 'px-5' : 'px-6'}`}>{letter}</div>
               {arr.map((c) => (
-                <div key={c.id} className="flex items-center gap-3 px-6 py-2.5 transition-colors hover:bg-cbg">
+                <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
                   <Avatar
                     name={c.user?.name ?? c.name}
                     avatarKey={c.user?.avatarKey ?? 0}
-                    size={46}
+                    size={desk ? 42 : 46}
                     online={c.user ? online[c.user.id] : undefined}
                   />
                   <div className="min-w-0 flex-1">
@@ -186,7 +212,7 @@ export function ContactsTab() {
                       <button
                         className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand hover:bg-csoft"
                         aria-label={`Message ${c.user.name}`}
-                        onClick={() => openChat(c.user!.id)}
+                        onClick={() => messageUser(c.user!.id)}
                       >
                         <MessageCircle size={20} />
                       </button>
@@ -214,20 +240,25 @@ export function ContactsTab() {
           ))
         )}
 
-        <p className="px-6 pt-4 text-center text-xs text-[#9AA8C7]">
+        <p className={`pt-4 text-center text-xs text-[#9AA8C7] ${desk ? 'px-5' : 'px-6'}`}>
           {registeredCount} of {contacts.length} contacts are on CALL
         </p>
       </div>
 
       {showAdd && (
-        <div className="absolute inset-0 z-40 flex items-end bg-black/45" onClick={() => setShowAdd(false)}>
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${
+            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+          }`}
+          onClick={() => setShowAdd(false)}
+        >
           <div
-            className="w-full rounded-t-[28px] bg-white p-6 pb-8"
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Add contact"
           >
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
             <h2 className="text-xl font-extrabold text-cink">New contact</h2>
             <p className="mt-1 text-sm text-cmut">Save a number to call and chat for free.</p>
             <div className="mt-5 space-y-3">

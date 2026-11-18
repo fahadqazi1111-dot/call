@@ -13,10 +13,11 @@ import type { Message } from '@/lib/callapp/types'
 const EMOJIS = ['😀', '😂', '🥰', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😭', '😮', '🤝']
 const EMPTY_MESSAGES: Message[] = []
 
-export function ChatScreen({ peerId }: { peerId: string }) {
+export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
   const messages = useApp((s) => s.messages[peerId]) ?? EMPTY_MESSAGES
   const chats = useApp((s) => s.chats)
+  const contacts = useApp((s) => s.contacts)
   const online = useApp((s) => s.online)
   const typing = useApp((s) => s.typing[peerId] ?? false)
   const closeChat = useApp((s) => s.closeChat)
@@ -25,7 +26,15 @@ export function ChatScreen({ peerId }: { peerId: string }) {
   const startCall = useApp((s) => s.startCall)
   const loadMessages = useApp((s) => s.loadMessages)
 
-  const peer = useMemo(() => chats.find((c) => c.peer.id === peerId)?.peer, [chats, peerId])
+  /** Resolve the peer from existing chats, falling back to contacts (fresh conversation). */
+  const peer = useMemo(() => {
+    const fromChat = chats.find((c) => c.peer.id === peerId)?.peer
+    if (fromChat) return fromChat
+    const fromContact = contacts.find((c) => c.user?.id === peerId)?.user
+    if (fromContact)
+      return { id: fromContact.id, name: fromContact.name, avatarKey: fromContact.avatarKey, lastSeen: fromContact.lastSeen }
+    return undefined
+  }, [chats, contacts, peerId])
   const [draft, setDraft] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [sending, setSending] = useState(false)
@@ -33,6 +42,7 @@ export function ChatScreen({ peerId }: { peerId: string }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const typingLast = useRef(0)
   const recorder = useRecorder()
+  const desk = variant === 'desktop'
 
   useEffect(() => {
     if (peer) {
@@ -100,11 +110,21 @@ export function ChatScreen({ peerId }: { peerId: string }) {
   if (!peer) return null
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-cbg">
+    <div
+      className={`flex flex-col ${
+        desk ? 'relative h-full min-w-0 flex-1 bg-cbg' : 'absolute inset-0 z-40 bg-cbg'
+      }`}
+    >
       {/* header */}
-      <header className="relative z-10 flex items-center gap-2 border-b border-cline bg-white/95 px-2 pb-3 pt-12 backdrop-blur-md">
+      <header
+        className={`relative z-10 flex items-center gap-2 border-b border-cline bg-white/95 backdrop-blur-md ${
+          desk ? 'px-4 py-2.5' : 'px-2 pb-3 pt-12'
+        }`}
+      >
         <button
-          className="flex h-10 w-10 items-center justify-center rounded-full text-cink"
+          className={`flex h-10 w-10 items-center justify-center rounded-full text-cink transition hover:bg-cbg ${
+            desk ? 'hidden' : ''
+          }`}
           onClick={closeChat}
           aria-label="Back to chats"
         >
@@ -118,14 +138,14 @@ export function ChatScreen({ peerId }: { peerId: string }) {
           </div>
         </div>
         <button
-          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
           aria-label="Video call"
           onClick={() => startCall(peer, 'video')}
         >
           <Video size={22} />
         </button>
         <button
-          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand transition hover:bg-csoft"
           aria-label="Voice call"
           onClick={() => startCall(peer, 'voice')}
         >
@@ -134,7 +154,10 @@ export function ChatScreen({ peerId }: { peerId: string }) {
       </header>
 
       {/* messages */}
-      <div ref={scrollRef} className="app-scroll flex-1 overflow-y-auto px-4 pb-4 pt-4">
+      <div
+        ref={scrollRef}
+        className={`app-scroll flex-1 overflow-y-auto ${desk ? 'chat-canvas desk-scroll px-6 py-6 md:px-10' : 'px-4 pb-4 pt-4'}`}
+      >
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
             <Avatar name={peer.name} avatarKey={peer.avatarKey} size={84} />
@@ -192,7 +215,7 @@ export function ChatScreen({ peerId }: { peerId: string }) {
 
       {/* composer / recorder */}
       {recorder.status === 'recording' ? (
-        <div className="flex h-[92px] items-center gap-3 border-t border-cline bg-white px-4 pb-4">
+        <div className={`flex items-center gap-3 border-t border-cline bg-white px-4 ${desk ? 'h-[84px] py-4' : 'h-[92px] pb-4'}`}>
           <button
             className="flex h-12 w-12 flex-none items-center justify-center rounded-full text-cred hover:bg-[#FEF0EF]"
             aria-label="Cancel recording"
@@ -223,7 +246,7 @@ export function ChatScreen({ peerId }: { peerId: string }) {
           </button>
         </div>
       ) : (
-        <div className="border-t border-cline bg-white px-4 pb-[92px] pt-3">
+        <div className={`border-t border-cline bg-white ${desk ? 'px-4 pb-3.5 pt-3' : 'px-4 pb-[92px] pt-3'}`}>
           {showEmoji && (
             <div className="mb-2 flex flex-wrap gap-1.5 rounded-2xl bg-cbg p-3">
               {EMOJIS.map((e) => (
@@ -339,7 +362,7 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[272px] rounded-[20px] px-3.5 py-2 shadow-sm ${
+        className={`rounded-[20px] px-3.5 py-2 shadow-sm sm:max-w-[520px] max-w-[272px] ${
           mine
             ? 'rounded-br-md bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.3)]'
             : 'rounded-bl-md bg-white text-cink'

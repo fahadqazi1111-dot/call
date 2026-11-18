@@ -2,19 +2,21 @@
 
 import { useMemo, useState } from 'react'
 import { Avatar } from './Avatar'
-import { Search, Plus, Mic, Video, Phone, Check, CheckCheck, Camera } from 'lucide-react'
+import { Search, Plus, Mic, Video, Phone, Check, CheckCheck, MessageSquare, Camera } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { fmtChatListTime, fmtDuration } from '@/lib/callapp/utils'
 import type { ChatSummary } from '@/lib/callapp/types'
 
-export function ChatsTab() {
+export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const chats = useApp((s) => s.chats)
   const me = useApp((s) => s.me)
   const online = useApp((s) => s.online)
   const openChat = useApp((s) => s.openChat)
+  const openPeerId = useApp((s) => s.openPeerId)
   const setTab = useApp((s) => s.setTab)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const desk = variant === 'desktop'
 
   const list = useMemo(() => {
     let arr = [...chats].sort((a, b) => +new Date(b.lastActivity) - +new Date(a.lastActivity))
@@ -45,25 +47,46 @@ export function ChatsTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2.5 px-6 pt-14">
-        <h1 className="flex-1 text-[32px] font-extrabold tracking-tight text-cink">Chats</h1>
-        <button
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-csoft text-cbrand"
-          aria-label="New conversation"
-          onClick={() => setTab('contacts')}
-        >
-          <Camera size={21} />
-        </button>
-        <button
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-cbrand text-white"
-          aria-label="New chat"
-          onClick={() => setTab('contacts')}
-        >
-          <Plus size={21} />
-        </button>
+      <header
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+      >
+        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
+          Chats
+        </h1>
+        {desk ? (
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-cbrand text-white transition hover:bg-cbrand-deep"
+            aria-label="New chat"
+            title="New chat"
+            onClick={() => setTab('contacts')}
+          >
+            <MessageSquare size={19} />
+          </button>
+        ) : (
+          <>
+            <button
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-csoft text-cbrand"
+              aria-label="New conversation"
+              onClick={() => setTab('contacts')}
+            >
+              <Camera size={21} />
+            </button>
+            <button
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-cbrand text-white"
+              aria-label="New chat"
+              onClick={() => setTab('contacts')}
+            >
+              <Plus size={21} />
+            </button>
+          </>
+        )}
       </header>
 
-      <div className="mx-6 mt-4 flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499]">
+      <div
+        className={`flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499] ${
+          desk ? 'mx-4 mt-4' : 'mx-6 mt-4'
+        }`}
+      >
         <Search size={19} />
         <input
           className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
@@ -73,7 +96,7 @@ export function ChatsTab() {
         />
       </div>
 
-      <div className="flex gap-2 px-6 pb-2 pt-3">
+      <div className={`flex gap-2 pb-2 pt-3 ${desk ? 'px-4' : 'px-6'}`}>
         <button
           className={`rounded-[20px] px-4 py-2 text-[13px] font-semibold transition-colors ${
             filter === 'all' ? 'bg-cbrand text-white' : 'bg-[#F0F3FA] text-[#4A5568]'
@@ -92,7 +115,7 @@ export function ChatsTab() {
         </button>
       </div>
 
-      <div className="app-scroll flex-1 overflow-y-auto pb-[96px]">
+      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
         {list.length === 0 ? (
           <div className="flex flex-col items-center pt-24 text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-cbrand">
@@ -110,10 +133,18 @@ export function ChatsTab() {
           list.map((c) => (
             <button
               key={c.conversationId}
-              className="flex w-full items-center gap-3.5 px-6 py-3 text-left transition-colors hover:bg-cbg"
+              className={`flex w-full items-center gap-3.5 text-left transition-colors ${
+                desk ? 'mx-2 rounded-xl px-3 py-2.5' : 'px-6 py-3'
+              } ${
+                openPeerId === c.peer.id
+                  ? desk
+                    ? 'bg-[#E7EEFF]'
+                    : 'bg-cbg'
+                  : 'hover:bg-cbg'
+              }`}
               onClick={() => openChat(c.peer.id)}
             >
-              <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={56} online={online[c.peer.id]} />
+              <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-[16px] font-bold text-cink">
                   <span className="truncate">{c.peer.name}</span>
