@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, normalizePhone } from '@/lib/callapp/server'
+import { requireUser, normalizePhone, matchRegisteredUsers } from '@/lib/callapp/server'
 
 /** GET: list my contacts, each with the matched registered CALL user (if any). */
 export async function GET(req: Request) {
@@ -10,13 +10,13 @@ export async function GET(req: Request) {
     where: { ownerId: me.id },
     orderBy: [{ name: 'asc' }],
   })
-  const phones = contacts.map((c) => c.phone)
-  const users = await db.user.findMany({
-    where: { phone: { in: phones }, NOT: { id: me.id } },
-  })
-  const byPhone = new Map(users.map((u) => [u.phone, u]))
+  // Smart matching: exact digits, national format (0-prefix), and subscriber-suffix.
+  const matched = await matchRegisteredUsers(
+    contacts.map((c) => c.phone),
+    me.id
+  )
   const list = contacts.map((c) => {
-    const u = byPhone.get(c.phone)
+    const u = matched.get(c.phone)
     return {
       id: c.id,
       name: c.name,
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
         name: String(name || '').trim().slice(0, 40) || normalized,
       },
     })
-    const u = await db.user.findUnique({ where: { phone: normalized } })
+    const u = (await matchRegisteredUsers([normalized], me.id)).get(normalized)
     return NextResponse.json({
       contact: {
         id: contact.id,

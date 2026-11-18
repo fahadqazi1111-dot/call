@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, normalizePhone } from '@/lib/callapp/server'
+import { requireUser, normalizePhone, matchRegisteredUsers } from '@/lib/callapp/server'
 
 /**
  * Sync device contacts (Contact Picker API results or a pasted list).
@@ -31,13 +31,15 @@ export async function POST(req: Request) {
         create: { ownerId: me.id, phone: r.phone, name: r.name },
       })
     }
-    const users = await db.user.findMany({
-      where: { phone: { in: rows.map((r) => r.phone) }, NOT: { id: me.id } },
-    })
+    // Smart matching: exact digits, national format (0-prefix), and subscriber-suffix.
+    const matched = await matchRegisteredUsers(
+      rows.map((r) => r.phone),
+      me.id
+    )
     return NextResponse.json({
       ok: true,
       saved: rows.length,
-      matched: users.length,
+      matched: matched.size,
     })
   } catch {
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
