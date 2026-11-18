@@ -8,9 +8,9 @@ import { liveManager, battleManager } from '@/lib/callapp/liveManager'
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { Avatar } from './Avatar'
-import { GiftPickerSheet, GiftAnimationLayer, type GiftAnim } from './GiftsUI'
+import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { BattleVideoLayout } from './LiveHostScreen'
-import type { GiftSendResult, LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/callapp/types'
+import type { LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/callapp/types'
 
 /**
  * TikTok-style viewer: full-screen vertical video of the host (and battle
@@ -67,30 +67,17 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
       if (d.liveId === session.id) setComments((c) => [...c.slice(-120), d.comment])
     }
     const onGift = (p: unknown) => {
-      const d = p as { liveId: string; payload: GiftSendResult }
+      const d = p as { liveId: string; payload: {
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+      } }
       if (d.liveId !== session.id) return
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift?.priceCoins ?? 0) / 500)))
-      const key = ++animKey.current
-      setAnims((a) => [
-        ...a,
-        {
-          key,
-          emoji: d.payload.gift.emoji,
-          name: d.payload.gift.name,
-          animKind: d.payload.gift.animKind,
-          from: d.payload.from.name,
-          to: d.payload.to.name,
-          durationMs: d.payload.gift.durationMs,
-          tier: Math.min(3, Math.floor(d.payload.gift.priceCoins / 500)),
-        },
-      ])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== key)), d.payload.gift.durationMs + 300)
-      if (battle.id && d.payload.battle) {
-        setBattle((b) => ({
-          ...b,
-          sideScores: b.sideScores.map((s, i) => (i === d.payload.battle!.side ? (d.payload.battle.total ?? s + d.payload.battle.added) : s)),
-        }))
-      }
+      // Animation is driven by the server-verified fulfillment event only.
+      const anim = animFromPayload(d.payload)
+      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      setAnims((a) => [...a, anim])
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
     }
     const onEnded = (p: unknown) => {
       const d = p as { liveId: string }
@@ -275,24 +262,21 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
           </button>
         </div>
         <p className="flex items-center justify-center gap-1 pt-2 text-[10px] text-white/50">
-          <Check size={11} /> Gifts to the host / battle teams are real coin transactions
+          <Check size={11} /> Gifts are direct card payments — hosts earn real money after verified checkout
         </p>
       </div>
 
-      {/* gift picker */}
+      {/* gift picker — host/battle-team selection happens inside the sheet */}
       {giftOpen && me && (
         <GiftPickerSheet
           context={battleLive ? 'battle' : 'live'}
-          recipientId={battleLive ? battle.participants.find((p) => p.side === 0)?.userId ?? session.host.id : session.host.id}
-          recipientName={battleLive ? 'Team A' : session.host.name}
           extra={
             battleLive
-              ? { liveId: session.id, battleId: battle.id, battleSide: 0 }
+              ? { liveId: session.id, battleId: battle.id }
               : { liveId: session.id }
           }
-          onSent={(res) => {
-            socketClient.emit('live:gift', { liveId: session.id, payload: res })
-            if (res.battle) socketClient.emit('battle:score', { liveId: session.id, battleId: res.battle.battleId, side: res.battle.side, added: res.battle.added, total: res.battle.total })
+          onSent={() => {
+            // animation + battle score arrive via the server-verified relay
           }}
           onClose={() => setGiftOpen(false)}
         />

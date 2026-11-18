@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, Radio, Users, Lock, Mic, Loader2, Trophy } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { Avatar } from './Avatar'
 import { AdBanner } from './GiftsUI'
 import { RoomScreen } from './RoomScreen'
 import { BattleHistorySheet } from './BattleHistorySheet'
+import { PaymentModal, waitForPayment, type PendingPayment } from './PaymentModal'
 import type { VoiceRoomItem } from '@/lib/callapp/types'
 
 export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
@@ -16,6 +18,8 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [activeRoom, setActiveRoom] = useState<{ id: string; title: string; entryPaid: boolean } | null>(null)
+  const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null)
+  const [pendingRoomId, setPendingRoomId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const desk = variant === 'desktop'
@@ -36,17 +40,28 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
 
   const openRoom = async (room: VoiceRoomItem) => {
     if (!me) return
-    let entryPaid = false
     try {
-      if (room.isPaid && room.host.id !== me.id) {
-        // paid entry (idempotent, charges once per room)
-        const res = await api.roomEntry(room.id)
-        entryPaid = (res.charged ?? 0) > 0 || !!res.alreadyPaid
-      } else {
-        await api.roomEntry(room.id)
-        entryPaid = true
+      // roomEntry POST: free rooms join instantly; paid rooms create a direct
+      // payment checkout (money, never coins) — joining only after verified payment.
+      const res = await api.roomEntry(room.id)
+      if (res.needsPayment && res.paymentId) {
+        setPendingRoomId(room.id)
+        if (res.provider === 'stripe' && res.checkoutUrl) {
+          window.location.assign(res.checkoutUrl)
+          return
+        }
+        setPendingPayment({
+          id: res.paymentId,
+          amount: res.amount ?? 0,
+          currency: res.currency ?? 'USD',
+          isTest: !!res.isTest,
+          provider: res.provider ?? 'sandbox',
+          description: `Entry — ${room.title}`,
+          emoji: '🎙️',
+        })
+        return
       }
-      setActiveRoom({ id: room.id, title: room.title, entryPaid })
+      setActiveRoom({ id: room.id, title: room.title, entryPaid: true })
     } catch (e) {
       alert((e as Error).message || 'Could not join the room')
     }
@@ -85,7 +100,7 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
             </div>
             <p className="mt-5 text-lg font-bold text-cink">No live rooms</p>
             <p className="mt-1 px-10 text-sm text-cmut">
-              Create a free room and talk with friends, or host a paid room and earn diamonds.
+              Create a free room and talk with friends, or host a paid room and earn real money from entries.
             </p>
             <button className="mt-5 rounded-full bg-brand-grad px-6 py-3 text-sm font-semibold text-white" onClick={() => setShowCreate(true)}>
               Create a room
@@ -105,7 +120,7 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
                     <span className="truncate text-[15px] font-bold text-cink">{r.title}</span>
                     {r.isPaid && (
                       <span className="flex flex-none items-center gap-0.5 rounded-full bg-[#FFF3D6] px-2 py-0.5 text-[10px] font-bold text-[#B7791F]">
-                        <Lock size={10} /> {r.entryFee}
+                        <Lock size={10} /> ${r.entryFee.toFixed(2)}
                       </span>
                     )}
                   </div>
@@ -132,6 +147,31 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
           }}
         />
       )}
+      {pendingPayment && pendingRoomId && (
+        <PaymentModal
+          payment={pendingPayment}
+          onPaid={async () => {
+            const pid = pendingPayment.id
+            setPendingPayment(null)
+            const final = await waitForPayment(pid, 8000)
+            if (final?.status === 'successful') {
+              const room = rooms.find((r) => r.id === pendingRoomId)
+              if (room) void openRoom(room)
+            } else {
+              toast.error('Payment still processing — you can join once it completes')
+            }
+            setPendingRoomId(null)
+          }}
+          onClose={() => {
+            setPendingPayment(null)
+            setPendingRoomId(null)
+          }}
+          onCancel={() => {
+            setPendingPayment(null)
+            setPendingRoomId(null)
+          }}
+        />
+      )}
       {activeRoom && (
         <RoomScreen
           roomId={activeRoom.id}
@@ -152,10 +192,10 @@ function CreateRoomSheet({ onClose, onCreated }: { onClose: () => void; onCreate
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [isPaid, setIsPaid] = useState(false)
-  const [entryFee, setEntryFee] = useState('50')
+  const [entryFee, setEntryFee] = useState('2.50')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [maxFee, setMaxFee] = useState(5000)
+  const [maxFee, setMaxFee] = useState(50)
   const [allowPaid, setAllowPaid] = useState(true)
 
   useEffect(() => {
@@ -222,11 +262,12 @@ function CreateRoomSheet({ onClose, onCreated }: { onClose: () => void; onCreate
         </div>
         {isPaid && (
           <div className="mt-3 flex items-center gap-3">
-            <label className="text-sm font-semibold text-cmut">Entry fee (coins, max {maxFee})</label>
+            <label className="text-sm font-semibold text-cmut">Entry fee (USD, max ${maxFee}) — paid by joiners via card</label>
             <input
               type="number"
-              min={1}
+              min={0.5}
               max={maxFee}
+              step="0.5"
               className="h-11 w-28 rounded-[12px] bg-[#F0F3FA] px-3 text-[15px] font-bold outline-none"
               value={entryFee}
               onChange={(e) => setEntryFee(e.target.value)}

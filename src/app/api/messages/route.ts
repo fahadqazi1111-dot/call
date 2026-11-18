@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/callapp/server'
+import { requireUser, isContactOf } from '@/lib/callapp/server'
 import { getOrCreateConversation } from '@/lib/callapp/conv'
 
 /**
- * POST: send a message { to, type: 'text'|'voice'|'call', content, duration?, callMeta? }
+ * POST: send a message { to, type: 'text'|'voice'|'call'|'image', content, duration?, callMeta? }
  * Returns the persisted message; the client then pushes it over the socket.
+ *
+ * CONTACTS-BASED MESSAGING: a brand-new conversation can only be started with
+ * an actual contact (either side has the other saved) or by staff reaching a
+ * user. Existing conversations always keep working. Users with the privacy
+ * toggle "Allow messages from non-contacts" accept anyone.
  */
 export async function POST(req: Request) {
   const me = await requireUser(req)
@@ -13,7 +18,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const to = String(body.to || '')
-    const type = ['text', 'voice', 'call'].includes(body.type) ? body.type : 'text'
+    const type = ['text', 'voice', 'call', 'image'].includes(body.type) ? body.type : 'text'
     let content = String(body.content ?? '')
     if (!to || !content) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
@@ -31,10 +36,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'The official account cannot send chat messages' }, { status: 403 })
     }
 
+    // CONTACTS GATE — hard floor on the backend for NEW conversations only:
+    // the INITIATOR must have the recipient saved as a contact (or the
+    // recipient allows non-contacts, or the sender is staff).
+    const existing = await db.conversation.findFirst({
+      where: { OR: [{ userAId: me.id, userBId: to }, { userAId: to, userBId: me.id }] },
+      select: { id: true },
+    })
+    if (!existing) {
+      const staffSender = me.role === 'admin' || me.role === 'team'
+      const savedByMe = await isContactOf(me.id, peer.phone)
+      const allowed = staffSender || peer.allowNonContacts || savedByMe
+      if (!allowed) {
+        return NextResponse.json(
+          { error: 'You can only message people in your contacts. Save them as a contact first — or ask them to message you.' },
+          { status: 403 }
+        )
+      }
+    }
+
     if (type === 'text' && content.length > 4000) content = content.slice(0, 4000)
     const duration = typeof body.duration === 'number' ? Math.max(0, Math.round(body.duration)) : null
 
-    const conv = await getOrCreateConversation(me.id, to)
+    const conv = existing ? { id: existing.id } : await getOrCreateConversation(me.id, to)
     const msg = await db.message.create({
       data: {
         conversationId: conv.id,
@@ -54,6 +78,7 @@ export async function POST(req: Request) {
         content: msg.content,
         duration: msg.duration,
         createdAt: msg.createdAt.toISOString(),
+        deliveredAt: null,
         readAt: null,
         mine: true,
       },

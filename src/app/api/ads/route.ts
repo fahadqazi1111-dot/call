@@ -4,9 +4,10 @@ import { getSetting } from '@/lib/callapp/server'
 
 /**
  * GET ?placement=chats|rooms|profile — active ads for a placement.
- * Ads are lightweight banner cards rendered only in LIST screens — never
- * overlaid on active calls, chat conversations, voice rooms or live streams
- * (store policy + user-experience requirement).
+ * Serves BOTH admin house ads and user campaigns that are ACTIVE AND PAID.
+ * Unpaid campaigns (pending_payment) can never appear here. Ads are
+ * lightweight banner cards rendered only in LIST screens — never overlaid on
+ * active calls, chat conversations, voice rooms or live streams.
  */
 export async function GET(req: Request) {
   const placement = new URL(req.url).searchParams.get('placement') || 'chats'
@@ -17,8 +18,14 @@ export async function GET(req: Request) {
   if (!cfg.enabled || !cfg.placements.includes(placement)) {
     return NextResponse.json({ ads: [], enabled: false })
   }
+  const now = new Date()
   const ads = await db.ad.findMany({
-    where: { active: true, placements: { contains: placement } },
+    where: {
+      status: 'active',
+      placements: { contains: placement },
+      OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+      AND: [{ OR: [{ endsAt: null }, { endsAt: { gt: now } }] }],
+    },
     orderBy: { weight: 'desc' },
     take: 5,
   })

@@ -1,0 +1,284 @@
+import { db } from '@/lib/db'
+import { applyLedgerDelta, ensureWallet, getFinance, providerFeeFor, round2 } from './server'
+import { relayToLive, relayToRoom, relayToUser } from './relay'
+import { safeJson } from './payments'
+
+/**
+ * Financial fulfillment — the ONLY path that turns a verified payment into
+ * delivered value. Every step is idempotent and audited:
+ *
+ *   1. Atomic claim: pending → successful (updateMany guarded by status).
+ *      Two webhook retries hitting simultaneously can never double-deliver.
+ *   2. Commission split: gross − platform commission − provider fee = creator net.
+ *   3. Ledger: creator's wallet credited through applyLedgerDelta (append-only
+ *      ledger rows with idempotency keys).
+ *   4. Delivery: GiftSend row, notification, realtime relay for animations,
+ *      battle score updates (score = verified money, not a separate currency).
+ */
+
+export interface FulfillResult {
+  ok: boolean
+  alreadyProcessed?: boolean
+  reason?: string
+  sendId?: string
+  wallet?: { available: number; reserved: number }
+}
+
+/** Entry price breakdown for UI display. */
+export function splitAmounts(gross: number, feeAmount: number, commissionPercent: number) {
+  const commission = round2((gross * commissionPercent) / 100)
+  const net = round2(Math.max(0, gross - commission - feeAmount))
+  return { commission, net }
+}
+
+export async function fulfillPayment(paymentId: string): Promise<FulfillResult> {
+  const payment = await db.payment.findUnique({ where: { id: paymentId } })
+  if (!payment) return { ok: false, reason: 'payment_not_found' }
+  if (payment.status === 'successful') return { ok: true, alreadyProcessed: true }
+  if (payment.status === 'refunded') return { ok: false, reason: 'refunded' }
+
+  // refine provider fee once, at fulfillment time (kept separately identifiable)
+  const feeAmount = payment.feeAmount > 0 ? payment.feeAmount : await providerFeeFor(payment.amount)
+
+  // ---- atomic claim: only ONE caller wins the pending → successful transition
+  const claimed = await db.payment.updateMany({
+    where: { id: payment.id, status: 'pending' },
+    data: { status: 'successful', completedAt: new Date(), feeAmount },
+  })
+  if (claimed.count === 0) {
+    const fresh = await db.payment.findUnique({ where: { id: payment.id } })
+    return fresh?.status === 'successful'
+      ? { ok: true, alreadyProcessed: true }
+      : { ok: false, reason: `payment_status_${fresh?.status ?? 'unknown'}` }
+  }
+
+  const meta = safeJson(payment.meta)
+  const finance = await getFinance()
+  const gross = round2(payment.amount)
+
+  try {
+    if (payment.purpose === 'gift') {
+      return await fulfillGift(payment, meta, gross, feeAmount, finance.platformCommission)
+    }
+    if (payment.purpose === 'room_entry') {
+      return await fulfillRoomEntry(payment, meta, gross, feeAmount, finance.roomHostPercent)
+    }
+    if (payment.purpose === 'ad_campaign') {
+      return await fulfillAdCampaign(payment, meta)
+    }
+    return { ok: true, reason: 'no_fulfillment_needed' }
+  } catch (err) {
+    console.error('fulfillment error', paymentId, err)
+    // keep payment successful (money verified) but surface the failure for ops
+    return { ok: false, reason: 'fulfillment_error' }
+  }
+}
+
+/* ---------------- gift ---------------- */
+
+async function fulfillGift(
+  payment: { id: string; userId: string; isTest: boolean; amount: number },
+  meta: Record<string, unknown>,
+  gross: number,
+  feeAmount: number,
+  commissionPercent: number
+): Promise<FulfillResult> {
+  const giftId = String(meta.giftId || '')
+  const toUserId = String(meta.toUserId || '')
+  const context = ['room', 'live', 'battle'].includes(String(meta.context)) ? String(meta.context) : 'live'
+  const gift = await db.gift.findUnique({ where: { id: giftId } })
+  const recipient = await db.user.findUnique({ where: { id: toUserId } })
+  const sender = await db.user.findUnique({ where: { id: payment.userId } })
+  if (!gift || !recipient || !sender) return { ok: false, reason: 'gift_participants_missing' }
+
+  const { commission, net } = splitAmounts(gross, feeAmount, commissionPercent)
+
+  const send = await db.giftSend.create({
+    data: {
+      giftId: gift.id,
+      senderId: sender.id,
+      recipientId: recipient.id,
+      context,
+      roomId: (meta.roomId as string) || null,
+      liveId: (meta.liveId as string) || null,
+      battleId: (meta.battleId as string) || null,
+      battleSide: typeof meta.battleSide === 'number' ? meta.battleSide : null,
+      grossAmount: gross,
+      commission,
+      feeAmount,
+      netAmount: net,
+      paymentId: payment.id,
+      isTest: payment.isTest,
+    },
+  })
+
+  // creator credit — idempotent by payment id
+  const credit = await applyLedgerDelta(
+    recipient.id,
+    'gift_received',
+    { available: net, totals: { totalReceived: gross, totalEarned: net } },
+    `Gift ${gift.name} from ${sender.name}${payment.isTest ? ' (test)' : ''} — gross $${gross.toFixed(2)}, commission $${commission.toFixed(2)}, net $${net.toFixed(2)}`,
+    'gift_send',
+    send.id,
+    `giftcredit:${payment.id}`
+  )
+
+  // battle scoring — verified money only
+  let battleTotal: number | null = null
+  if (context === 'battle' && meta.battleId && typeof meta.battleSide === 'number') {
+    const part = await db.battleParticipant.findFirst({
+      where: { battleId: String(meta.battleId), side: meta.battleSide, userId: recipient.id },
+    })
+    if (part) {
+      const updated = await db.battleParticipant.update({
+        where: { id: part.id },
+        data: { score: { increment: gross } },
+      })
+      battleTotal = updated.score
+    }
+  }
+
+  await db.notification.create({
+    data: {
+      userId: recipient.id,
+      kind: 'gift',
+      title: `${sender.name} sent you ${gift.name} ${gift.emoji}`,
+      body: `Gross $${gross.toFixed(2)} · commission $${commission.toFixed(2)} · you earned $${net.toFixed(2)}${payment.isTest ? ' (test payment)' : ''}`,
+      refType: context === 'room' ? 'room' : 'live',
+      refId: (meta.roomId as string) || (meta.liveId as string) || null,
+    },
+  })
+
+  // realtime delivery so every client in the room/live plays the animation
+  const payload = {
+    ok: true,
+    sendId: send.id,
+    gift: {
+      id: gift.id,
+      name: gift.name,
+      emoji: gift.emoji,
+      animKind: gift.animKind,
+      sound: gift.sound,
+      durationMs: gift.durationMs,
+      priceUsd: gift.priceUsd,
+    },
+    from: { id: sender.id, name: sender.name, avatarKey: sender.avatarKey, avatarUrl: sender.avatarUrl },
+    to: { id: recipient.id, name: recipient.name, avatarKey: recipient.avatarKey, avatarUrl: recipient.avatarUrl },
+    battle:
+      context === 'battle' && meta.battleId
+        ? { battleId: meta.battleId, side: meta.battleSide, added: gross, total: battleTotal }
+        : null,
+  }
+  if (context === 'room' && meta.roomId) {
+    await relayToRoom(String(meta.roomId), 'room:gift', { roomId: meta.roomId, payload })
+  } else if (meta.liveId) {
+    await relayToLive(String(meta.liveId), 'live:gift', { liveId: meta.liveId, payload })
+    if (battleTotal !== null && meta.battleId && meta.liveId) {
+      await relayToLive(String(meta.liveId), 'battle:score', {
+        battleId: meta.battleId,
+        side: meta.battleSide,
+        added: gross,
+        total: battleTotal,
+      })
+    }
+  }
+  await relayToUser(recipient.id, 'notify:incoming', {
+    payload: {
+      id: `live-${send.id}`,
+      kind: 'gift',
+      title: `${sender.name} sent you ${gift.name} ${gift.emoji}`,
+      body: `You earned $${net.toFixed(2)}`,
+      createdAt: new Date().toISOString(),
+    },
+  })
+
+  return { ok: true, sendId: send.id, wallet: credit.wallet }
+}
+
+/* ---------------- paid room entry ---------------- */
+
+async function fulfillRoomEntry(
+  payment: { id: string; userId: string; isTest: boolean },
+  meta: Record<string, unknown>,
+  gross: number,
+  feeAmount: number,
+  roomHostPercent: number
+): Promise<FulfillResult> {
+  const roomId = String(meta.roomId || '')
+  const room = await db.voiceRoom.findUnique({ where: { id: roomId } })
+  if (!room) return { ok: false, reason: 'room_missing' }
+
+  const commissionPercent = Math.max(0, 100 - roomHostPercent)
+  const { commission, net } = splitAmounts(gross, feeAmount, commissionPercent)
+
+  await db.roomParticipant.upsert({
+    where: { roomId_userId: { roomId, userId: payment.userId } },
+    update: { entryPaid: true, leftAt: null, blocked: false },
+    create: { roomId, userId: payment.userId, role: 'listener', entryPaid: true },
+  })
+
+  await applyLedgerDelta(
+    room.hostId,
+    'room_income',
+    { available: net, totals: { totalEarned: net } },
+    `Paid room entry — ${room.title} (entry by user) — gross $${gross.toFixed(2)}, commission $${commission.toFixed(2)}, net $${net.toFixed(2)}${payment.isTest ? ' (test)' : ''}`,
+    'room',
+    room.id,
+    `roomincome:${payment.id}`
+  )
+
+  await db.notification.create({
+    data: {
+      userId: room.hostId,
+      kind: 'wallet',
+      title: 'New paid room entry',
+      body: `Gross $${gross.toFixed(2)} · you earned $${net.toFixed(2)}${payment.isTest ? ' (test payment)' : ''}`,
+      refType: 'room',
+      refId: room.id,
+    },
+  })
+
+  await relayToRoom(roomId, 'room:entry:paid', { roomId, userId: payment.userId })
+  return { ok: true }
+}
+
+/* ---------------- ad campaign payment ---------------- */
+
+async function fulfillAdCampaign(
+  payment: { id: string; userId: string; isTest: boolean },
+  meta: Record<string, unknown>
+): Promise<FulfillResult> {
+  const campaignId = String(meta.campaignId || '')
+  const ad = await db.ad.findUnique({ where: { id: campaignId } })
+  if (!ad) return { ok: false, reason: 'campaign_missing' }
+  if (ad.status === 'pending_payment') {
+    await db.ad.update({
+      where: { id: ad.id },
+      data: { status: 'pending_approval', paymentId: payment.id },
+    })
+  }
+  await db.notification.create({
+    data: {
+      userId: ad.ownerId || payment.userId,
+      kind: 'ad',
+      title: 'Ad campaign payment received',
+      body: `"${ad.title}" is now pending admin approval${payment.isTest ? ' (test payment)' : ''}.`,
+      refType: 'ad',
+      refId: ad.id,
+    },
+  })
+  return { ok: true }
+}
+
+/* ---------------- wallet snapshot helper ---------------- */
+
+export async function walletSnapshot(userId: string) {
+  const w = await ensureWallet(userId)
+  return {
+    available: round2(w.available),
+    reserved: round2(w.reserved),
+    totalReceived: round2(w.totalReceived),
+    totalEarned: round2(w.totalEarned),
+    totalWithdrawn: round2(w.totalWithdrawn),
+  }
+}

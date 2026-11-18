@@ -28,6 +28,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ peerId: string 
       content: m.content,
       duration: m.duration,
       createdAt: m.createdAt.toISOString(),
+      deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
       readAt: m.readAt ? m.readAt.toISOString() : null,
       mine: m.senderId === me.id,
     })),

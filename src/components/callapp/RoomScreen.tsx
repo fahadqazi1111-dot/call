@@ -12,9 +12,9 @@ import { roomManager, type RoomManagerState } from '@/lib/callapp/roomManager'
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { Avatar } from './Avatar'
-import { GiftPickerSheet, GiftAnimationLayer, type GiftAnim } from './GiftsUI'
+import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { VOICE_FX, createFxStream } from '@/lib/callapp/voiceFx'
-import type { GiftSendResult, RoomChatMsg, RoomUserState } from '@/lib/callapp/types'
+import type { GiftSessionStats, RoomChatMsg, RoomUserState } from '@/lib/callapp/types'
 
 const REACTIONS = ['👍', '❤️', '😂', '🎉', '😮', '🔥']
 
@@ -35,7 +35,9 @@ export function RoomScreen({
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [giftTarget, setGiftTarget] = useState<RoomUserState | null>(null)
+  const [giftOpen, setGiftOpen] = useState(false)
   const [anims, setAnims] = useState<GiftAnim[]>([])
+  const [giftStats, setGiftStats] = useState<GiftSessionStats | null>(null)
   const [reacts, setReacts] = useState<{ key: number; emoji: string; x: number }[]>([])
   const [voiceFx, setVoiceFx] = useState('original')
   const [fxBusy, setFxBusy] = useState(false)
@@ -101,24 +103,19 @@ export function RoomScreen({
       window.setTimeout(() => setReacts((r) => r.filter((x) => x.key !== key)), 2600)
     }
     const onGift = (p: unknown) => {
-      const d = p as { roomId: string; payload: GiftSendResult }
+      const d = p as { roomId: string; payload: {
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+      } }
       if (d.roomId !== roomId) return
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift?.priceCoins ?? 0) / 500)))
-      const key = ++animKey.current
-      setAnims((a) => [
-        ...a,
-        {
-          key,
-          emoji: d.payload.gift.emoji,
-          name: d.payload.gift.name,
-          animKind: d.payload.gift.animKind,
-          from: d.payload.from.name,
-          to: d.payload.to.name,
-          durationMs: d.payload.gift.durationMs,
-          tier: Math.min(3, Math.floor(d.payload.gift.priceCoins / 500)),
-        },
-      ])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== key)), d.payload.gift.durationMs + 300)
+      // Animation + sound are driven SOLELY by the server-verified fulfillment
+      // event — nothing is ever shown before the payment is confirmed.
+      const anim = animFromPayload(d.payload)
+      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      setAnims((a) => [...a, anim])
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
+      void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
     }
     const onRemoved = (p: unknown) => {
       const d = p as { roomId: string; reason: string }
@@ -250,8 +247,10 @@ export function RoomScreen({
     } catch {}
   }
 
-  const sendGiftDone = (res: GiftSendResult) => {
-    socketClient.emit('room:gift', { roomId, payload: res })
+  const sendGiftDone = () => {
+    // The animation for EVERYONE (including me) arrives via the server relay
+    // after payment verification — nothing is played pre-verification.
+    void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
   }
 
   const endRoom = async () => {
@@ -271,6 +270,8 @@ export function RoomScreen({
       </div>
     )
   }
+
+  const sessionGross = giftStats?.totals.gross ?? 0
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-gradient-to-b from-[#181b26] via-[#12141c] to-[#0b0d13] text-white">
@@ -309,6 +310,19 @@ export function RoomScreen({
           </button>
         )}
       </header>
+
+      {/* verified gift session stats (money, host earnings) */}
+      <button
+        className="mx-4 flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-left text-[11.5px] font-semibold text-white/85 transition hover:bg-white/15"
+        onClick={() => void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})}
+        title="Verified gift stats for this room"
+      >
+        <Gift size={13} className="text-[#FFD166]" />
+        <span>${sessionGross.toFixed(2)} in gifts</span>
+        {giftStats?.topGifters?.[0] && (
+          <span className="truncate text-white/55">· top: {giftStats.topGifters[0].name} ${giftStats.topGifters[0].total.toFixed(2)}</span>
+        )}
+      </button>
 
       {notice && (
         <div className="mx-4 rounded-xl bg-white/10 px-4 py-2 text-center text-[13px] font-semibold text-white/90">{notice}</div>
@@ -440,11 +454,15 @@ export function RoomScreen({
         <button
           className="flex h-[58px] w-[58px] items-center justify-center rounded-full bg-gradient-to-r from-[#F59E0B] to-[#E1306C] text-white shadow-lg"
           onClick={() => {
-            const target = speakers.find((s) => s.userId !== me?.id) ?? st.participants.find((p) => p.userId !== me?.id)
-            if (target) setGiftTarget(target)
-            else setNotice('No one to gift yet')
+            const eligible = (st.participants ?? []).filter((p) => (p.role === 'host' || p.role === 'cohost') && p.userId !== me?.id)
+            if (eligible.length === 0) {
+              setNotice('No eligible gift recipient — only hosts and co-hosts can receive gifts')
+              window.setTimeout(() => setNotice(''), 2600)
+              return
+            }
+            setGiftOpen(true)
           }}
-          title="Send gift"
+          title="Send gift (direct payment)"
         >
           <Gift size={24} />
         </button>
@@ -485,15 +503,17 @@ export function RoomScreen({
         </div>
       )}
 
-      {/* gift picker */}
-      {giftTarget && me && (
+      {/* gift picker — recipients are always eligible hosts, never me */}
+      {giftOpen && me && (
         <GiftPickerSheet
           context="room"
-          recipientId={giftTarget.userId}
-          recipientName={giftTarget.name}
+          preselectedRecipientId={giftTarget && giftTarget.userId !== me.id ? giftTarget.userId : undefined}
           extra={{ roomId }}
           onSent={sendGiftDone}
-          onClose={() => setGiftTarget(null)}
+          onClose={() => {
+            setGiftOpen(false)
+            setGiftTarget(null)
+          }}
         />
       )}
 
@@ -577,7 +597,6 @@ function SpeakerTile({
           <Gift size={13} />
         </button>
       )}
-
       {menu && canModerate && (
         <div className="absolute inset-x-0 bottom-1 z-20 mx-1 rounded-xl bg-[#0b0d13]/95 p-2 text-[11px] shadow-xl">
           <button className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/10" onClick={() => { onModerate('promote'); setMenu(false) }}>

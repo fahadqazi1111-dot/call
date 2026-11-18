@@ -1,7 +1,71 @@
-import { createServer } from 'http'
+import { createServer, type IncomingMessage } from 'http'
 import { Server, type Socket } from 'socket.io'
 
 const httpServer = createServer()
+
+/* ================= internal HTTP relay (Next.js API -> socket clients) =================
+ * The Next.js backend cannot emit socket events itself. Financial fulfillment
+ * (gift delivered after a verified payment), broadcasts and other server-side
+ * events POST here with the shared secret:
+ *   POST /internal/relay  { targets: ['user:<id>'|'room:<id>'|'live:<id>'|'all'], event, data }
+ *
+ * NOTE: this runs on a SEPARATE internal-only port (3004) because socket.io
+ * is attached to the main server with path '/' and would otherwise swallow
+ * every HTTP request. Port 3004 is never exposed by the gateway.
+ */
+const RELAY_SECRET = 'call-internal-relay-v1'
+
+function readBody(req: IncomingMessage, cb: (raw: string) => void) {
+  let raw = ''
+  req.on('data', (c) => {
+    raw += c
+    if (raw.length > 1e6) req.destroy()
+  })
+  req.on('end', () => cb(raw))
+}
+
+const relayServer = createServer((req, res) => {
+  if (!req.url || !req.url.startsWith('/internal/relay')) {
+    res.writeHead(404).end()
+    return
+  }
+  if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+    res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
+    return
+  }
+  readBody(req, (raw) => {
+    try {
+      const body = JSON.parse(raw || '{}') as { targets?: string[]; event?: string; data?: unknown }
+      const targets = Array.isArray(body.targets) ? body.targets : []
+      const event = String(body.event || '')
+      if (!targets.length || !event) {
+        res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'bad_request' }))
+        return
+      }
+      let reached = 0
+      for (const t of targets) {
+        if (t === 'all') {
+          io.emit(event, body.data)
+          reached++
+        } else if (t.startsWith('user:')) {
+          const ids = socketsOf(t.slice(5))
+          for (const id of ids) io.to(id).emit(event, body.data)
+          reached++
+        } else if (t.startsWith('room:') || t.startsWith('live:')) {
+          io.to(t).emit(event, body.data)
+          reached++
+        }
+      }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, reached }))
+    } catch {
+      if (!res.writableEnded) {
+        res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'bad_json' }))
+      }
+    }
+  })
+})
+relayServer.listen(3004, () => console.log('CALL internal relay on port 3004'))
+
 const io = new Server(httpServer, {
   // DO NOT change the path, it is used by Caddy to forward the request to the correct port
   path: '/',
@@ -155,6 +219,11 @@ io.on('connection', (socket: Socket) => {
   socket.on('msg:read', (p: { to: string; peerId: string }) => {
     if (!p?.to) return
     for (const id of socketsOf(p.to)) io.to(id).emit('msg:read', { peerId: myUserId, at: new Date().toISOString() })
+  })
+
+  socket.on('msg:delivered', (p: { to: string; ids: string[] }) => {
+    if (!p?.to || !Array.isArray(p.ids)) return
+    for (const id of socketsOf(p.to)) io.to(id).emit('msg:delivered', { ids: p.ids, by: myUserId })
   })
 
   socket.on('typing', (p: { to: string; peerId: string; isTyping: boolean }) => {
@@ -426,6 +495,7 @@ io.on('connection', (socket: Socket) => {
 })
 
 const PORT = 3003
+
 httpServer.listen(PORT, () => console.log(`CALL signaling service on port ${PORT}`))
 
 process.on('SIGTERM', () => httpServer.close(() => process.exit(0)))

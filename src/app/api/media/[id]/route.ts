@@ -64,6 +64,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // public if used as an avatar
     const avatarUser = await db.user.findFirst({ where: { avatarUrl: { contains: id } }, select: { id: true } })
     if (avatarUser) authorized = true
+    // public if used as an ad creative (ads are meant to be seen by every user)
+    if (!authorized) {
+      const adRef = await db.ad.findFirst({ where: { imageUrl: { contains: id } }, select: { id: true } })
+      if (adRef) authorized = true
+    }
   }
   if (!authorized) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -78,7 +83,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       const start = m[1] ? parseInt(m[1], 10) : 0
       const end = m[2] ? Math.min(parseInt(m[2], 10), stat.size - 1) : stat.size - 1
       if (start <= end && start < stat.size) {
-        const chunk = await fs.promises.open(filePath, 'r').then(async (fh) => {
+        const chunk = await fs.open(filePath, 'r').then(async (fh) => {
           const len = end - start + 1
           const buf = Buffer.alloc(len)
           await fh.read(buf, 0, len, start)

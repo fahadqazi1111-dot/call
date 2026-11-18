@@ -103,83 +103,125 @@ export async function setSetting(key: string, value: unknown) {
 }
 
 export interface FinanceSettings {
-  creatorEarnPercent: number
+  currency: string
+  /** % of every verified gift the platform keeps */
   platformCommission: number
+  /** % of a paid-room entry fee credited to the room host */
   roomHostPercent: number
+  /** estimated payment-provider fee % — tracked separately, never merged with commission */
+  paymentFeePercent: number
+  paymentFeeFixed: number
   minWithdrawal: number
   withdrawalMethods: string[]
 }
 
 export async function getFinance(): Promise<FinanceSettings> {
   return getSetting<FinanceSettings>('finance', {
-    creatorEarnPercent: 50,
-    platformCommission: 50,
+    currency: 'USD',
+    platformCommission: 30,
     roomHostPercent: 70,
-    minWithdrawal: 5000,
-    withdrawalMethods: ['bank', 'jazzcash', 'easypaisa', 'usdt'],
+    paymentFeePercent: 2.9,
+    paymentFeeFixed: 0.3,
+    minWithdrawal: 25,
+    withdrawalMethods: ['bank'],
   })
 }
 
-/* ---------------- wallet helpers (atomic + idempotent) ---------------- */
+/* ---------------- money helpers ---------------- */
 
-export interface WalletDelta {
-  coins?: number
-  earnings?: number
+export function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100
 }
 
-/**
- * Apply a wallet delta and record a transaction. If idempotencyKey already
- * exists, the previous transaction is returned and NOTHING is applied again
- * (prevents duplicate deductions / credits).
- */
-export async function applyWalletDelta(
-  userId: string,
-  kind: string,
-  delta: WalletDelta,
-  note: string,
-  refId?: string,
-  idempotencyKey?: string
-): Promise<{ applied: boolean; wallet: { coins: number; earnings: number } }> {
-  if (idempotencyKey) {
-    const existing = await db.walletTx.findUnique({ where: { idempotencyKey } })
-    if (existing) {
-      const w = await ensureWallet(userId)
-      return { applied: false, wallet: { coins: w.coins, earnings: w.earnings } }
-    }
+/** Estimated payment-provider processing fee, kept separately identifiable. */
+export async function providerFeeFor(amount: number): Promise<number> {
+  const f = await getFinance()
+  return round2((amount * f.paymentFeePercent) / 100 + f.paymentFeeFixed)
+}
+
+export function fmtMoney(n: number, currency = 'USD'): string {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(n || 0)
+  } catch {
+    return `${currency} ${(n || 0).toFixed(2)}`
   }
-  const wallet = await ensureWallet(userId)
-  const coins = Math.max(0, wallet.coins + (delta.coins ?? 0))
-  const earnings = Math.max(0, Math.round((wallet.earnings + (delta.earnings ?? 0)) * 100) / 100)
-  await db.wallet.update({
-    where: { userId },
-    data: {
-      coins,
-      earnings,
-      totalSpent: delta.coins && delta.coins < 0 ? { increment: -delta.coins } : undefined,
-      totalEarned: delta.earnings && delta.earnings > 0 ? { increment: delta.earnings } : undefined,
-      totalTopUp: delta.coins && delta.coins > 0 && kind === 'purchase' ? { increment: delta.coins } : undefined,
-    },
-  })
-  await db.walletTx.create({
-    data: {
-      userId,
-      kind,
-      coins: delta.coins ?? 0,
-      earnings: delta.earnings ?? 0,
-      note,
-      refId: refId ?? null,
-      idempotencyKey: idempotencyKey ?? null,
-      balanceAfter: coins,
-      earningsAfter: earnings,
-    },
-  })
-  return { applied: true, wallet: { coins, earnings } }
 }
+
+/* ---------------- wallet helpers (atomic + idempotent ledger) ---------------- */
 
 export async function ensureWallet(userId: string) {
   let w = await db.wallet.findUnique({ where: { userId } })
   if (!w) w = await db.wallet.create({ data: { userId } })
   return w
+}
+
+export interface WalletDelta {
+  /** change to withdrawable available balance (money) */
+  available?: number
+  /** change to the reserved (locked) bucket — withdrawal holds */
+  reserved?: number
+  /** lifetime counter updates */
+  totals?: { totalReceived?: number; totalEarned?: number; totalWithdrawn?: number }
+}
+
+export interface LedgerResult {
+  applied: boolean
+  wallet: { available: number; reserved: number; totalReceived: number; totalEarned: number; totalWithdrawn: number }
+}
+
+/**
+ * Apply a wallet delta and append a LedgerEntry. If idempotencyKey already
+ * exists, NOTHING is applied again (prevents duplicate credits/debits).
+ * The wallet row and the ledger entry are written together; the ledger is the
+ * source of truth for every balance change.
+ */
+export async function applyLedgerDelta(
+  userId: string,
+  kind: string,
+  delta: WalletDelta,
+  note: string,
+  refType?: string,
+  refId?: string,
+  idempotencyKey?: string
+): Promise<LedgerResult> {
+  if (idempotencyKey) {
+    const existing = await db.ledgerEntry.findUnique({ where: { idempotencyKey } })
+    if (existing) {
+      const w = await ensureWallet(userId)
+      return { applied: false, wallet: w }
+    }
+  }
+  const wallet = await ensureWallet(userId)
+  const dAvail = round2(delta.available ?? 0)
+  const dRes = round2(delta.reserved ?? 0)
+  const available = Math.max(0, round2(wallet.available + dAvail))
+  const reserved = Math.max(0, round2(wallet.reserved + dRes))
+  const data: Record<string, unknown> = { available, reserved, updatedAt: new Date() }
+  const t = delta.totals ?? {}
+  if (t.totalReceived) data.totalReceived = round2(wallet.totalReceived + t.totalReceived)
+  if (t.totalEarned) data.totalEarned = round2(wallet.totalEarned + t.totalEarned)
+  if (t.totalWithdrawn) data.totalWithdrawn = round2(wallet.totalWithdrawn + t.totalWithdrawn)
+  await db.wallet.update({ where: { userId }, data: data as never })
+  const direction = dAvail + dRes >= 0 ? 'credit' : 'debit'
+  await db.ledgerEntry.create({
+    data: {
+      userId,
+      kind,
+      direction,
+      amount: Math.abs(dAvail || dRes),
+      availableAfter: available,
+      reservedAfter: reserved,
+      refType: refType ?? null,
+      refId: refId ?? null,
+      note,
+      idempotencyKey: idempotencyKey ?? null,
+    },
+  })
+  const updated = await db.wallet.findUnique({ where: { userId } })
+  return {
+    applied: true,
+    wallet: updated ?? { available, reserved, totalReceived: wallet.totalReceived, totalEarned: wallet.totalEarned, totalWithdrawn: wallet.totalWithdrawn },
+  }
 }
 
 /* ---------------- simple in-memory rate limiter ---------------- */
@@ -299,6 +341,7 @@ export function publicUser(u: {
   emailVerified?: boolean
   role?: string
   isOfficial?: boolean
+  allowNonContacts?: boolean
   createdAt?: Date
 }) {
   return {
@@ -315,6 +358,7 @@ export function publicUser(u: {
     emailVerified: u.emailVerified ?? false,
     role: u.role ?? 'user',
     isOfficial: u.isOfficial ?? false,
+    allowNonContacts: u.allowNonContacts ?? false,
     createdAt: u.createdAt ? u.createdAt.toISOString() : null,
   }
 }
@@ -395,4 +439,38 @@ export function verifyPassword(password: string, stored: string | null): boolean
   } catch {
     return false
   }
+}
+
+/* ---------------- contact relationship helpers ---------------- */
+
+/**
+ * True when `viewerPhone` is saved in `ownerId`'s contacts. Used for
+ * contacts-only stories and messaging requests. Server-side only — the
+ * client can never widen its own visibility.
+ */
+export async function isContactOf(ownerId: string, viewerPhone: string): Promise<boolean> {
+  if (!viewerPhone) return false
+  const c = await db.contact.findFirst({ where: { ownerId, phone: viewerPhone }, select: { id: true } })
+  return !!c
+}
+
+/** Mutual contact gate: either side has the other saved (registered users only). */
+export async function areContacts(a: { id: string; phone: string }, b: { id: string; phone: string }): Promise<boolean> {
+  if (a.id === b.id) return true
+  const mine = await db.contact.findFirst({ where: { ownerId: a.id, phone: b.phone }, select: { id: true } })
+  if (mine) return true
+  const theirs = await db.contact.findFirst({ where: { ownerId: b.id, phone: a.phone }, select: { id: true } })
+  return !!theirs
+}
+
+/**
+ * CONTACTS-ONLY stories gate: a story is visible to the viewer only when the
+ * VIEWER has the author saved in their contacts (WhatsApp status model).
+ * Server-side on every path — direct story URLs or API calls cannot bypass it.
+ */
+export async function canViewStory(viewer: { id: string; phone: string }, authorId: string): Promise<boolean> {
+  if (viewer.id === authorId) return true
+  const author = await db.user.findUnique({ where: { id: authorId }, select: { phone: true } })
+  if (!author) return false
+  return isContactOf(viewer.id, author.phone)
 }

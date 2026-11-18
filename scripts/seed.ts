@@ -2,20 +2,25 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
-/** One-time seed: default admin settings, gift catalog, coin packages. Idempotent. */
+/**
+ * One-time seed: default admin settings, money-priced gift catalog, ad packages.
+ * Idempotent. NO coins/diamonds/points — every price is real money (USD).
+ */
 async function main() {
   /* ---------- admin settings ---------- */
   const settings: Record<string, unknown> = {
     finance: {
-      creatorEarnPercent: 50, // % of gift price credited to recipient earnings
-      platformCommission: 50, // % kept by platform
-      roomHostPercent: 70, // % of paid-room entry fee credited to host earnings
-      minWithdrawal: 5000, // diamonds
-      withdrawalMethods: ['bank', 'jazzcash', 'easypaisa', 'usdt'],
+      currency: 'USD',
+      platformCommission: 30, // % of each verified gift kept by the platform
+      roomHostPercent: 70, // % of paid-room entry fee credited to the host
+      paymentFeePercent: 2.9, // estimated provider fee % — tracked separately, never merged into commission
+      paymentFeeFixed: 0.3, // estimated provider fixed fee per transaction
+      minWithdrawal: 25, // USD — bank transfer only
+      withdrawalMethods: ['bank'],
     },
     rooms: {
       maxSpeakers: 5,
-      maxEntryFee: 5000, // coins cap for paid-room entry fee
+      maxEntryFee: 50, // USD cap for paid-room entry fee
       allowPaidRooms: true,
     },
     live: {
@@ -33,6 +38,11 @@ async function main() {
       imageGen: true,
     },
     ads: { enabled: true, placements: ['chats', 'rooms', 'profile'] },
+    payments: {
+      provider: 'sandbox', // sandbox = clearly labeled test checkout; set to "stripe" + keys for production
+      stripeSecretKey: '',
+      stripeWebhookSecret: '',
+    },
     adminSetupCode: 'CALL-ADMIN-2024',
   }
   for (const [key, value] of Object.entries(settings)) {
@@ -43,41 +53,72 @@ async function main() {
     })
   }
 
-  /* ---------- gift catalog ---------- */
+  /* ---------- gift catalog (real money prices, admin-configurable) ---------- */
   const gifts = [
-    { name: 'Rose', emoji: '🌹', animKind: 'rose', category: 'both', priceCoins: 1, earnValue: 0.5, sortOrder: 1 },
-    { name: 'Heart', emoji: '❤️', animKind: 'heart', category: 'both', priceCoins: 5, earnValue: 2.5, sortOrder: 2 },
-    { name: 'Flowers', emoji: '💐', animKind: 'flower', category: 'both', priceCoins: 20, earnValue: 10, sortOrder: 3 },
-    { name: 'Crown', emoji: '👑', animKind: 'crown', category: 'both', priceCoins: 100, earnValue: 50, sortOrder: 4 },
-    { name: 'Diamond', emoji: '💎', animKind: 'diamond', category: 'both', priceCoins: 200, earnValue: 100, sortOrder: 5 },
-    { name: 'Car', emoji: '🏎️', animKind: 'car', category: 'both', priceCoins: 500, earnValue: 250, durationMs: 3200, sortOrder: 6 },
-    { name: 'Rocket', emoji: '🚀', animKind: 'rocket', category: 'both', priceCoins: 1000, earnValue: 500, durationMs: 3500, sortOrder: 7 },
-    { name: 'Dragon', emoji: '🐉', animKind: 'dragon', category: 'both', priceCoins: 2000, earnValue: 1000, durationMs: 4000, sortOrder: 8 },
-    { name: 'Lion', emoji: '🦁', animKind: 'lion', category: 'both', priceCoins: 3000, earnValue: 1500, durationMs: 4000, sortOrder: 9 },
-    { name: 'Super Lion', emoji: '🦁✨', animKind: 'superlion', category: 'both', priceCoins: 5000, earnValue: 2500, durationMs: 4500, sortOrder: 10 },
-    { name: 'Fireworks', emoji: '🎆', animKind: 'fireworks', category: 'both', priceCoins: 7500, earnValue: 3750, durationMs: 4500, sortOrder: 11 },
-    { name: 'Magic Castle', emoji: '🏰', animKind: 'castle', category: 'both', priceCoins: 10000, earnValue: 5000, durationMs: 5000, sortOrder: 12 },
+    { name: 'Rose', emoji: '🌹', animKind: 'rose', category: 'both', priceUsd: 0.6, sortOrder: 1 },
+    { name: 'Flower', emoji: '🌺', animKind: 'flower', category: 'both', priceUsd: 1.0, sortOrder: 2 },
+    { name: 'Heart', emoji: '❤️', animKind: 'heart', category: 'both', priceUsd: 1.5, sortOrder: 3 },
+    { name: 'Bouquet', emoji: '💐', animKind: 'flower', category: 'both', priceUsd: 2.5, durationMs: 2600, sortOrder: 4 },
+    { name: 'Crown', emoji: '👑', animKind: 'crown', category: 'both', priceUsd: 5.0, durationMs: 2800, sortOrder: 5 },
+    { name: 'Race Car', emoji: '🏎️', animKind: 'car', category: 'both', priceUsd: 8.0, durationMs: 3200, sortOrder: 6 },
+    { name: 'Rocket', emoji: '🚀', animKind: 'rocket', category: 'both', priceUsd: 10.0, durationMs: 3500, sortOrder: 7 },
+    { name: 'Fireworks', emoji: '🎆', animKind: 'fireworks', category: 'both', priceUsd: 15.0, durationMs: 4000, sortOrder: 8 },
+    { name: 'Dragon', emoji: '🐉', animKind: 'dragon', category: 'both', priceUsd: 20.0, durationMs: 4000, sortOrder: 9 },
+    { name: 'Lion', emoji: '🦁', animKind: 'lion', category: 'both', priceUsd: 30.0, durationMs: 4200, sortOrder: 10 },
+    { name: 'Magic Castle', emoji: '🏰', animKind: 'castle', category: 'both', priceUsd: 50.0, durationMs: 5000, sortOrder: 11 },
+    { name: 'Galaxy', emoji: '🌌', animKind: 'superlion', category: 'both', priceUsd: 99.0, durationMs: 5200, sortOrder: 12 },
   ]
   for (const g of gifts) {
-    const existing = await prisma.gift.findFirst({ where: { name: g.name, category: g.category } })
-    if (!existing) await prisma.gift.create({ data: g })
+    const existing = await prisma.gift.findFirst({ where: { name: g.name } })
+    if (!existing) {
+      await prisma.gift.create({
+        data: {
+          ...g,
+          sound: Number(g.priceUsd) >= 10 ? 'gift_big' : 'gift',
+          description: `${g.name} gift — delivered with a real-time animation.`,
+          platformMap: JSON.stringify({
+            android: `call_gift_${g.animKind}`,
+            ios: `call_gift_${g.animKind}`,
+          }),
+        },
+      })
+    }
   }
 
-  /* ---------- coin packages ---------- */
-  const pkgs = [
-    { name: 'Starter', coins: 100, bonus: 0, priceUsd: 0.99, order: 1 },
-    { name: 'Basic', coins: 500, bonus: 25, priceUsd: 4.99, order: 2 },
-    { name: 'Popular', coins: 1200, bonus: 120, priceUsd: 9.99, order: 3 },
-    { name: 'Pro', coins: 3000, bonus: 400, priceUsd: 24.99, order: 4 },
-    { name: 'Mega', coins: 8000, bonus: 1500, priceUsd: 49.99, order: 5 },
-    { name: 'Legend', coins: 20000, bonus: 5000, priceUsd: 99.99, order: 6 },
+  /* ---------- advertising packages (user campaigns) ---------- */
+  const adPkgs = [
+    { name: 'Starter', description: '3-day campaign across one placement of your choice.', priceUsd: 5, durationDays: 3, placements: 'chats,rooms,profile', minBudget: 0, order: 1 },
+    { name: 'Growth', description: '7-day campaign, best for reaching new audiences.', priceUsd: 15, durationDays: 7, placements: 'chats,rooms,profile', minBudget: 10, order: 2 },
+    { name: 'Pro', description: '14-day campaign with priority rotation.', priceUsd: 40, durationDays: 14, placements: 'chats,rooms,profile', minBudget: 25, order: 3 },
+    { name: 'Premium', description: '30-day flagship campaign, maximum exposure.', priceUsd: 99, durationDays: 30, placements: 'chats,rooms,profile', minBudget: 50, order: 4 },
   ]
-  for (const p of pkgs) {
-    const existing = await prisma.coinPackage.findFirst({ where: { name: p.name } })
-    if (!existing) await prisma.coinPackage.create({ data: p })
+  for (const p of adPkgs) {
+    const existing = await prisma.adPackage.findFirst({ where: { name: p.name } })
+    if (!existing) await prisma.adPackage.create({ data: p })
   }
 
-  console.log('Seed complete: settings, gifts, packages ready.')
+  console.log('Seed complete: settings, money gift catalog, ad packages ready.')
+
+  /* ---------- first admin (idempotent) — logs in on the normal login screen ---------- */
+  const adminEmail = 'admin@call.app'
+  const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } })
+  if (!existingAdmin) {
+    const { hashPassword } = await import('../src/lib/callapp/server')
+    await prisma.user.create({
+      data: {
+        phone: '0000000001',
+        email: adminEmail,
+        emailVerified: true,
+        passwordHash: hashPassword('CallAdmin2024!'),
+        role: 'admin',
+        name: 'CALL Admin',
+        username: 'calladmin',
+      },
+    })
+    console.log('First admin created: admin@call.app / CallAdmin2024!')
+  } else if (existingAdmin.role !== 'admin') {
+    await prisma.user.update({ where: { id: existingAdmin.id }, data: { role: 'admin' } })
+  }
 }
 
 main()

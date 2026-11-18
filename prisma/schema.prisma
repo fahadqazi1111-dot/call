@@ -8,35 +8,42 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(cuid())
-  phone         String         @unique
-  email         String?        @unique
-  emailVerified Boolean        @default(false)
-  passwordHash  String?
-  googleId      String?        @unique
-  role          String         @default("user") // user | admin | team
-  isOfficial    Boolean        @default(false) // CALL Official system account (welcome messages, broadcasts)
-  blocked       Boolean        @default(false)
-  name          String
-  username      String         @unique // globally unique handle, lowercase a-z0-9_ (3-20 chars)
+  id               String         @id @default(cuid())
+  phone            String         @unique
+  email            String?        @unique
+  emailVerified    Boolean        @default(false)
+  passwordHash     String?
+  googleId         String?        @unique
+  role             String         @default("user") // user | admin | team
+  isOfficial       Boolean        @default(false) // CALL Official system account (welcome messages, broadcasts)
+  blocked          Boolean        @default(false)
+  name             String
+  username         String         @unique // globally unique handle, lowercase a-z0-9_ (3-20 chars)
   usernameChangedAt DateTime? // last username change; first change allowed 7 days after signup, then 1 per week
-  about         String         @default("Available on CALL")
-  avatarKey     Int            @default(0)
-  avatarUrl     String?
-  createdAt     DateTime       @default(now())
-  lastSeen      DateTime       @default(now())
-  contacts      Contact[]      @relation("ContactOwner")
-  convA         Conversation[] @relation("ConvA")
-  convB         Conversation[] @relation("ConvB")
-  messages      Message[]      @relation("MsgSender")
-  callsMade     Call[]         @relation("CallCaller")
-  callsRecv     Call[]         @relation("CallCallee")
-  roomsHosted   VoiceRoom[]    @relation("RoomHost")
-  livesHosted   LiveSession[]  @relation("LiveHost")
-  withdrawals   Withdrawal[]   @relation("UserWithdrawals")
-  stories       Story[]        @relation("UserStories")
-  storyViews    StoryView[]    @relation("UserStoryViews")
-  wallet        Wallet?
+  about            String         @default("Available on CALL")
+  avatarKey        Int            @default(0)
+  avatarUrl        String?
+  allowNonContacts Boolean        @default(false) // privacy: allow message requests from people not in contacts
+  createdAt        DateTime       @default(now())
+  lastSeen         DateTime       @default(now())
+  contacts         Contact[]      @relation("ContactOwner")
+  convA            Conversation[] @relation("ConvA")
+  convB            Conversation[] @relation("ConvB")
+  messages         Message[]      @relation("MsgSender")
+  callsMade        Call[]         @relation("CallCaller")
+  callsRecv        Call[]         @relation("CallCallee")
+  roomsHosted      VoiceRoom[]    @relation("RoomHost")
+  livesHosted      LiveSession[]  @relation("LiveHost")
+  withdrawals      Withdrawal[]   @relation("UserWithdrawals")
+  stories          Story[]        @relation("UserStories")
+  storyViews       StoryView[]    @relation("UserStoryViews")
+  wallet           Wallet?
+  bankAccounts     BankAccount[]
+  payments         Payment[]      @relation("UserPayments")
+  giftSent         GiftSend[]     @relation("GiftSender")
+  giftReceived     GiftSend[]     @relation("GiftRecipient")
+  adCampaigns      Ad[]           @relation("AdOwner")
+  broadcastsSent   Broadcast[]    @relation("BroadcastSender")
 }
 
 model Otp {
@@ -95,6 +102,7 @@ model Message {
   content        String // text body, media id, or call summary json
   duration       Int? // voice seconds
   createdAt      DateTime     @default(now())
+  deliveredAt    DateTime? // reached the recipient's device
   readAt         DateTime?
 
   @@index([conversationId, createdAt])
@@ -117,95 +125,157 @@ model Call {
 }
 
 /**
- * ==================== WALLET / COINS / FINANCE ====================
+ * ==================== WALLET (REAL MONEY — NO COINS) ====================
+ * available  — withdrawable creator earnings (verified gifts/room income only)
+ * reserved   — locked into pending withdrawal requests (prevents double spend)
  */
 
 model Wallet {
-  id          String   @id @default(cuid())
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  coins       Int      @default(0) // spendable coins
-  earnings    Float    @default(0) // withdrawable creator earnings (diamonds)
-  totalTopUp  Int      @default(0)
-  totalSpent  Int      @default(0)
-  totalEarned Float    @default(0)
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  available      Float    @default(0)
+  reserved       Float    @default(0)
+  totalReceived  Float    @default(0) // gross gift value received
+  totalEarned    Float    @default(0) // net creator earnings credited
+  totalWithdrawn Float    @default(0)
+  updatedAt      DateTime @updatedAt
 }
 
-model WalletTx {
+/** Centralized append-only financial ledger. Every balance change lives here. */
+model LedgerEntry {
   id             String   @id @default(cuid())
   userId         String
-  kind           String // purchase | gift_sent | gift_received | room_entry | room_income | live_gift_sent | live_gift_received | withdrawal | withdrawal_refund | admin_credit
-  coins          Int      @default(0) // coin delta (negative = spend)
-  earnings       Float    @default(0) // earnings delta
+  kind           String // gift_received | room_income | withdrawal_hold | withdrawal_release | withdrawal_paid | admin_adjustment | ad_campaign_charge
+  direction      String // credit | debit
+  amount         Float
+  currency       String   @default("USD")
+  availableAfter Float
+  reservedAfter  Float
+  refType        String?
+  refId          String?
   note           String   @default("")
-  refId          String? // giftSendId / roomId / liveId / withdrawalId
   idempotencyKey String?  @unique
-  balanceAfter   Int      @default(0)
-  earningsAfter  Float    @default(0)
   createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
 }
 
-model CoinPackage {
-  id       String  @id @default(cuid())
-  name     String
-  coins    Int
-  priceUsd Float
-  bonus    Int     @default(0)
-  active   Boolean @default(true)
-  order    Int     @default(0)
-}
-
-model Withdrawal {
+/**
+ * Payments — every real-money checkout (gift, room entry, ad campaign).
+ * status: pending | successful | failed | cancelled | refunded
+ * provider: stripe | sandbox (sandbox = clearly-labeled test mode, isTest=true)
+ */
+model Payment {
   id          String    @id @default(cuid())
   userId      String
-  user        User      @relation("UserWithdrawals", fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  provider    String // stripe | sandbox
+  providerRef String? // checkout session / payment intent id
+  purpose     String // gift | room_entry | ad_campaign
+  status      String    @default("pending")
   amount      Float
-  method      String // bank | jazzcash | easypaisa | usdt | other (admin-configured list)
-  destination String
-  status      String    @default("pending") // pending | approved | rejected
-  adminNote   String    @default("")
+  currency    String    @default("USD")
+  feeAmount   Float     @default(0) // provider processing fee, kept separately identifiable
+  meta        String    @default("{}") // JSON: giftId, toUserId, context, roomId, liveId, battleId, battleSide, campaignId
+  isTest      Boolean   @default(false) // sandbox transactions never count as real revenue
+  clientKey   String?   @unique // client idempotency key
   createdAt   DateTime  @default(now())
-  reviewedAt  DateTime?
+  completedAt DateTime?
 
   @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 /**
- * ==================== GIFTS ====================
+ * ==================== GIFTS (direct money prices — admin controlled) ====================
  */
 
 model Gift {
-  id         String  @id @default(cuid())
-  name       String
-  emoji      String // visual anchor
-  animKind   String // rose | heart | flower | crown | diamond | car | rocket | dragon | lion | superlion | fireworks | castle | generic
-  sound      String  @default("gift") // soundKit key
-  category   String  @default("room") // room | live | both
-  priceCoins Int
-  earnValue  Float // credited to recipient earnings
-  durationMs Int     @default(2200)
-  active     Boolean @default(true)
-  sortOrder  Int     @default(0)
+  id          String  @id @default(cuid())
+  name        String
+  emoji       String // visual anchor
+  imageUrl    String? // gift image (uploaded / generated)
+  description String  @default("")
+  animKind    String // rose | heart | flower | crown | car | rocket | dragon | lion | superlion | fireworks | castle | generic
+  sound       String  @default("gift") // soundKit key
+  category    String  @default("both") // room | live | both
+  priceUsd    Float // real money price
+  currency    String  @default("USD")
+  platformMap String? // JSON platform product mapping: { android: "gift_rose", ios: "gift_rose" }
+  durationMs  Int     @default(2200)
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+  sends       GiftSend[]
 }
 
 model GiftSend {
   id           String   @id @default(cuid())
   giftId       String
+  gift         Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
   senderId     String
+  sender       User     @relation("GiftSender", fields: [senderId], references: [id], onDelete: Cascade)
   recipientId  String
+  recipient    User     @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   context      String // room | live | battle
   roomId       String?
   liveId       String?
   battleId     String?
   battleSide   Int?
-  coinsSpent   Int
-  earnCredited Float
+  grossAmount  Float // verified payment value
+  commission   Float    @default(0) // platform share
+  feeAmount    Float    @default(0) // payment processing fee
+  netAmount    Float    @default(0) // credited to creator
+  currency     String   @default("USD")
+  paymentId    String?
+  isTest       Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   @@index([recipientId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([roomId, createdAt])
+  @@index([liveId, createdAt])
+}
+
+/**
+ * ==================== BANK + WITHDRAWALS (bank transfer only) ====================
+ */
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holderName    String
+  bankName      String
+  accountNumber String
+  iban          String?
+  swift         String?
+  countryCode   String
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Withdrawal {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation("UserWithdrawals", fields: [userId], references: [id], onDelete: Cascade)
+  amount        Float
+  currency      String    @default("USD")
+  method        String    @default("bank") // bank transfer is the only method
+  bankAccountId String?
+  bankDetails   String    @default("{}") // snapshot of bank details at request time
+  status        String    @default("pending") // pending | under_review | approved | rejected | paid
+  adminNote     String    @default("")
+  transferRef   String? // bank transfer reference recorded when marking paid
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 /**
@@ -224,7 +294,7 @@ model Story {
   overlayJson String? // JSON [{type:'text'|'emoji', text, x, y, size, color}]
   bgColor     String          @default("#2F5BE0")
   durationMs  Int             @default(5000)
-  privacy     String          @default("all") // all | contacts
+  privacy     String          @default("contacts") // contacts | all (all is capped to contacts by the feed gate)
   createdAt   DateTime        @default(now())
   expiresAt   DateTime
   views       StoryView[]
@@ -269,7 +339,7 @@ model VoiceRoom {
   description  String            @default("")
   coverUrl     String?
   isPaid       Boolean           @default(false)
-  entryFee     Int               @default(0)
+  entryFee     Float             @default(0) // USD — direct payment at entry
   status       String            @default("live") // live | ended
   createdAt    DateTime          @default(now())
   endedAt      DateTime?
@@ -288,6 +358,7 @@ model RoomParticipant {
   muted      Boolean   @default(false)
   handRaised Boolean   @default(false)
   blocked    Boolean   @default(false)
+  entryPaid  Boolean   @default(false)
   joinedAt   DateTime  @default(now())
   leftAt     DateTime?
 
@@ -367,7 +438,7 @@ model BattleParticipant {
   avatarKey Int     @default(0)
   avatarUrl String?
   accepted  Boolean @default(false)
-  score     Int     @default(0)
+  score     Float   @default(0) // verified gift value ($) — no separate scoring economy
   connected Boolean @default(false)
 
   @@unique([battleId, userId])
@@ -380,7 +451,7 @@ model BattleParticipant {
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  kind      String // message | missed_call | story_reaction | story_reply | room_invite | live_started | gift | battle_invite | battle_result | wallet | withdrawal | ai | security
+  kind      String // message | missed_call | story_reaction | story_reply | room_invite | live_started | gift | gift_payment | battle_invite | battle_result | wallet | withdrawal | ad | broadcast | ai | security
   title     String
   body      String   @default("")
   refType   String?
@@ -432,7 +503,7 @@ model AiUsage {
 }
 
 /**
- * ==================== ADMIN + ADS ====================
+ * ==================== ADMIN + ADVERTISING ====================
  */
 
 model AdminSetting {
@@ -441,15 +512,85 @@ model AdminSetting {
   updatedAt DateTime @updatedAt
 }
 
-model Ad {
-  id          String  @id @default(cuid())
-  title       String
-  body        String  @default("")
-  imageUrl    String?
-  linkUrl     String?
-  placements  String  @default("chats") // chats | rooms | profile
+/** Ad packages define price + duration + placements (admin managed). */
+model AdPackage {
+  id          String @id @default(cuid())
+  name        String
+  description String  @default("")
+  priceUsd    Float
+  durationDays Int    @default(7)
+  placements  String  @default("chats,rooms,profile")
+  minBudget   Float   @default(0)
   active      Boolean @default(true)
-  weight      Int     @default(1)
-  impressions Int     @default(0)
-  clicks      Int     @default(0)
+  order       Int     @default(0)
+  campaigns   Ad[]
+}
+
+/**
+ * Ad — admin house ads (ownerId null) AND user-created campaigns.
+ * User campaign status flow:
+ *   draft → pending_payment → payment_completed → pending_approval
+ *         → approved → active ⇄ paused → completed | rejected
+ */
+model Ad {
+  id              String     @id @default(cuid())
+  ownerId         String?
+  owner           User?      @relation("AdOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  title           String
+  body            String     @default("")
+  imageUrl        String?
+  mediaKind       String     @default("image") // image | video
+  linkUrl         String?
+  placements      String     @default("chats") // csv: chats | rooms | profile
+  packageId       String?
+  pkg             AdPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  budget          Float      @default(0)
+  totalCost       Float      @default(0)
+  status          String     @default("active") // draft | pending_payment | payment_completed | pending_approval | approved | active | paused | rejected | completed
+  paymentId       String?
+  isUserAd        Boolean    @default(false)
+  rejectionReason String?
+  impressions     Int        @default(0)
+  clicks          Int        @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  weight          Int        @default(1)
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  createdAt       DateTime   @default(now())
+
+  @@index([status, createdAt])
+  @@index([ownerId])
+}
+
+/**
+ * ==================== ADMIN BROADCASTS (with delivery records) ====================
+ */
+
+model Broadcast {
+  id             String              @id @default(cuid())
+  title          String
+  body           String              @default("")
+  senderId       String
+  sender         User                @relation("BroadcastSender", fields: [senderId], references: [id], onDelete: Cascade)
+  createdBy      String
+  totalTargets   Int                 @default(0)
+  deliveredCount Int                 @default(0)
+  failedCount    Int                 @default(0)
+  status         String              @default("completed") // processing | completed
+  createdAt      DateTime            @default(now())
+  deliveries     BroadcastDelivery[]
+}
+
+model BroadcastDelivery {
+  id          String    @id @default(cuid())
+  broadcastId String
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId      String
+  status      String    @default("sent") // sent | failed
+  error       String?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([broadcastId, userId])
 }

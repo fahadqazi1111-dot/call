@@ -34,6 +34,7 @@ export async function POST(req: Request) {
 
     const zai = await ZAI.create()
     const completion = await zai.chat.completions.createVision({
+      model: 'default',
       messages: [
         {
           role: 'user',

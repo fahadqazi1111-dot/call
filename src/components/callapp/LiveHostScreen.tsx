@@ -11,8 +11,8 @@ import { liveManager, battleManager, type LiveManagerState } from '@/lib/callapp
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { Avatar } from './Avatar'
-import { GiftPickerSheet, GiftAnimationLayer, type GiftAnim } from './GiftsUI'
-import type { GiftSendResult, LiveComment, BattleParticipantInfo } from '@/lib/callapp/types'
+import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
+import type { GiftSessionStats, LiveComment, BattleParticipantInfo } from '@/lib/callapp/types'
 
 const COUNTDOWN_MS = 8000
 
@@ -38,7 +38,8 @@ export function LiveHostScreen({
   const [comments, setComments] = useState<LiveComment[]>([])
   const [commentInput, setCommentInput] = useState('')
   const [anims, setAnims] = useState<GiftAnim[]>([])
-  const [giftTarget, setGiftTarget] = useState<{ id: string; name: string; side?: number; slot?: number } | null>(null)
+  const [giftStats, setGiftStats] = useState<GiftSessionStats | null>(null)
+  const [giftOpen, setGiftOpen] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteMode, setInviteMode] = useState<'1v1' | '2v2'>('1v1')
@@ -121,6 +122,11 @@ export function LiveHostScreen({
     return () => window.clearInterval(t)
   }, [liveId])
 
+  /* ---------- my verified earnings for this session ---------- */
+  useEffect(() => {
+    void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
+  }, [liveId])
+
   /* ---------- realtime events ---------- */
   useEffect(() => {
     const onComment = (p: unknown) => {
@@ -128,40 +134,39 @@ export function LiveHostScreen({
       if (d.liveId === liveId) setComments((c) => [...c.slice(-120), d.comment])
     }
     const onGift = (p: unknown) => {
-      const d = p as { liveId: string; payload: GiftSendResult }
+      const d = p as { liveId: string; payload: {
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+      } }
       if (d.liveId !== liveId) return
-      soundKit.gift(Math.min(3, Math.floor((d.payload.gift?.priceCoins ?? 0) / 500)))
-      const key = ++animKey.current
-      setAnims((a) => [
-        ...a,
-        {
-          key,
-          emoji: d.payload.gift.emoji,
-          name: d.payload.gift.name,
-          animKind: d.payload.gift.animKind,
-          from: d.payload.from.name,
-          to: d.payload.to.name,
-          durationMs: d.payload.gift.durationMs,
-          tier: Math.min(3, Math.floor(d.payload.gift.priceCoins / 500)),
-        },
-      ])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== key)), d.payload.gift.durationMs + 300)
-      if (battle && d.payload.battle) {
-        setBattle((b) =>
-          b
-            ? {
-                ...b,
-                sideScores: b.sideScores.map((s, i) => (i === d.payload.battle!.side ? (d.payload.battle.total ?? s + d.payload.battle.added) : s)),
-              }
-            : b
-        )
-      }
+      // Server-verified fulfillment event drives the animation + scores.
+      const anim = animFromPayload(d.payload)
+      soundKit.gift(Math.min(3, Math.floor((d.payload.gift.priceUsd ?? 0) / 10)))
+      setAnims((a) => [...a, anim])
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 300)
+      void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
+      // battle score updates also arrive via the relayed battle:score event
+    }
+    const onBattleScore = (p: unknown) => {
+      const d = p as { liveId: string; battleId: string; side: number; added: number; total: number | null }
+      if (d.liveId !== liveId || !battle || d.battleId !== battle.id) return
+      setBattle((b) =>
+        b
+          ? {
+              ...b,
+              sideScores: b.sideScores.map((s, i) => (i === d.side ? (d.total ?? s + d.added) : s)),
+            }
+          : b
+      )
     }
     const offComment = socketClient.on('live:chat', onComment)
     const offGift = socketClient.on('live:gift', onGift)
+    const offScore = socketClient.on('battle:score', onBattleScore)
     return () => {
       offComment()
       offGift()
+      offScore()
     }
   }, [liveId, battle])
 
@@ -206,7 +211,7 @@ export function LiveHostScreen({
           userId: t.user!.id,
           name: t.user!.name,
           avatarKey: t.user!.avatarKey,
-          avatarUrl: t.user!.avatarUrl,
+          avatarUrl: t.user!.avatarUrl ?? null,
           side: inviteMode === '1v1' ? 1 : i === 0 ? 0 : 1,
           slot: inviteMode === '1v1' ? 0 : i === 0 ? 1 : i === 1 ? 0 : 1,
           accepted: false,
@@ -382,6 +387,25 @@ export function LiveHostScreen({
         </div>
       </div>
 
+      {/* ===== my session earnings (verified money) ===== */}
+      <div className="absolute left-4 top-[76px] z-30 flex items-center gap-2">
+        <div className="rounded-2xl bg-black/55 px-3.5 py-2 backdrop-blur">
+          <div className="text-[9.5px] font-bold uppercase tracking-wide text-white/60">My earnings</div>
+          <div className="text-[15px] font-extrabold text-[#FFD166]">
+            ${(giftStats?.totals.net ?? 0).toFixed(2)}
+            <span className="ml-1 text-[10px] font-semibold text-white/55">of ${(giftStats?.totals.gross ?? 0).toFixed(2)} gross</span>
+          </div>
+        </div>
+        {giftStats?.topGifters?.[0] && (
+          <div className="rounded-2xl bg-black/55 px-3 py-2 backdrop-blur">
+            <div className="text-[9.5px] font-bold uppercase tracking-wide text-white/60">Top gifter</div>
+            <div className="max-w-[120px] truncate text-[12px] font-bold">
+              {giftStats.topGifters[0].name} <span className="text-[#FFD166]">${giftStats.topGifters[0].total.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ===== battle score strip ===== */}
       {battle && battle.phase !== 'inviting' && (
         <div className="absolute inset-x-0 top-[68px] z-30 flex items-center justify-center gap-4 px-4">
@@ -486,40 +510,35 @@ export function LiveHostScreen({
           >
             <RefreshCw size={18} />
           </button>
-          <button
-            className="flex h-11 flex-none items-center gap-1.5 rounded-full bg-gradient-to-r from-[#F59E0B] to-[#E1306C] px-4 text-[13px] font-bold"
-            onClick={() => setGiftTarget({ id: me?.id ?? '', name: me?.name ?? '', side: 0, slot: 0 })}
-          >
-            <Gift size={16} /> Gift
-          </button>
+          {/* SELF-GIFTING PREVENTION: a host can never gift their own stream.
+              In a battle the host may only gift the OPPOSING team. */}
+          {battle?.phase === 'live' && (
+            <button
+              className="flex h-11 flex-none items-center gap-1.5 rounded-full bg-gradient-to-r from-[#F59E0B] to-[#E1306C] px-4 text-[13px] font-bold"
+              onClick={() => setGiftOpen(true)}
+            >
+              <Gift size={16} /> Gift team
+            </button>
+          )}
           <button className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white text-black" onClick={() => void sendComment()}>
             <Send size={17} />
           </button>
         </div>
       </div>
 
-      {/* gift picker (host gifting a battle side) */}
-      {giftTarget && me && battle && battle.phase === 'live' && (
+      {/* gift picker — battle only, opposing team, never my own side */}
+      {giftOpen && me && battle && battle.phase === 'live' && (
         <GiftPickerSheet
           context="battle"
-          recipientId={giftTarget.id}
-          recipientName={`Team ${giftTarget.side === 0 ? 'A' : 'B'}`}
-          extra={{ liveId, battleId: battle.id, battleSide: giftTarget.side ?? 0 }}
-          onSent={(res) => {
-            socketClient.emit('live:gift', { liveId, payload: res })
-            if (res.battle) socketClient.emit('battle:score', { liveId, battleId: battle.id, side: res.battle.side, added: res.battle.added, total: res.battle.total })
+          extra={{
+            liveId,
+            battleId: battle.id,
+            battleSide: battle.participants.some((p) => p.userId === me.id && p.side === 0) ? 1 : 0,
           }}
-          onClose={() => setGiftTarget(null)}
-        />
-      )}
-      {giftTarget && me && !battle && (
-        <GiftPickerSheet
-          context="live"
-          recipientId={giftTarget.id}
-          recipientName={giftTarget.name}
-          extra={{ liveId }}
-          onSent={(res) => socketClient.emit('live:gift', { liveId, payload: res })}
-          onClose={() => setGiftTarget(null)}
+          onSent={() => {
+            // animation + score arrive via the server-verified relay
+          }}
+          onClose={() => setGiftOpen(false)}
         />
       )}
 

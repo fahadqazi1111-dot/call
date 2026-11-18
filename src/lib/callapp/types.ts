@@ -12,6 +12,7 @@ export interface Me {
   emailVerified?: boolean
   role?: string
   isOfficial?: boolean
+  allowNonContacts?: boolean
   createdAt?: string | null
 }
 
@@ -21,6 +22,7 @@ export interface Message {
   content: string
   duration?: number | null
   createdAt: string
+  deliveredAt?: string | null
   readAt?: string | null
   mine: boolean
   mediaUrl?: string | null
@@ -31,12 +33,14 @@ export interface ChatSummary {
   peer: Me
   lastMessage: {
     id: string
-    type: 'text' | 'voice' | 'call'
+    type: 'text' | 'voice' | 'call' | 'image'
     content: string
     duration?: number | null
     createdAt: string
     mine: boolean
     senderName: string
+    deliveredAt?: string | null
+    readAt?: string | null
   } | null
   unread: number
   lastActivity: string
@@ -46,7 +50,12 @@ export interface ContactItem {
   id: string
   name: string
   phone: string
-  user: (Pick<Me, 'id' | 'name' | 'about' | 'avatarKey' | 'lastSeen'> & { avatarUrl?: string | null; role?: string; isOfficial?: boolean }) | null
+  user: (Pick<Me, 'id' | 'name' | 'username' | 'about' | 'avatarKey' | 'lastSeen'> & {
+    avatarUrl?: string | null
+    role?: string
+    isOfficial?: boolean
+    allowNonContacts?: boolean
+  }) | null
 }
 
 export interface CallRecord {
@@ -78,68 +87,150 @@ export interface CallState {
   remoteStream?: MediaStream
 }
 
-/* ================= wallet ================= */
+/* ================= wallet (REAL MONEY — no coins anywhere) ================= */
 
 export interface WalletInfo {
-  coins: number
-  earnings: number
-  totalTopUp: number
-  totalSpent: number
+  available: number
+  reserved: number
+  totalReceived: number
   totalEarned: number
+  totalWithdrawn: number
 }
 
-export interface WalletTx {
+export interface LedgerEntryItem {
   id: string
   kind: string
-  coins: number
-  earnings: number
-  note: string
-  createdAt: string
-}
-
-export interface CoinPackage {
-  id: string
-  name: string
-  coins: number
-  bonus: number
-  priceUsd: number
-  active: boolean
-  order: number
-}
-
-export interface Withdrawal {
-  id: string
-  userId: string
+  direction: 'credit' | 'debit'
   amount: number
-  method: string
-  destination: string
-  status: 'pending' | 'approved' | 'rejected'
-  adminNote: string
+  availableAfter: number
+  reservedAfter: number
+  note: string
+  refType?: string | null
+  refId?: string | null
   createdAt: string
 }
 
-/* ================= gifts ================= */
+export interface GiftReceivedItem {
+  id: string
+  gift: { name: string; emoji: string; imageUrl?: string | null }
+  from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+  context: string
+  grossAmount: number
+  commission: number
+  feeAmount: number
+  netAmount: number
+  currency: string
+  isTest: boolean
+  createdAt: string
+}
+
+export interface WithdrawalItem {
+  id: string
+  amount: number
+  currency: string
+  method: string
+  status: 'pending' | 'under_review' | 'approved' | 'rejected' | 'paid'
+  adminNote: string
+  transferRef?: string | null
+  bankName?: string | null
+  maskedAccount?: string | null
+  createdAt: string
+  paidAt?: string | null
+}
+
+export interface BankAccountItem {
+  id: string
+  holderName: string
+  bankName: string
+  accountNumber: string
+  iban: string | null
+  swift: string | null
+  countryCode: string
+  isDefault: boolean
+  createdAt: string
+}
+
+export interface PaymentInfo {
+  id: string
+  status: 'pending' | 'successful' | 'failed' | 'cancelled' | 'refunded'
+  purpose: string
+  provider: string
+  amount: number
+  currency: string
+  isTest: boolean
+  giftName?: string | null
+  createdAt?: string
+  completedAt?: string | null
+}
+
+/* ================= gifts (direct money prices) ================= */
 
 export interface GiftItem {
   id: string
   name: string
   emoji: string
+  imageUrl: string | null
   animKind: string
   sound: string
   category: string
-  priceCoins: number
-  earnValue: number
+  priceUsd: number
   durationMs: number
+  description?: string
+  active?: boolean
+  sortOrder?: number
+  currency?: string
+}
+
+export interface GiftRecipient {
+  id: string
+  name: string
+  avatarKey: number
+  avatarUrl: string | null
+  role: string
+  side: number | null
+  score: number
+}
+
+export interface CheckoutResult {
+  ok: boolean
+  paymentId: string
+  amount: number
+  currency: string
+  provider: 'stripe' | 'sandbox'
+  isTest: boolean
+  checkoutUrl: string | null
+  alreadyPaid?: boolean
 }
 
 export interface GiftSendResult {
   ok: boolean
   sendId: string
-  wallet: { coins: number; earnings: number }
   gift: GiftItem
   from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   battle: { battleId: string; side: number; added: number; total: number | null } | null
+}
+
+export interface TopGifter {
+  userId: string
+  name: string
+  avatarKey: number
+  avatarUrl: string | null
+  total: number
+  count: number
+}
+
+export interface GiftSessionStats {
+  totals: { gross: number; commission: number; net: number; count: number }
+  topGifters: TopGifter[]
+  recent: Array<{
+    id: string
+    gift: { name: string; emoji: string }
+    from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+    amount: number
+    isTest: boolean
+    createdAt: string
+  }>
 }
 
 /* ================= stories ================= */
@@ -323,4 +414,108 @@ export interface AdItem {
   body: string
   imageUrl: string | null
   linkUrl: string | null
+}
+
+export interface AdPackageItem {
+  id: string
+  name: string
+  description: string
+  priceUsd: number
+  durationDays: number
+  placements: string[]
+  minBudget: number
+}
+
+export type AdCampaignStatus =
+  | 'draft'
+  | 'pending_payment'
+  | 'payment_completed'
+  | 'pending_approval'
+  | 'approved'
+  | 'active'
+  | 'paused'
+  | 'rejected'
+  | 'completed'
+
+export interface AdCampaignItem {
+  id: string
+  title: string
+  body: string
+  imageUrl: string | null
+  mediaKind: string
+  linkUrl: string | null
+  placements: string[]
+  pkg: { name: string; durationDays: number; priceUsd: number } | null
+  budget: number
+  totalCost: number
+  status: AdCampaignStatus
+  rejectionReason: string | null
+  impressions: number
+  clicks: number
+  startsAt: string | null
+  endsAt: string | null
+  createdAt: string
+}
+
+/* ================= admin finance ================= */
+
+export interface FinanceSummary {
+  currency: string
+  giftRevenue: { gross: number; platformCommission: number; providerFees: number; creatorNet: number; count: number }
+  adRevenue: { total: number; fees: number; count: number }
+  payments: Record<'successful' | 'pending' | 'failed' | 'refunded' | 'cancelled', { amount: number; count: number }>
+  testMode: { gross: number; commission: number; net: number; count: number }
+  withdrawalTotals: Record<string, { amount: number; count: number }>
+  config: {
+    currency: string
+    platformCommission: number
+    roomHostPercent: number
+    paymentFeePercent: number
+    paymentFeeFixed: number
+    minWithdrawal: number
+    withdrawalMethods: string[]
+  }
+}
+
+export interface AdminPaymentRow {
+  id: string
+  userId: string
+  user: { id: string; name: string; username: string; email: string | null }
+  purpose: string
+  provider: string
+  status: string
+  amount: number
+  currency: string
+  feeAmount: number
+  isTest: boolean
+  description: string
+  createdAt: string
+  completedAt: string | null
+}
+
+export interface AdminWithdrawalRow {
+  id: string
+  amount: number
+  currency: string
+  method: string
+  status: 'pending' | 'under_review' | 'approved' | 'rejected' | 'paid'
+  adminNote: string
+  transferRef: string | null
+  reviewedAt: string | null
+  paidAt: string | null
+  createdAt: string
+  user: { id: string; name: string; phone: string; email: string | null; username: string }
+  bank: { holderName: string; bankName: string; accountNumber: string; iban: string; swift: string; countryCode: string }
+}
+
+export interface BroadcastRow {
+  id: string
+  title: string
+  body: string
+  sender: { id: string; name: string; username: string; role: string; isOfficial: boolean }
+  totalTargets: number
+  deliveredCount: number
+  failedCount: number
+  status: string
+  createdAt: string
 }

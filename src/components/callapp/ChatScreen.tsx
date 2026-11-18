@@ -36,9 +36,14 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       return {
         id: fromContact.id,
         name: fromContact.name,
+        username: fromContact.username ?? '',
+        phone: '',
+        about: fromContact.about,
         avatarKey: fromContact.avatarKey,
         avatarUrl: fromContact.avatarUrl,
         lastSeen: fromContact.lastSeen,
+        role: fromContact.role,
+        isOfficial: fromContact.isOfficial,
       }
     return undefined
   }, [chats, contacts, peerId])
@@ -391,7 +396,7 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
           <VoiceBubble msg={msg} mine={mine} />
           <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
             <span>{fmtTime(msg.createdAt)}</span>
-            {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : <Check size={13} />)}
+            {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
           </div>
         </div>
       </div>
@@ -410,7 +415,7 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
         <p className="whitespace-pre-wrap break-words text-[15px] leading-[21px]">{msg.content}</p>
         <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
           <span>{fmtTime(msg.createdAt)}</span>
-          {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : <Check size={13} />)}
+          {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
         </div>
       </div>
     </div>

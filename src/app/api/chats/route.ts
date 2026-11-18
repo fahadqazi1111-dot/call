@@ -13,7 +13,13 @@ export async function GET(req: Request) {
     include: { userA: true, userB: true },
   })
 
-  const result = []
+  const result: Array<{
+    conversationId: string
+    peer: ReturnType<typeof publicUser>
+    lastMessage: { id: string; type: string; content: string; duration: number | null; createdAt: string; mine: boolean; senderName: string } | null
+    unread: number
+    lastActivity: string
+  }> = []
   for (const conv of convs) {
     const peer = conv.userAId === me.id ? conv.userB : conv.userA
     const [lastMsg, unread] = await Promise.all([

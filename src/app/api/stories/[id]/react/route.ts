@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/callapp/server'
+import { requireUser, canViewStory } from '@/lib/callapp/server'
 
-/** POST { emoji } — react to a story (one reaction per user, upsert). */
+/** POST { emoji } — react to a story (one reaction per user, upsert). CONTACTS-ONLY gate. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -14,6 +14,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const story = await db.story.findUnique({ where: { id } })
     if (!story) return NextResponse.json({ error: 'Story not found' }, { status: 404 })
     if (story.userId === me.id) return NextResponse.json({ ok: true, self: true })
+    if (!(await canViewStory(me, story.userId))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     await db.storyReaction.upsert({
       where: { storyId_userId: { storyId: id, userId: me.id } },
       update: { emoji },

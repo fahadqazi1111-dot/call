@@ -1,15 +1,15 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Gift as GiftIcon, Loader2, ChevronLeft, Users, Sparkles, Info } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
-import { soundKit } from '@/lib/callapp/sound'
-import { useApp } from '@/lib/callapp/store'
-import type { GiftItem, GiftSendResult } from '@/lib/callapp/types'
-
-/* ================= gift animation overlay ================= */
+import { toast } from 'sonner'
+import { Avatar } from './Avatar'
+import { PaymentModal, waitForPayment, type PendingPayment } from './PaymentModal'
+import type { GiftItem, GiftRecipient } from '@/lib/callapp/types'
 
 export interface GiftAnim {
-  key: number
+  key: string
   emoji: string
   name: string
   animKind: string
@@ -19,15 +19,7 @@ export interface GiftAnim {
   tier: number
 }
 
-export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden" aria-live="polite">
-      {gifts.map((g) => (
-        <GiftAnimCard key={g.key} gift={g} />
-      ))}
-    </div>
-  )
-}
+/* ---------------- animation layer (unchanged visuals, money tiers) ---------------- */
 
 const ANIM_CLASSES: Record<string, string> = {
   rose: 'gift-float',
@@ -40,181 +32,341 @@ const ANIM_CLASSES: Record<string, string> = {
   dragon: 'gift-fly',
   lion: 'gift-fly',
   superlion: 'gift-fly-big',
-  fireworks: 'gift-burst',
   castle: 'gift-fly-big',
+  fireworks: 'gift-burst',
   generic: 'gift-float',
 }
 
-function GiftAnimCard({ gift }: { gift: GiftAnim }) {
-  const cls = ANIM_CLASSES[gift.animKind] ?? 'gift-float'
-  const big = gift.tier >= 3
+function tierOf(price: number): number {
+  if (price >= 30) return 3
+  if (price >= 5) return 2
+  return 1
+}
+
+export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
   return (
-    <div className={`absolute ${cls}`} style={{ left: gift.animKind === 'fireworks' ? '50%' : `${12 + ((gift.key * 13) % 60)}%`, bottom: 80 }}>
-      <div
-        className={`flex flex-col items-center gap-1 rounded-2xl bg-black/70 px-4 py-3 text-white backdrop-blur ${big ? 'scale-125' : ''}`}
-        style={{ animationDuration: `${gift.durationMs}ms` }}
-      >
-        <span className={big ? 'text-[52px]' : 'text-[38px]'}>{gift.emoji}</span>
-        <span className="text-xs font-bold">{gift.name}</span>
-        <span className="text-[10px] text-white/80">
-          {gift.from} → {gift.to}
-        </span>
-      </div>
+    <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+      {gifts.map((g) => (
+        <div
+          key={g.key}
+          className={`absolute ${ANIM_CLASSES[g.animKind] ?? 'gift-float'}`}
+          style={{ animationDuration: `${g.durationMs}ms` }}
+        >
+          <div className="flex items-center gap-2 rounded-2xl bg-black/70 px-3 py-2 text-white shadow-xl backdrop-blur">
+            <span className={g.tier >= 3 ? 'text-[46px]' : g.tier === 2 ? 'text-[38px]' : 'text-[30px]'}>{g.emoji}</span>
+            <div className="leading-tight">
+              <div className="text-[12px] font-bold">{g.name}</div>
+              <div className="text-[10.5px] text-white/75">{g.from} → {g.to}</div>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
 
-/* ================= gift picker sheet ================= */
+/** Play a delivered gift event (payload from REST fulfillment → socket relay). */
+export function animFromPayload(payload: {
+  gift: { name: string; emoji: string; animKind: string; durationMs: number; priceUsd?: number }
+  from: { name: string }
+  to: { name: string }
+}): GiftAnim {
+  const price = payload.gift.priceUsd ?? 0
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    emoji: payload.gift.emoji,
+    name: payload.gift.name,
+    animKind: payload.gift.animKind,
+    from: payload.from.name,
+    to: payload.to.name,
+    durationMs: payload.gift.durationMs,
+    tier: tierOf(price),
+  }
+}
 
-export function GiftPickerSheet({
-  context,
-  recipientId,
-  recipientName,
-  extra,
-  onSent,
-  onClose,
-}: {
+export function soundTierFor(price: number): number {
+  return Math.min(3, tierOf(price))
+}
+
+/* ---------------- TikTok-style gift panel ---------------- */
+
+interface PickerProps {
   context: 'room' | 'live' | 'battle'
-  recipientId: string
-  recipientName: string
+  /** Optional pre-selected recipient (e.g. the tile the viewer tapped). Must never be the viewer. */
+  preselectedRecipientId?: string
   extra?: { roomId?: string; liveId?: string; battleId?: string; battleSide?: number }
-  onSent: (res: GiftSendResult) => void
+  onSent: (payload: unknown) => void
   onClose: () => void
-}) {
-  const me = useApp((s) => s.me)
-  const wallet = useApp((s) => s.wallet)
-  const loadWallet = useApp((s) => s.loadWallet)
+  /** test-mode flag surfaced by the parent screen (from checkout or parent state) */
+}
+
+export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent, onClose }: PickerProps) {
   const [gifts, setGifts] = useState<GiftItem[]>([])
-  const [sending, setSending] = useState<string | null>(null)
-  const [error, setError] = useState('')
-  const [recipient, setRecipient] = useState({ id: recipientId, name: recipientName })
+  const [recipients, setRecipients] = useState<GiftRecipient[]>([])
+  const [commission, setCommission] = useState(30)
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<GiftItem | null>(null)
+  const [recipientId, setRecipientId] = useState<string | null>(preselectedRecipientId ?? null)
+  const [checkout, setCheckout] = useState<{ payment: PendingPayment } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const stage = recipients.length > 1 && !recipientId ? 'recipient' : 'gift'
 
   useEffect(() => {
-    setRecipient({ id: recipientId, name: recipientName })
-  }, [recipientId, recipientName])
+    void (async () => {
+      try {
+        const [g, r] = await Promise.all([
+          api.gifts(context === 'battle' ? 'live' : context),
+          api.giftRecipients({
+            context,
+            roomId: extra?.roomId,
+            liveId: extra?.liveId,
+            battleId: extra?.battleId,
+            battleSide: extra?.battleSide,
+          }),
+        ])
+        setGifts(g.gifts)
+        setCommission(g.platformCommission ?? 30)
+        setRecipients(r.recipients)
+        if (r.recipients.length === 1) setRecipientId(r.recipients[0].id)
+        if (r.recipients.length === 0) {
+          toast.error('No eligible gift recipients right now — only hosts can receive gifts')
+          onClose()
+        }
+      } catch (e) {
+        toast.error((e as Error).message || 'Could not load gifts')
+        onClose()
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
 
-  useEffect(() => {
-    void api
-      .gifts(context === 'battle' ? 'live' : context)
-      .then((res) => setGifts(res.gifts))
-      .catch(() => setError('Could not load gifts'))
-    if (!wallet) void loadWallet()
-  }, [context, wallet, loadWallet])
+  const recipient = useMemo(() => recipients.find((r) => r.id === recipientId) ?? null, [recipients, recipientId])
 
-  const send = async (gift: GiftItem) => {
-    if (!me) return
-    setSending(gift.id)
-    setError('')
+  const startCheckout = async (gift: GiftItem) => {
+    if (!recipientId) {
+      setSelected(gift)
+      return
+    }
+    setBusy(true)
     try {
-      const res = await api.sendGift({
+      const res = await api.giftCheckout({
         giftId: gift.id,
-        toUserId: recipient.id,
+        toUserId: recipientId,
         context,
         roomId: extra?.roomId,
         liveId: extra?.liveId,
         battleId: extra?.battleId,
         battleSide: extra?.battleSide,
-        idempotencyKey: `gift:${me.id}:${gift.id}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+        clientKey: `gift:${gift.id}:${recipientId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
       })
-      soundKit.gift(Math.min(3, Math.floor(gift.priceCoins / 500)))
-      onSent(res)
-      void loadWallet()
-      onClose()
+      if (res.alreadyPaid) {
+        toast.success('Gift already delivered')
+        onClose()
+        return
+      }
+      if (res.provider === 'stripe' && res.checkoutUrl) {
+        toast.loading('Opening secure checkout…', { duration: 2500 })
+        window.location.href = res.checkoutUrl
+        return
+      }
+      setCheckout({
+        payment: {
+          id: res.paymentId,
+          amount: res.amount,
+          currency: res.currency,
+          isTest: res.isTest,
+          provider: res.provider,
+          description: `${gift.name} for ${recipient?.name ?? 'host'}`,
+          emoji: gift.emoji,
+        },
+      })
     } catch (e) {
-      setError((e as Error).message)
+      toast.error((e as Error).message || 'Checkout failed')
     } finally {
-      setSending(null)
+      setBusy(false)
+    }
+  }
+
+  const onPaid = async (payment: PendingPayment) => {
+    // fetch fulfillment status; animation arrives via socket relay for everyone
+    const final = await waitForPayment(payment.id, 8000)
+    if (final?.status === 'successful') {
+      const gift = selected
+      if (gift && recipient) {
+        onSent({
+          ok: true,
+          sendId: final.id,
+          gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd },
+          from: { id: 'me', name: 'You', avatarKey: 0, avatarUrl: null },
+          to: { id: recipient.id, name: recipient.name, avatarKey: recipient.avatarKey, avatarUrl: recipient.avatarUrl },
+          battle: null,
+        })
+      }
+      toast.success(`Gift delivered to ${recipient?.name ?? 'host'}`)
+      setCheckout(null)
+      onClose()
+    } else {
+      toast.error('Payment is still processing — it will complete automatically')
+      setCheckout(null)
+      onClose()
     }
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/40" onClick={onClose}>
-      <div
-        className="rounded-t-[24px] border-t border-cline bg-white p-4 pb-8 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Send a gift"
-      >
-        <div className="flex items-center gap-3 pb-3">
-          <h3 className="flex-1 text-[16px] font-extrabold text-cink">
-            Send a gift to <span className="text-cbrand">{recipient.name}</span>
-          </h3>
-          <div className="flex items-center gap-1.5 rounded-full bg-[#F0F3FA] px-3 py-1.5 text-[13px] font-bold text-cink">
-            🪙 {wallet?.coins ?? 0}
-          </div>
-          <button className="rounded-full bg-cbg px-3 py-1.5 text-xs font-bold text-cmut" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        {error && <p className="pb-2 text-[12px] font-semibold text-cred">{error}</p>}
-        <div className="grid max-h-[300px] grid-cols-4 gap-2 overflow-y-auto app-scroll">
-          {gifts.map((g) => (
-            <button
-              key={g.id}
-              className="flex flex-col items-center gap-1 rounded-[14px] border border-cline bg-white px-1 py-2.5 transition hover:border-cbrand hover:bg-csoft disabled:opacity-50"
-              disabled={sending === g.id || (wallet?.coins ?? 0) < g.priceCoins}
-              onClick={() => void send(g)}
-            >
-              <span className="text-[26px]">{g.emoji}</span>
-              <span className="text-[10px] font-bold text-cink">{g.name}</span>
-              <span className="rounded-full bg-[#FFF3D6] px-1.5 py-0.5 text-[10px] font-bold text-[#B7791F]">🪙 {g.priceCoins}</span>
+    <>
+      <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50" onClick={onClose} role="dialog" aria-modal="true" aria-label="Send a gift">
+        <div
+          className="w-full max-w-[560px] rounded-t-[24px] bg-white pb-[max(env(safe-area-inset-bottom),14px)] shadow-2xl sm:mb-4 sm:rounded-[24px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* header */}
+          <div className="flex items-center justify-between border-b border-cline px-4 py-3">
+            <div className="flex items-center gap-2">
+              {stage === 'recipient' ? (
+                <button
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-csoft text-cink"
+                  onClick={() => setRecipientId(null)}
+                  aria-label="Back to gifts"
+                >
+                  <ChevronLeft size={17} />
+                </button>
+              ) : (
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFF0F3] text-[#E1306C]">
+                  <GiftIcon size={16} />
+                </span>
+              )}
+              <div>
+                <div className="text-[14.5px] font-extrabold text-cink">{stage === 'recipient' ? 'Choose a recipient' : 'Send a gift'}</div>
+                <div className="text-[11px] text-cmut">Direct payment · no coins</div>
+              </div>
+            </div>
+            <button onClick={onClose} aria-label="Close" className="text-[12.5px] font-bold text-cmut hover:text-cink">
+              Close
             </button>
-          ))}
+          </div>
+
+          {/* recipient strip (context) */}
+          {stage === 'gift' && recipients.length > 0 && (
+            <button
+              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-cbg"
+              onClick={() => recipients.length > 1 && setRecipientId(null)}
+            >
+              <Users size={14} className="flex-none text-cmut" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-cmut">Gift goes to</div>
+                <div className="truncate text-[13.5px] font-bold text-cink">{recipient?.name ?? 'Select a host'}</div>
+              </div>
+              {recipients.length > 1 && <span className="text-[11.5px] font-bold text-cbrand">Change</span>}
+            </button>
+          )}
+
+          {loading ? (
+            <div className="flex h-44 items-center justify-center text-cmut">
+              <Loader2 size={22} className="animate-spin" />
+            </div>
+          ) : stage === 'recipient' ? (
+            /* ---- recipient selection ---- */
+            <ul className="max-h-[300px] overflow-y-auto app-scroll px-3 py-2">
+              {recipients.map((r) => (
+                <li key={r.id}>
+                  <button
+                    className="flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition hover:bg-cbg"
+                    onClick={() => {
+                      setRecipientId(r.id)
+                      if (selected) void startCheckout(selected)
+                    }}
+                  >
+                    <Avatar name={r.name} avatarKey={r.avatarKey} size={42} src={r.avatarUrl} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14px] font-bold text-cink">{r.name}</div>
+                      <div className="text-[11px] text-cmut">
+                        {r.role === 'host' ? 'Host' : r.role === 'cohost' ? 'Co-host' : `Battle team ${r.side === 0 ? 'A' : 'B'}`}
+                        {r.role === 'battle' && r.score > 0 ? ` · $${r.score.toFixed(2)} scored` : ''}
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-csoft px-2.5 py-1 text-[11px] font-bold text-cbrand">Select</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            /* ---- gift grid (money prices) ---- */
+            <div className="px-4 pb-2 pt-2">
+              <div className="grid max-h-[300px] grid-cols-4 gap-2 overflow-y-auto app-scroll">
+                {gifts.map((g) => (
+                  <button
+                    key={g.id}
+                    className={`flex flex-col items-center gap-1 rounded-[14px] border px-1 py-2.5 transition hover:border-[#E1306C] hover:bg-[#FFF0F3] ${
+                      selected?.id === g.id ? 'border-[#E1306C] bg-[#FFF0F3]' : 'border-cline bg-white'
+                    }`}
+                    disabled={busy}
+                    onClick={() => {
+                      setSelected(g)
+                      void startCheckout(g)
+                    }}
+                  >
+                    <span className={g.priceUsd >= 10 ? 'text-[30px]' : 'text-[26px]'}>{g.emoji}</span>
+                    <span className="max-w-full truncate text-[10px] font-bold text-cink">{g.name}</span>
+                    <span className="rounded-full bg-[#FFE8EE] px-1.5 py-0.5 text-[10px] font-extrabold text-[#D6336C]">
+                      ${g.priceUsd.toFixed(2)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-cmut">
+                <Info size={12} className="flex-none" />
+                The host earns ≈{100 - commission}% after commission and processing fees — credited the moment your
+                payment is verified.
+              </div>
+            </div>
+          )}
         </div>
-        <p className="pt-2 text-center text-[10px] text-cmut">
-          Recipient earns {`≈50%`} of the gift value as diamonds (admin-configured).
-        </p>
       </div>
-    </div>
+
+      {checkout && <PaymentModal payment={checkout.payment} onPaid={() => void onPaid(checkout.payment)} onClose={() => setCheckout(null)} />}
+    </>
   )
 }
 
-/* ================= ad banner (non-intrusive, list screens only) ================= */
+
+/* ---------------- ad banner (placements) ---------------- */
 
 export function AdBanner({ placement }: { placement: 'chats' | 'rooms' | 'profile' }) {
   const [ad, setAd] = useState<{ id: string; title: string; body: string; linkUrl: string | null } | null>(null)
-  const shown = useRef(false)
+  const firedRef = useRef(false)
 
   useEffect(() => {
-    let cancelled = false
-    void api
-      .ads(placement)
-      .then((res) => {
-        if (cancelled) return
-        if (res.enabled && res.ads.length > 0) {
-          const pick = res.ads[0]
-          setAd(pick)
-          if (!shown.current) {
-            shown.current = true
-            void api.adEvent(pick.id, 'impression').catch(() => {})
-          }
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    void (async () => {
+      try {
+        const res = await api.ads(placement)
+        if (res.ads.length) setAd(res.ads[0])
+      } catch {}
+    })()
   }, [placement])
+
+  useEffect(() => {
+    if (ad && !firedRef.current) {
+      firedRef.current = true
+      void api.adEvent(ad.id, 'impression').catch(() => {})
+    }
+  }, [ad])
 
   if (!ad) return null
   return (
-    <div className="mx-4 my-3 flex items-center gap-3 rounded-[14px] border border-cline bg-[#F7F9FF] px-3.5 py-2.5">
-      <span className="rounded-lg bg-csoft px-2 py-1 text-[10px] font-bold text-cbrand">AD</span>
+    <button
+      className="mx-2 mb-2 flex items-center gap-3 rounded-[18px] border border-cline bg-white px-3.5 py-3 text-left transition hover:bg-cbg"
+      onClick={() => {
+        if (ad.linkUrl) window.open(ad.linkUrl, '_blank', 'noopener')
+        void api.adEvent(ad.id, 'click').catch(() => {})
+      }}
+    >
+      <span className="rounded-md bg-[#E7EEFF] px-1.5 py-0.5 text-[9px] font-extrabold tracking-wide text-cbrand">AD</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-bold text-cink">{ad.title}</div>
-        <div className="truncate text-[11px] text-cmut">{ad.body}</div>
+        {ad.body && <div className="truncate text-[11.5px] text-cmut">{ad.body}</div>}
       </div>
-      {ad.linkUrl && (
-        <a
-          href={ad.linkUrl}
-          target="_blank"
-          rel="noopener noreferrer sponsored"
-          className="rounded-full bg-cbrand px-3 py-1.5 text-[11px] font-bold text-white"
-          onClick={() => void api.adEvent(ad.id, 'click').catch(() => {})}
-        >
-          Open
-        </a>
-      )}
-    </div>
+      <Sparkles size={15} className="flex-none text-cmut" />
+    </button>
   )
 }

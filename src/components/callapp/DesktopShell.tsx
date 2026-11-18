@@ -152,7 +152,7 @@ function RailButton({
   onClick,
   badge = 0,
 }: {
-  active: boolean
+  active?: boolean
   label: string
   Icon: typeof MessageCircle
   onClick: () => void

@@ -7,6 +7,7 @@ import {
   normalizeUsername,
   usernameError,
   nextUsernameChangeAt,
+  round2,
 } from '@/lib/callapp/server'
 
 export async function GET(req: Request) {
@@ -15,7 +16,11 @@ export async function GET(req: Request) {
   const wallet = await ensureWallet(me.id)
   return NextResponse.json({
     user: publicUser(me),
-    wallet: { coins: wallet.coins, earnings: wallet.earnings },
+    wallet: {
+      available: round2(wallet.available),
+      reserved: round2(wallet.reserved),
+      totalEarned: round2(wallet.totalEarned),
+    },
   })
 }
 
@@ -24,9 +29,10 @@ export async function PUT(req: Request) {
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const body = await req.json()
-    const data: { name?: string; about?: string; avatarKey?: number; avatarUrl?: string | null; username?: string; usernameChangedAt?: Date } = {}
+    const data: { name?: string; about?: string; avatarKey?: number; avatarUrl?: string | null; username?: string; usernameChangedAt?: Date; allowNonContacts?: boolean } = {}
     if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim().slice(0, 40)
     if (typeof body.about === 'string') data.about = body.about.slice(0, 120)
+    if (typeof body.allowNonContacts === 'boolean') data.allowNonContacts = body.allowNonContacts
     if (typeof body.avatarKey === 'number') data.avatarKey = Math.abs(body.avatarKey) % 8
     if (body.avatarUrl === null) data.avatarUrl = null
     if (typeof body.avatarUrl === 'string' && /^\/api\/media\/[a-f0-9]{32}$/.test(body.avatarUrl)) {

@@ -89,7 +89,7 @@ export function VoiceBubble({ msg, mine }: { msg: Message; mine: boolean }) {
         ))}
       </div>
       <span className="min-w-[34px] text-right text-xs font-semibold opacity-85">{fmtDuration(duration)}</span>
-      <audio ref={audioRef} src={url} preload="metadata" className="hidden" />
+      <audio ref={audioRef} src={url ?? undefined} preload="metadata" className="hidden" />
     </div>
   )
 }

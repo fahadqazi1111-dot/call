@@ -9,21 +9,22 @@ import { liveManager, battleManager } from './liveManager'
 import { soundKit } from './sound'
 import type {
   AppNotification,
+  BankAccountItem,
   CallRecord,
   CallState,
   ChatSummary,
   ContactItem,
+  GiftReceivedItem,
+  LedgerEntryItem,
   Me,
   Message,
   WalletInfo,
-  WalletTx,
-  Withdrawal,
-  CoinPackage,
+  WithdrawalItem,
 } from './types'
 
 export type AppPhase = 'splash' | 'onboarding' | 'auth' | 'main'
 export type AppTab = 'chats' | 'calls' | 'rooms' | 'live' | 'contacts' | 'profile'
-export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'story-composer' | null
+export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'ads' | 'story-composer' | null
 /** Staff members land in the console; they can switch to the normal user app. */
 export type StaffView = 'console' | 'app'
 
@@ -80,9 +81,11 @@ interface AppState {
   chatsLoaded: boolean
 
   wallet: WalletInfo | null
-  walletTxs: WalletTx[]
-  packages: CoinPackage[]
-  withdrawals: Withdrawal[]
+  walletCurrency: string
+  walletLedger: LedgerEntryItem[]
+  walletGifts: GiftReceivedItem[]
+  withdrawals: WithdrawalItem[]
+  bankAccounts: BankAccountItem[]
   notifications: AppNotification[]
   unreadNotifs: number
 
@@ -92,7 +95,7 @@ interface AppState {
   setStaffView: (v: StaffView) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string }) => Promise<void>
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) => Promise<void>
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
   logout: () => void
 
@@ -117,8 +120,7 @@ interface AppState {
   hangup: () => void
 
   loadWallet: () => Promise<void>
-  purchase: (packageId: string) => Promise<{ ok: boolean; credited: number }>
-  withdraw: (amount: number, method: string, destination: string) => Promise<Withdrawal | null>
+  withdraw: (amount: number, bankAccountId: string) => Promise<{ id: string; amount: number; status: string } | null>
 
   loadNotifications: () => Promise<void>
   markNotifs: (payload: { ids?: string[]; all?: boolean }) => Promise<void>
@@ -144,9 +146,11 @@ export const useApp = create<AppState>((set, get) => ({
   chatsLoaded: false,
 
   wallet: null,
-  walletTxs: [],
-  packages: [],
+  walletCurrency: 'USD',
+  walletLedger: [],
+  walletGifts: [],
   withdrawals: [],
+  bankAccounts: [],
   notifications: [],
   unreadNotifs: 0,
 
@@ -163,16 +167,16 @@ export const useApp = create<AppState>((set, get) => ({
     }
     try {
       persistToken(s.token)
-      const { user, wallet } = await api.me()
+      const { user } = await api.me()
       const staff = user.role === 'admin' || user.role === 'team'
       set({
         token: s.token,
         me: user,
         phase: 'main',
         booted: true,
-        wallet: wallet ?? null,
         staffView: staff ? 'console' : 'app',
       })
+      void get().loadWallet()
       socketClient.connect(user.id, user.name)
       callManager.setMe({ id: user.id, name: user.name })
       void get().loadChats()
@@ -242,9 +246,11 @@ export const useApp = create<AppState>((set, get) => ({
       openPeerId: null,
       chatsLoaded: false,
       wallet: null,
-      walletTxs: [],
-      packages: [],
+      walletCurrency: 'USD',
+      walletLedger: [],
+      walletGifts: [],
       withdrawals: [],
+      bankAccounts: [],
       notifications: [],
       unreadNotifs: 0,
       overlay: null,
@@ -358,6 +364,9 @@ export const useApp = create<AppState>((set, get) => ({
     soundKit.pop(false)
     const peer = st.chats.find((c) => c.peer.id === fromId)?.peer
     notifyDesktop(peer?.name ?? 'New message', message.type === 'text' ? message.content : message.type === 'voice' ? 'Voice message' : 'Call log')
+    // DELIVERY RECEIPT — acknowledge to the sender instantly + persist server-side
+    socketClient.emit('msg:delivered', { to: fromId, ids: [message.id] })
+    void api.markDelivered([message.id]).catch(() => {})
     if (isOpen) void get().markReadIfOpen(fromId)
   },
 
@@ -412,26 +421,18 @@ export const useApp = create<AppState>((set, get) => ({
       const res = await api.wallet()
       set({
         wallet: res.wallet,
-        walletTxs: res.txs,
-        packages: res.packages,
+        walletCurrency: res.currency,
+        walletLedger: res.ledger,
+        walletGifts: res.gifts,
         withdrawals: res.withdrawals,
+        bankAccounts: res.bankAccounts,
       })
     } catch {}
   },
 
-  purchase: async (packageId) => {
+  withdraw: async (amount, bankAccountId) => {
     try {
-      const res = await api.purchaseCoins(packageId)
-      await get().loadWallet()
-      return { ok: true, credited: res.credited }
-    } catch (e) {
-      return { ok: false, credited: 0, error: (e as Error).message }
-    }
-  },
-
-  withdraw: async (amount, method, destination) => {
-    try {
-      const res = await api.requestWithdrawal(amount, method, destination)
+      const res = await api.requestWithdrawal(amount, bankAccountId)
       await get().loadWallet()
       return res.withdrawal
     } catch {
@@ -503,6 +504,18 @@ export function bindGlobalSocketHandlers() {
         [peerId]: (st.messages[peerId] ?? []).map((m) => (m.mine ? { ...m, readAt: m.readAt ?? at } : m)),
       },
     }))
+  })
+  // DELIVERY receipts: the recipient's device acknowledged my messages
+  socketClient.on('msg:delivered', (p) => {
+    const { ids } = p as { ids: string[] }
+    if (!Array.isArray(ids) || ids.length === 0) return
+    const mark = (list: Message[]) => list.map((m) => (ids.includes(m.id) && m.mine ? { ...m, deliveredAt: m.deliveredAt ?? new Date().toISOString() } : m))
+    const messages = useApp.getState().messages
+    const next: Record<string, Message[]> = {}
+    for (const [peer, list] of Object.entries(messages)) {
+      if (list.some((m) => ids.includes(m.id))) next[peer] = mark(list)
+    }
+    if (Object.keys(next).length) useApp.setState({ messages: { ...messages, ...next } })
   })
   socketClient.on('typing', (p) => {
     const { peerId, isTyping } = p as { peerId: string; isTyping: boolean }

@@ -137,45 +137,49 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
             </button>
           </div>
         ) : (
-          list.map((c) => (
-            <button
-              key={c.conversationId}
-              className={`flex text-left transition-colors ${
-                desk ? 'mx-2 w-[calc(100%-16px)] items-center gap-3 rounded-xl px-2 py-2.5' : 'flex w-full items-center gap-3.5 px-6 py-3'
-              } ${
-                openPeerId === c.peer.id
-                  ? desk
-                    ? 'bg-[#E7EEFF]'
-                    : 'bg-cbg'
-                  : 'hover:bg-cbg'
-              }`}
-              onClick={() => openChat(c.peer.id)}
-            >
-              {c.peer.isOfficial ? (
-                <OfficialAvatar size={desk ? 48 : 56} />
-              ) : (
-                <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 48 : 56} online={online[c.peer.id]} src={c.peer.avatarUrl} />
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 text-[16px] font-bold text-cink">
-                  <span className="truncate">{c.peer.name}</span>
-                  <StaffTick role={c.peer.role} isOfficial={c.peer.isOfficial} />
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-sm text-[#4A5568]">
-                  <PreviewIcon chat={c} />
-                  <span className="truncate">{previewOf(c)}</span>
-                </div>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="text-xs text-cmut">{fmtChatListTime(c.lastActivity)}</span>
-                {c.unread > 0 && (
-                  <span className="mt-1.5 flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-cbrand px-1.5 text-xs font-bold text-white">
-                    {c.unread}
-                  </span>
+          <div className={desk ? 'space-y-0.5 px-2 pt-1' : ''}>
+            {list.map((c) => (
+              <button
+                key={c.conversationId}
+                className={`flex text-left transition-colors ${
+                  desk
+                    ? 'w-full items-center gap-3 rounded-xl px-3 py-2.5'
+                    : 'flex w-full items-center gap-3.5 px-6 py-3'
+                } ${
+                  openPeerId === c.peer.id
+                    ? desk
+                      ? 'bg-[#E7EEFF]'
+                      : 'bg-cbg'
+                    : 'hover:bg-cbg'
+                }`}
+                onClick={() => openChat(c.peer.id)}
+              >
+                {c.peer.isOfficial ? (
+                  <OfficialAvatar size={desk ? 46 : 56} />
+                ) : (
+                  <Avatar name={c.peer.name} avatarKey={c.peer.avatarKey} size={desk ? 46 : 56} online={online[c.peer.id]} src={c.peer.avatarUrl} />
                 )}
-              </div>
-            </button>
-          ))
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-[15.5px] font-bold text-cink">
+                    <span className="truncate">{c.peer.name}</span>
+                    <StaffTick role={c.peer.role} isOfficial={c.peer.isOfficial} />
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[13.5px] text-[#4A5568]">
+                    <PreviewIcon chat={c} />
+                    <span className="truncate">{previewOf(c)}</span>
+                  </div>
+                </div>
+                <div className="flex w-[52px] flex-none flex-col items-end">
+                  <span className="text-[11.5px] text-cmut">{fmtChatListTime(c.lastActivity)}</span>
+                  {c.unread > 0 ? (
+                    <span className="mt-1.5 flex h-[21px] min-w-[21px] items-center justify-center rounded-full bg-cbrand px-1.5 text-[11px] font-bold text-white">
+                      {c.unread}
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -197,8 +201,11 @@ function PreviewIcon({ chat }: { chat: ChatSummary }) {
     return <Phone size={15} className={missed ? 'flex-none text-cred' : 'flex-none text-cgreen'} />
   }
   if (lm.mine) {
+    // sent ✓ → delivered ✓✓ (grey) → read ✓✓ (blue)
     return lm.readAt ? (
       <CheckCheck size={15} className="flex-none text-cbrand" />
+    ) : lm.deliveredAt ? (
+      <CheckCheck size={15} className="flex-none text-[#9AA8C7]" />
     ) : (
       <Check size={15} className="flex-none text-[#9AA8C7]" />
     )

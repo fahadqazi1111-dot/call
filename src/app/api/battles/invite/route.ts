@@ -27,7 +27,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'You must be the live host to invite' }, { status: 403 })
     }
     const cfg = await getSetting<{ allowBattles: boolean; battleDurations: number[] }>('live', {
-      maxViewers: 25,
       allowBattles: true,
       battleDurations: [60, 120, 180],
     })

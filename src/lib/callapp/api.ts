@@ -1,27 +1,38 @@
 import type {
+  AdCampaignItem,
   AdItem,
+  AdPackageItem,
+  AdminPaymentRow,
+  AdminWithdrawalRow,
   AiConversationItem,
   AiMsg,
   AppNotification,
   BattleHistoryItem,
   BattleInfo,
+  BankAccountItem,
+  BroadcastRow,
   CallRecord,
   ChatSummary,
+  CheckoutResult,
   ContactItem,
+  FinanceSummary,
   GiftItem,
+  GiftRecipient,
+  GiftReceivedItem,
   GiftSendResult,
+  GiftSessionStats,
+  LedgerEntryItem,
   LiveComment,
   LiveSessionItem,
   Me,
   Message,
+  PaymentInfo,
   RoomChatMsg,
   StoryGroup,
   StoryViewer,
   VoiceRoomItem,
   WalletInfo,
-  WalletTx,
-  Withdrawal,
-  CoinPackage,
+  WithdrawalItem,
 } from './types'
 
 const TOKEN_KEY = 'call.auth.token'
@@ -127,8 +138,8 @@ export const api = {
     request<{ ok: boolean }>(`/api/admin/team?id=${id}`, { method: 'DELETE' }),
 
   /* ---------- me ---------- */
-  me: () => request<{ user: Me; wallet?: { coins: number; earnings: number } }>('/api/me'),
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string }) =>
+  me: () => request<{ user: Me; wallet?: { available: number; reserved: number; totalEarned: number } }>('/api/me'),
+  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) =>
     request<{ user: Me; nextChangeAt?: string }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
 
   /* ---------- chats ---------- */
@@ -140,6 +151,11 @@ export const api = {
     request<{ ok: boolean; updated: number }>('/api/messages/read', {
       method: 'POST',
       body: JSON.stringify({ peerId }),
+    }),
+  markDelivered: (ids: string[]) =>
+    request<{ ok: boolean; updated: number }>('/api/messages/delivered', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
     }),
 
   /* ---------- contacts ---------- */
@@ -173,24 +189,55 @@ export const api = {
   },
   uploadStoryMedia: async (blob: Blob, ext: string) => uploadFile(blob, `story.${ext}`, 'story'),
 
-  /* ---------- wallet ---------- */
+  /* ---------- wallet (REAL MONEY — direct payments, no coins) ---------- */
   wallet: () =>
-    request<{ wallet: WalletInfo; txs: WalletTx[]; packages: CoinPackage[]; withdrawals: Withdrawal[] }>('/api/wallet'),
-  purchaseCoins: (packageId: string) =>
-    request<{ ok: boolean; wallet: { coins: number; earnings: number }; credited: number }>('/api/wallet/purchase', {
+    request<{
+      wallet: WalletInfo
+      currency: string
+      minWithdrawal: number
+      withdrawalMethods: string[]
+      provider: { id: string; isTest: boolean }
+      ledger: LedgerEntryItem[]
+      gifts: GiftReceivedItem[]
+      withdrawals: WithdrawalItem[]
+      bankAccounts: BankAccountItem[]
+    }>('/api/wallet'),
+  bankAccounts: () => request<{ accounts: BankAccountItem[] }>('/api/wallet/bank'),
+  addBankAccount: (payload: {
+    holderName: string
+    bankName: string
+    accountNumber: string
+    iban?: string
+    swift?: string
+    countryCode: string
+    isDefault?: boolean
+  }) => request<{ ok: boolean; account: BankAccountItem }>('/api/wallet/bank', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteBankAccount: (id: string) =>
+    request<{ ok: boolean }>(`/api/wallet/bank?id=${id}`, { method: 'DELETE' }),
+  requestWithdrawal: (amount: number, bankAccountId: string) =>
+    request<{ ok: boolean; withdrawal: { id: string; amount: number; status: string } }>('/api/wallet/withdraw', {
       method: 'POST',
-      body: JSON.stringify({ packageId }),
+      body: JSON.stringify({ amount, bankAccountId }),
     }),
-  requestWithdrawal: (amount: number, method: string, destination: string) =>
-    request<{ ok: boolean; withdrawal: Withdrawal }>('/api/wallet/withdraw', {
-      method: 'POST',
-      body: JSON.stringify({ amount, method, destination }),
-    }),
+  paymentStatus: (paymentId: string) =>
+    request<{ payment: PaymentInfo }>(`/api/payments/${paymentId}`),
+  confirmSandboxPayment: (paymentId: string) =>
+    request<{ ok: boolean; status: string }>(`/api/payments/${paymentId}/confirm`, { method: 'POST' }),
 
-  /* ---------- gifts ---------- */
+  /* ---------- gifts (direct money purchase flow) ---------- */
   gifts: (context: 'room' | 'live') =>
-    request<{ gifts: GiftItem[]; creatorEarnPercent: number }>(`/api/gifts?context=${context}`),
-  sendGift: (payload: {
+    request<{ gifts: GiftItem[]; platformCommission: number; currency: string }>(`/api/gifts?context=${context}`),
+  giftRecipients: (query: { context: 'room' | 'live' | 'battle'; roomId?: string; liveId?: string; battleId?: string; battleSide?: number }) => {
+    const qs = new URLSearchParams({ context: query.context })
+    if (query.roomId) qs.set('roomId', query.roomId)
+    if (query.liveId) qs.set('liveId', query.liveId)
+    if (query.battleId) qs.set('battleId', query.battleId)
+    if (typeof query.battleSide === 'number') qs.set('battleSide', String(query.battleSide))
+    return request<{ recipients: GiftRecipient[] }>(`/api/gifts/recipients?${qs.toString()}`)
+  },
+  giftStats: (query: { roomId?: string; liveId?: string }) =>
+    request<GiftSessionStats>(`/api/gifts/top?${query.roomId ? `roomId=${query.roomId}` : `liveId=${query.liveId}`}`),
+  giftCheckout: (payload: {
     giftId: string
     toUserId: string
     context: 'room' | 'live' | 'battle'
@@ -198,8 +245,8 @@ export const api = {
     liveId?: string
     battleId?: string
     battleSide?: number
-    idempotencyKey?: string
-  }) => request<GiftSendResult>('/api/gifts/send', { method: 'POST', body: JSON.stringify(payload) }),
+    clientKey?: string
+  }) => request<CheckoutResult>('/api/gifts/checkout', { method: 'POST', body: JSON.stringify(payload) }),
 
   /* ---------- stories ---------- */
   stories: () => request<{ groups: StoryGroup[] }>('/api/stories'),
@@ -227,10 +274,22 @@ export const api = {
       membership: { role: string; blocked: boolean; entryPaid: boolean } | null
     }>(`/api/rooms/${id}`),
   roomEntry: (id: string) =>
-    request<{ ok: boolean; charged: number; wallet?: { coins: number; earnings: number }; alreadyPaid?: boolean }>(
-      `/api/rooms/${id}/entry`,
-      { method: 'POST' }
-    ),
+    request<{
+      ok: boolean
+      charged?: number
+      alreadyPaid?: boolean
+      host?: boolean
+      needsPayment?: boolean
+      amount?: number
+      currency?: string
+      paymentId?: string
+      provider?: 'stripe' | 'sandbox'
+      isTest?: boolean
+      checkoutUrl?: string | null
+      error?: string
+    }>(`/api/rooms/${id}/entry`, { method: 'POST' }),
+  roomEntryState: (id: string) =>
+    request<{ entryPaid: boolean; entryFee?: number; isHost?: boolean }>(`/api/rooms/${id}/entry`),
   roomLeave: (id: string) => request<{ ok: boolean }>(`/api/rooms/${id}/leave`, { method: 'POST' }),
   roomEnd: (id: string) => request<{ ok: boolean }>(`/api/rooms/${id}`, { method: 'DELETE' }),
   roomMessages: (id: string) => request<{ messages: RoomChatMsg[] }>(`/api/rooms/${id}/messages?limit=50`),
@@ -281,9 +340,34 @@ export const api = {
   markNotifications: (payload: { ids?: string[]; all?: boolean }) =>
     request<{ ok: boolean; unread: number }>('/api/notifications', { method: 'POST', body: JSON.stringify(payload) }),
 
-  /* ---------- ads ---------- */
+  /* ---------- ads (serving + USER CAMPAIGNS) ---------- */
   ads: (placement: string) => request<{ ads: AdItem[]; enabled: boolean }>(`/api/ads?placement=${placement}`),
   adEvent: (id: string, action: 'impression' | 'click') => request<{ ok: boolean }>(`/api/ads/${id}/${action}`, { method: 'POST' }),
+  adPackages: () => request<{ packages: AdPackageItem[] }>('/api/ads/packages'),
+  adCampaigns: () =>
+    request<{ campaigns: AdCampaignItem[]; payments: Array<{ id: string; status: string; amount: number; isTest: boolean; createdAt: string }> }>(
+      '/api/ads/campaigns'
+    ),
+  adCampaignCreate: (payload: {
+    title: string
+    body?: string
+    imageUrl?: string
+    mediaKind?: 'image' | 'video'
+    linkUrl?: string
+    placements?: string[]
+    packageId: string
+    budget?: number
+    clientKey?: string
+  }) =>
+    request<{
+      ok: boolean
+      campaign: { id: string; title: string; totalCost: number }
+      paymentId: string
+      amount: number
+      provider: 'stripe' | 'sandbox'
+      isTest: boolean
+      checkoutUrl: string | null
+    }>('/api/ads/campaigns', { method: 'POST', body: JSON.stringify(payload) }),
 
   /* ---------- CALL AI ---------- */
   aiChat: (payload: { conversationId?: string; text: string }) =>
@@ -298,7 +382,7 @@ export const api = {
   aiConversation: (id: string) => request<{ conversation: { id: string; title: string; messages: AiMsg[] } }>(`/api/ai/conversations/${id}`),
   aiDeleteConversation: (id: string) => request<{ ok: boolean }>(`/api/ai/conversations/${id}`, { method: 'DELETE' }),
   aiImage: (payload: { prompt: string; conversationId?: string }) =>
-    request<{ ok: boolean; mediaId: string; url: string; prompt: string }>('/api/ai/image', {
+    request<{ ok: boolean; mediaId: string; url: string; prompt: string; conversationId?: string }>('/api/ai/image', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -329,27 +413,51 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ config, to }),
     }),
-  adminUsers: (q?: string) => request<{ users: Array<Me & { role: string; blocked: boolean; coins: number; earnings: number }> }>(`/api/admin/users?q=${encodeURIComponent(q || '')}`),
-  adminUserAction: (targetId: string, action: string, value?: number) =>
-    request<{ ok: boolean }>('/api/admin/users', { method: 'POST', body: JSON.stringify({ targetId, action, value }) }),
+  adminUsers: (q?: string) =>
+    request<{
+      users: Array<{
+        id: string
+        name: string
+        username: string
+        phone: string
+        email: string | null
+        role: string
+        blocked: boolean
+        createdAt: string
+        lastSeen: string
+        available: number
+        reserved: number
+        totalEarned: number
+        totalWithdrawn: number
+      }>
+    }>(`/api/admin/users?q=${encodeURIComponent(q || '')}`),
+  adminUserAction: (targetId: string, action: string, value?: number, note?: string) =>
+    request<{ ok: boolean }>('/api/admin/users', { method: 'POST', body: JSON.stringify({ targetId, action, value, note }) }),
   adminGifts: () => request<{ gifts: GiftItem[] }>('/api/admin/gifts'),
-  adminGiftCreate: (payload: Partial<GiftItem>) =>
+  adminGiftCreate: (payload: Partial<GiftItem> & { androidProduct?: string; iosProduct?: string; description?: string }) =>
     request<{ ok: boolean }>('/api/admin/gifts', { method: 'POST', body: JSON.stringify(payload) }),
-  adminGiftUpdate: (id: string, patch: Partial<GiftItem>) =>
+  adminGiftUpdate: (id: string, patch: Partial<GiftItem> & { androidProduct?: string; iosProduct?: string }) =>
     request<{ ok: boolean }>('/api/admin/gifts', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
   adminGiftDelete: (id: string) => request<{ ok: boolean }>(`/api/admin/gifts?id=${id}`, { method: 'DELETE' }),
-  adminPackages: () => request<{ packages: CoinPackage[] }>('/api/admin/packages'),
-  adminPackageCreate: (payload: Partial<CoinPackage>) =>
-    request<{ ok: boolean }>('/api/admin/packages', { method: 'POST', body: JSON.stringify(payload) }),
-  adminPackageUpdate: (id: string, patch: Partial<CoinPackage>) =>
-    request<{ ok: boolean }>('/api/admin/packages', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
-  adminPackageDelete: (id: string) => request<{ ok: boolean }>(`/api/admin/packages?id=${id}`, { method: 'DELETE' }),
+  adminFinance: (filters?: { from?: string; to?: string; purpose?: string; provider?: string; status?: string; userId?: string }) => {
+    const qs = new URLSearchParams()
+    if (filters?.from) qs.set('from', filters.from)
+    if (filters?.to) qs.set('to', filters.to)
+    if (filters?.purpose) qs.set('purpose', filters.purpose)
+    if (filters?.provider) qs.set('provider', filters.provider)
+    if (filters?.status) qs.set('status', filters.status)
+    if (filters?.userId) qs.set('userId', filters.userId)
+    return request<{ summary: FinanceSummary; transactions: AdminPaymentRow[] }>(`/api/admin/finance?${qs.toString()}`)
+  },
+  adminBalanceAdjust: (userId: string, amount: number, note?: string) =>
+    request<{ ok: boolean }>('/api/admin/finance', { method: 'POST', body: JSON.stringify({ userId, amount, note }) }),
   adminWithdrawals: (status?: string) =>
-    request<{ withdrawals: Array<Withdrawal & { user: { id: string; name: string; phone: string } }> }>(
-      `/api/admin/withdrawals${status ? `?status=${status}` : ''}`
-    ),
-  adminWithdrawalReview: (id: string, action: 'approve' | 'reject', note?: string) =>
-    request<{ ok: boolean }>('/api/admin/withdrawals', { method: 'POST', body: JSON.stringify({ id, action, note }) }),
+    request<{ withdrawals: AdminWithdrawalRow[] }>(`/api/admin/withdrawals${status ? `?status=${status}` : ''}`),
+  adminWithdrawalReview: (id: string, action: 'under_review' | 'approve' | 'reject' | 'paid', note?: string, transferRef?: string) =>
+    request<{ ok: boolean; status: string }>('/api/admin/withdrawals', {
+      method: 'POST',
+      body: JSON.stringify({ id, action, note, transferRef }),
+    }),
   adminModeration: () =>
     request<{
       rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean; entryFee: number }>,
@@ -358,10 +466,16 @@ export const api = {
     }>('/api/admin/moderation'),
   adminModerate: (type: 'room' | 'live' | 'story', id: string) =>
     request<{ ok: boolean }>('/api/admin/moderation', { method: 'POST', body: JSON.stringify({ type, id }) }),
+  adminBroadcasts: () => request<{ broadcasts: BroadcastRow[] }>('/api/admin/broadcast'),
   adminBroadcast: (title: string, body: string, senderId?: string) =>
-    request<{ ok: boolean; delivered: number; senderName: string }>('/api/admin/broadcast', {
+    request<{ ok: boolean; broadcastId: string; delivered: number; failed: number; total: number; senderName: string }>('/api/admin/broadcast', {
       method: 'POST',
       body: JSON.stringify({ title, body, senderId }),
+    }),
+  adminBroadcastRetry: (broadcastId: string) =>
+    request<{ ok: boolean; fixed: number; deliveredCount: number; failedCount: number }>('/api/admin/broadcast', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'retry', broadcastId }),
     }),
   adminAi: () =>
     request<{
@@ -371,10 +485,48 @@ export const api = {
     }>('/api/admin/ai'),
   adminAiSave: (config: Record<string, unknown>) =>
     request<{ ok: boolean }>('/api/admin/ai', { method: 'PUT', body: JSON.stringify({ config }) }),
-  adminAds: () => request<{ ads: Array<AdItem & { active: boolean; weight: number; placements: string; impressions: number; clicks: number }> }>('/api/admin/ads'),
+  adminAds: () =>
+    request<{
+      ads: Array<{
+        id: string
+        title: string
+        body: string
+        imageUrl: string | null
+        linkUrl: string | null
+        mediaKind: string
+        placements: string
+        status: string
+        isUserAd: boolean
+        owner: { id: string; name: string; username: string; email: string | null } | null
+        pkg: { id: string; name: string; durationDays: number; priceUsd: number } | null
+        budget: number
+        totalCost: number
+        paymentId: string | null
+        rejectionReason: string | null
+        impressions: number
+        clicks: number
+        startsAt: string | null
+        endsAt: string | null
+        createdAt: string
+      }>
+    }>('/api/admin/ads'),
   adminAdCreate: (payload: { title: string; body?: string; linkUrl?: string; placements?: string[]; weight?: number }) =>
     request<{ ok: boolean }>('/api/admin/ads', { method: 'POST', body: JSON.stringify(payload) }),
   adminAdUpdate: (id: string, patch: Record<string, unknown>) =>
     request<{ ok: boolean }>('/api/admin/ads', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
+  adminAdAction: (id: string, action: 'approve' | 'reject' | 'activate' | 'pause' | 'complete', reason?: string) =>
+    request<{ ok: boolean; status: string }>('/api/admin/ads', {
+      method: 'PUT',
+      body: JSON.stringify({ id, action, reason }),
+    }),
   adminAdDelete: (id: string) => request<{ ok: boolean }>(`/api/admin/ads?id=${id}`, { method: 'DELETE' }),
+  adminAdPackages: () => request<{ packages: Array<{ id: string; name: string; description: string; priceUsd: number; durationDays: number; placements: string; minBudget: number; order: number; active: boolean }> }>(
+    '/api/admin/adpackages'
+  ),
+  adminAdPackageCreate: (payload: Record<string, unknown>) =>
+    request<{ ok: boolean }>('/api/admin/adpackages', { method: 'POST', body: JSON.stringify(payload) }),
+  adminAdPackageUpdate: (id: string, patch: Record<string, unknown>) =>
+    request<{ ok: boolean }>('/api/admin/adpackages', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
+  adminAdPackageDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/adpackages?id=${id}`, { method: 'DELETE' }),
 }

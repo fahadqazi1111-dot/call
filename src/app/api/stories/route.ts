@@ -1,16 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, mediaUrl, rateLimit } from '@/lib/callapp/server'
+import { requireUser, mediaUrl, rateLimit, canViewStory } from '@/lib/callapp/server'
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000
-
-/** Users allowed to see a contacts-only story: people saved in the author's contacts. */
-async function isInContactsOf(authorId: string, viewerId: string, viewerPhone: string): Promise<boolean> {
-  const author = await db.user.findUnique({ where: { id: authorId }, select: { phone: true } })
-  if (!author) return false
-  const c = await db.contact.findFirst({ where: { ownerId: authorId, phone: viewerPhone } })
-  return !!c
-}
 
 /** GET: story feed — grouped by author, with signed media URLs + seen state. */
 export async function GET(req: Request) {
@@ -21,8 +13,11 @@ export async function GET(req: Request) {
   // lazy cleanup of expired stories (cheap, indexed)
   await db.story.deleteMany({ where: { expiresAt: { lt: now } } })
 
+  // CONTACTS-ONLY feed: only my own stories + stories from authors I actually
+  // saved as contacts are ever returned. privacy stays as a per-story setting
+  // ('contacts' default) — but the contact relationship is the hard floor.
   const stories = await db.story.findMany({
-    where: { expiresAt: { gt: now }, OR: [{ userId: me.id }, { privacy: 'all' }, { privacy: 'contacts' }] },
+    where: { expiresAt: { gt: now } },
     orderBy: { createdAt: 'asc' },
     include: { _count: { select: { views: true } } },
   })
@@ -30,12 +25,14 @@ export async function GET(req: Request) {
   const views = await db.storyView.findMany({ where: { viewerId: me.id }, select: { storyId: true } })
   const seen = new Set(views.map((v) => v.storyId))
 
-  // contacts-only filter
+  // contacts-only filter (server-side — cannot be bypassed by API calls)
   const allowed: typeof stories = []
   for (const s of stories) {
-    if (s.userId === me.id) allowed.push(s)
-    else if (s.privacy === 'all') allowed.push(s)
-    else if (await isInContactsOf(s.userId, me.id, me.phone)) allowed.push(s)
+    if (s.userId === me.id) {
+      allowed.push(s)
+      continue
+    }
+    if (await canViewStory(me, s.userId)) allowed.push(s)
   }
 
   interface AuthorGroup {

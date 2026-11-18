@@ -9,8 +9,10 @@ import type { StoryGroup } from '@/lib/callapp/types'
 import { StoryViewer } from './StoryViewer'
 
 /**
- * WhatsApp-style stories tray shown at the top of the chats list.
- * "My status" + friend story rings with unseen gradient.
+ * WhatsApp/Instagram-quality stories tray.
+ *  - unseen: animated conic-gradient ring with a clean white gap
+ *  - seen:   single soft grey ring (no heavy padding), avatar slightly dimmed
+ *  - my status with no story: plain avatar + compact brand "+" badge
  */
 export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
@@ -39,17 +41,18 @@ export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   const mine = groups.find((g) => g.mine)
   const others = groups.filter((g) => !g.mine)
   const compact = variant === 'desktop'
+  const size = compact ? 54 : 62
   const myHasStory = !!mine && mine.stories.length > 0
 
   return (
     <div
-      className={`stories-scroll no-scrollbar flex gap-4 overflow-x-auto pb-1.5 pt-1 px-4 ${
-        compact ? 'pt-2' : ''
+      className={`stories-scroll no-scrollbar flex gap-[18px] overflow-x-auto px-4 pb-2 pt-2 ${
+        compact ? 'pt-3' : ''
       }`}
     >
       {/* my status */}
       <button
-        className="group relative flex flex-none flex-col items-center gap-1.5"
+        className="group flex flex-none flex-col items-center gap-[7px]"
         onClick={() => {
           if (myHasStory) {
             setViewing({ groups: [mine!], start: 0 })
@@ -62,47 +65,77 @@ export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
         <span className="relative inline-flex">
           {myHasStory ? (
             <span
-              className={`rounded-full p-[3px] ${
-                mine!.allSeen ? 'bg-[#C9D2E4]' : 'bg-gradient-to-tr from-[#2F5BE0] via-[#7B3FE4] to-[#E1306C]'
-              }`}
+              className="rounded-full transition-transform duration-200 group-hover:scale-[1.04]"
+              style={{
+                padding: 3.5,
+                background: mine!.allSeen
+                  ? 'conic-gradient(from 210deg, #c9d3ec, #e3e9f6, #c9d3ec)'
+                  : 'conic-gradient(from 210deg, #2F5BE0, #7B3FE4, #E1306C, #F59E0B, #2F5BE0)',
+              }}
             >
-              <Avatar name={me?.name ?? 'Me'} avatarKey={me?.avatarKey ?? 0} size={compact ? 50 : 58} src={me?.avatarUrl} className="ring-2 ring-white rounded-full" />
+              <span className="block rounded-full bg-white p-[2.5px]">
+                <Avatar
+                  name={me?.name ?? 'Me'}
+                  avatarKey={me?.avatarKey ?? 0}
+                  size={size}
+                  src={me?.avatarUrl}
+                  className="rounded-full"
+                />
+              </span>
             </span>
           ) : (
-            <span className="rounded-full p-[3px] ring-[1.5px] ring-[#C9D2E4]">
-              <Avatar name={me?.name ?? 'Me'} avatarKey={me?.avatarKey ?? 0} size={compact ? 50 : 58} src={me?.avatarUrl} />
-            </span>
+            <>
+              <Avatar
+                name={me?.name ?? 'Me'}
+                avatarKey={me?.avatarKey ?? 0}
+                size={size}
+                src={me?.avatarUrl}
+                className="rounded-full ring-[2.5px] ring-[#D8DFEF]"
+              />
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-[22px] w-[22px] items-center justify-center rounded-full bg-cbrand text-white ring-[3px] ring-white transition-transform group-hover:scale-110">
+                <Plus size={13} strokeWidth={3} />
+              </span>
+            </>
           )}
-          <span
-            className={`absolute -bottom-0.5 -right-0.5 flex h-[24px] w-[24px] items-center justify-center rounded-full text-white ring-[3px] ring-white transition group-hover:scale-105 ${
-              myHasStory ? 'bg-cink/80' : 'bg-cbrand'
-            }`}
-          >
-            <Plus size={15} strokeWidth={2.6} />
-          </span>
         </span>
-        <span className="max-w-[66px] truncate text-[11px] font-semibold leading-4 text-cink">My status</span>
+        <span className="max-w-[72px] truncate text-[11.5px] font-semibold leading-4 text-cink">My status</span>
       </button>
 
       {/* friends */}
       {others.map((g) => (
         <button
           key={g.userId}
-          className="group flex flex-none flex-col items-center gap-1.5"
+          className="group flex flex-none flex-col items-center gap-[7px]"
           onClick={() => {
             const idx = groups.findIndex((x) => x.userId === g.userId)
             setViewing({ groups, start: idx })
           }}
           aria-label={`${g.name}'s story`}
         >
-          <span
-            className={`rounded-full p-[3px] transition group-hover:scale-[1.04] ${
-              g.allSeen ? 'bg-[#C9D2E4]' : 'bg-gradient-to-tr from-[#2F5BE0] via-[#7B3FE4] to-[#E1306C]'
-            }`}
-          >
-            <Avatar name={g.name} avatarKey={g.avatarKey} size={compact ? 50 : 58} src={g.avatarUrl} className="rounded-full ring-2 ring-white" />
+          {g.allSeen ? (
+            <Avatar
+              name={g.name}
+              avatarKey={g.avatarKey}
+              size={size}
+              src={g.avatarUrl}
+              className="rounded-full opacity-[0.72] ring-[2.5px] ring-[#D8DFEF] transition-all group-hover:opacity-100"
+            />
+          ) : (
+            <span
+              className="rounded-full transition-transform duration-200 group-hover:scale-[1.05]"
+              style={{
+                padding: 3.5,
+                background: 'conic-gradient(from 210deg, #2F5BE0, #7B3FE4, #E1306C, #F59E0B, #2F5BE0)',
+              }}
+            >
+              <span className="block rounded-full bg-white p-[2.5px]">
+                <Avatar name={g.name} avatarKey={g.avatarKey} size={size} src={g.avatarUrl} className="rounded-full" />
+              </span>
+            </span>
+          )}
+          <span className="max-w-[72px] truncate text-[11.5px] font-semibold leading-4 text-cink">
+            {g.name.split(' ')[0]}
           </span>
-          <span className="max-w-[66px] truncate text-[11px] font-semibold leading-4 text-cink">{g.name.split(' ')[0]}</span>
         </button>
       ))}
 

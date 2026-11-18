@@ -60,6 +60,17 @@ function faceRectsFor(filter: FilterId): boolean {
   return filter !== 'none' && filter !== 'beauty' && filter !== 'blurbg' && filter !== 'cartoon'
 }
 
+/* Minimal typing for the experimental Shape Detection API (Chrome-only, optional). */
+interface DetectedFace {
+  boundingBox: { x: number; y: number; width: number; height: number }
+}
+interface FaceDetectorLike {
+  detect(source: CanvasImageSource): Promise<DetectedFace[]>
+}
+interface FaceDetectorCtor {
+  new (options?: { fastMode?: boolean; maxDetectedFaces?: number }): FaceDetectorLike
+}
+
 class FaceFilterEngine {
   private video: HTMLVideoElement
   private canvas: HTMLCanvasElement
@@ -67,7 +78,7 @@ class FaceFilterEngine {
   private stream: MediaStream | null
   private raf = 0
   private running = false
-  private detector: FaceDetector | null = null
+  private detector: FaceDetectorLike | null = null
   private detectorOk = false
   private anchor: Anchors = { cx: 0.5, cy: 0.38, w: 0.35, h: 0.5 }
   private lastDetect = 0
@@ -82,7 +93,7 @@ class FaceFilterEngine {
     this.video.srcObject = stream
     void this.video.play().catch(() => {})
     // optional native face detection
-    const FD = (window as unknown as { FaceDetector?: typeof FaceDetector }).FaceDetector
+    const FD = (window as unknown as { FaceDetector?: FaceDetectorCtor }).FaceDetector
     if (FD) {
       try {
         this.detector = new FD({ fastMode: true, maxDetectedFaces: 1 })

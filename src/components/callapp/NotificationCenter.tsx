@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import {
   X, Bell, MessageCircle, Phone, Heart, Radio, Clapperboard, Gift,
-  Swords, Wallet, Gem, Bot, ShieldAlert, Trophy, Loader2,
+  Swords, Wallet, Landmark, Bot, ShieldAlert, Trophy, Loader2, Megaphone, BadgeCheck,
 } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 
@@ -15,10 +15,13 @@ const KIND_META: Record<string, { Icon: typeof Bell; color: string }> = {
   room_invite: { Icon: Radio, color: 'bg-csoft text-cbrand' },
   live_started: { Icon: Clapperboard, color: 'bg-pink-50 text-[#E1306C]' },
   gift: { Icon: Gift, color: 'bg-amber-50 text-[#B7791F]' },
+  gift_payment: { Icon: BadgeCheck, color: 'bg-green-50 text-green-600' },
   battle_invite: { Icon: Swords, color: 'bg-violet-50 text-violet-600' },
   battle_result: { Icon: Trophy, color: 'bg-amber-50 text-[#B7791F]' },
   wallet: { Icon: Wallet, color: 'bg-green-50 text-green-600' },
-  withdrawal: { Icon: Gem, color: 'bg-amber-50 text-[#B7791F]' },
+  withdrawal: { Icon: Landmark, color: 'bg-amber-50 text-[#B7791F]' },
+  ad: { Icon: Megaphone, color: 'bg-pink-50 text-[#D6336C]' },
+  broadcast: { Icon: Megaphone, color: 'bg-csoft text-cbrand' },
   ai: { Icon: Bot, color: 'bg-csoft text-cbrand' },
   security: { Icon: ShieldAlert, color: 'bg-slate-100 text-slate-600' },
 }

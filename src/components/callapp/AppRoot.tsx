@@ -22,6 +22,7 @@ import { AuthBranding } from './AuthBranding'
 import { StoryComposer } from './StoryComposer'
 import { AiScreen } from './AiScreen'
 import { WalletScreen } from './WalletScreen'
+import { AdsScreen } from './AdsScreen'
 import { NotificationCenter } from './NotificationCenter'
 import { AdminPanel } from './AdminPanel'
 import { BattleInviteBridge } from './BattleInviteUI'
@@ -38,6 +39,7 @@ function OverlayHost() {
     <>
       {overlay === 'ai' && <AiScreen onClose={() => setOverlay(null)} />}
       {overlay === 'wallet' && <WalletScreen onClose={() => setOverlay(null)} />}
+      {overlay === 'ads' && <AdsScreen onClose={() => setOverlay(null)} />}
       {overlay === 'notifications' && <NotificationCenter onClose={() => setOverlay(null)} />}
       {overlay === 'admin' && <AdminPanel onClose={() => setOverlay(null)} />}
       {overlay === 'story-composer' && <StoryComposer onClose={() => setOverlay(null)} />}

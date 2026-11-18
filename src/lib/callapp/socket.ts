@@ -43,6 +43,7 @@ class SocketClient {
       'call:unavailable',
       'msg:incoming',
       'msg:read',
+      'msg:delivered',
       'typing',
       'notify:incoming',
       // voice rooms

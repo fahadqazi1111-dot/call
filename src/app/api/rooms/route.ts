@@ -48,12 +48,12 @@ export async function POST(req: Request) {
     const title = String(body.title || '').trim().slice(0, 60)
     const description = String(body.description || '').trim().slice(0, 200)
     const isPaid = !!body.isPaid
-    const entryFee = Math.max(0, Math.floor(Number(body.entryFee) || 0))
+    const entryFee = Math.round((Number(body.entryFee) || 0) * 100) / 100
     if (!title) return NextResponse.json({ error: 'Room name required' }, { status: 400 })
 
     const cfg = await getSetting<{ maxSpeakers: number; maxEntryFee: number; allowPaidRooms: boolean }>('rooms', {
       maxSpeakers: 5,
-      maxEntryFee: 5000,
+      maxEntryFee: 50,
       allowPaidRooms: true,
     })
     if (isPaid && !cfg.allowPaidRooms) {
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     }
     if (isPaid && (entryFee <= 0 || entryFee > cfg.maxEntryFee)) {
       return NextResponse.json(
-        { error: `Entry fee must be between 1 and ${cfg.maxEntryFee} coins` },
+        { error: `Entry fee must be between $0.50 and $${cfg.maxEntryFee}` },
         { status: 400 }
       )
     }

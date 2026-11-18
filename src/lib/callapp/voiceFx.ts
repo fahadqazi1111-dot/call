@@ -152,7 +152,7 @@ function chainFor(effect: VoiceEffect): ChainConfig {
   }
 }
 
-function distortionCurve(amount: number): Float32Array {
+function distortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const n = 1024
   const curve = new Float32Array(n)
   const k = amount * 60

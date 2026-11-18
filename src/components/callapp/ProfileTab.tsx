@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Avatar } from './Avatar'
+import { Avatar, OfficialAvatar } from './Avatar'
 import { CallLogoMark } from './CallLogo'
 import { StaffTick } from './StaffTick'
 import { useApp } from '@/lib/callapp/store'
@@ -20,16 +20,20 @@ import {
   Wifi,
   BadgeCheck,
   Loader2,
-  Coins,
+  Wallet,
   Bot,
   Shield,
   AtSign,
   CheckCircle2,
   XCircle,
   Clock3,
-  Gem,
   Mail,
-  Infinity as InfinityIcon,
+  Landmark,
+  Gift,
+  Megaphone,
+  TrendingUp,
+  Lock,
+  LockOpen,
 } from 'lucide-react'
 
 const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
@@ -101,6 +105,8 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const logout = useApp((s) => s.logout)
   const setOverlay = useApp((s) => s.setOverlay)
   const wallet = useApp((s) => s.wallet)
+  const walletGifts = useApp((s) => s.walletGifts)
+  const loadWallet = useApp((s) => s.loadWallet)
   const [showEdit, setShowEdit] = useState(false)
   const [editName, setEditName] = useState(me?.name ?? '')
   const [editAbout, setEditAbout] = useState(me?.about ?? '')
@@ -122,6 +128,11 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     const t = window.setInterval(() => setNowTick(Date.now()), 30_000)
     return () => window.clearInterval(t)
   }, [showUsername])
+
+  // keep the money stats fresh
+  useEffect(() => {
+    queueMicrotask(() => void loadWallet())
+  }, [])
 
   // live availability check while typing (debounced)
   useEffect(() => {
@@ -259,24 +270,35 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         <div className="relative flex flex-col items-center px-6">
           <div className="relative">
             <span className="inline-flex rounded-full bg-white/10 p-[4px] ring-1 ring-white/25">
-              <Avatar
-                name={me.name}
-                avatarKey={me.avatarKey}
-                size={desk ? 110 : 104}
-                src={me.avatarUrl}
-                className="rounded-full ring-[3.5px] ring-white/95"
-              />
+              {me.isOfficial ? (
+                <OfficialAvatar
+                  size={desk ? 110 : 104}
+                  className="rounded-full ring-[3.5px] ring-white/95"
+                />
+              ) : (
+                <Avatar
+                  name={me.name}
+                  avatarKey={me.avatarKey}
+                  size={desk ? 110 : 104}
+                  src={me.avatarUrl}
+                  className="rounded-full ring-[3.5px] ring-white/95"
+                />
+              )}
             </span>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onPickFile(e)} />
-            <button
-              className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#0B1B40] bg-white text-cbrand shadow-lg transition hover:scale-105 disabled:opacity-60"
-              aria-label="Change profile photo"
-              title="Change profile photo"
-              disabled={photoBusy}
-              onClick={() => fileRef.current?.click()}
-            >
-              {photoBusy ? <Loader2 size={17} className="animate-spin" /> : <Camera size={17} />}
-            </button>
+            {!me.isOfficial && (
+              <>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onPickFile(e)} />
+                <button
+                  className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#0B1B40] bg-white text-cbrand shadow-lg transition hover:scale-105 disabled:opacity-60"
+                  aria-label="Change profile photo"
+                  title="Change profile photo"
+                  disabled={photoBusy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {photoBusy ? <Loader2 size={17} className="animate-spin" /> : <Camera size={17} />}
+                </button>
+              </>
+            )}
           </div>
 
           <h1 className="mt-4 flex items-center gap-2 text-[24px] font-extrabold tracking-tight">
@@ -304,32 +326,53 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         </div>
       </div>
 
-      {/* ============ stats (overlap hero) ============ */}
-      <div className={`relative z-10 -mt-14 grid grid-cols-3 gap-3 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`}>
-        <button className="stat-tile group" onClick={() => setOverlay('wallet')}>
-          <span className="stat-ico bg-[#FFF6E6] text-[#B45309]"><Coins size={18} /></span>
-          <span className="stat-val">{wallet ? wallet.coins.toLocaleString() : '0'}</span>
-          <span className="stat-lbl">Coins</span>
-        </button>
-        <button className="stat-tile group" onClick={() => setOverlay('wallet')}>
-          <span className="stat-ico bg-[#E0F2FE] text-[#0369A1]"><Gem size={18} /></span>
-          <span className="stat-val">{wallet ? wallet.earnings.toLocaleString() : '0'}</span>
-          <span className="stat-lbl">Diamonds</span>
-        </button>
-        <div className="stat-tile">
-          <span className="stat-ico bg-[#DFF3E7] text-[#0B8A46]"><InfinityIcon size={18} /></span>
-          <span className="stat-val">100%</span>
-          <span className="stat-lbl">Free forever</span>
+      {/* ============ real-money earnings card (overlaps hero) ============ */}
+      <div className={`relative z-10 -mt-14 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`}>
+        <div className="bg-brand-grad relative overflow-hidden rounded-[24px] p-5 text-white shadow-[0_16px_36px_rgba(47,91,234,0.30)]">
+          <div className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/75">My balance</p>
+              <p className="mt-1 text-[34px] font-extrabold leading-none tracking-tight">
+                ${(wallet?.available ?? 0).toFixed(2)}
+              </p>
+              {wallet && wallet.reserved > 0 && (
+                <p className="mt-1 flex items-center gap-1 text-[11.5px] font-semibold text-white/70">
+                  <Lock size={11} /> ${wallet.reserved.toFixed(2)} reserved in withdrawals
+                </p>
+              )}
+            </div>
+            <button
+              className="flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[12.5px] font-extrabold text-cbrand shadow-lg transition active:scale-95"
+              onClick={() => setOverlay('wallet')}
+            >
+              <Landmark size={14} /> Withdraw
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-2xl bg-white/12 px-3 py-2.5 ring-1 ring-white/15">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-white/70"><TrendingUp size={11} /> Lifetime earned</p>
+              <p className="mt-0.5 text-[16px] font-extrabold">${(wallet?.totalEarned ?? 0).toFixed(2)}</p>
+            </div>
+            <div className="rounded-2xl bg-white/12 px-3 py-2.5 ring-1 ring-white/15">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-white/70"><Gift size={11} /> Gifts received</p>
+              <p className="mt-0.5 text-[16px] font-extrabold">{walletGifts.length}</p>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* ============ quick actions ============ */}
       <section className={`mt-6 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Quick actions">
         <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Explore</h2>
-        <div className={`grid gap-3 ${isStaff ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <div className={`grid gap-3 ${isStaff ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3 sm:grid-cols-4'}`}>
           <button className="qa-tile" onClick={() => setOverlay('wallet')}>
-            <span className="qa-ico bg-[#FFF6E6] text-[#B45309]"><Coins size={20} /></span>
+            <span className="qa-ico bg-[#E7F7EF] text-[#0B8A46]"><Wallet size={20} /></span>
             <span className="qa-lbl">Wallet</span>
+          </button>
+          <button className="qa-tile" onClick={() => setOverlay('ads')}>
+            <span className="qa-ico bg-[#FFF0F3] text-[#D6336C]"><Megaphone size={20} /></span>
+            <span className="qa-lbl">My ads</span>
           </button>
           <button className="qa-tile" onClick={() => setOverlay('ai')}>
             <span className="qa-ico bg-[#F1ECFE] text-[#6D28D9]"><Bot size={20} /></span>
@@ -367,6 +410,29 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       <section className={`mt-5 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Privacy and support">
         <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Privacy & support</h2>
         <div className="overflow-hidden rounded-[22px] border border-cline bg-white shadow-[0_1px_3px_rgba(16,32,72,0.04)]">
+          <button
+            className="flex w-full items-center gap-3.5 border-b border-cline px-4 py-3 text-left transition-colors hover:bg-cbg"
+            type="button"
+            onClick={() => {
+              const next = !me.allowNonContacts
+              void updateMe({ allowNonContacts: next })
+                .then(() => toast.success(next ? 'Non-contacts can now message you' : 'Only contacts can message you'))
+                .catch(() => toast.error('Could not update the setting'))
+            }}
+          >
+            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+              {me.allowNonContacts ? <LockOpen size={18} /> : <Lock size={18} />}
+            </span>
+            <span className="flex-1">
+              <span className="block text-[15px] font-semibold text-cink">Message requests</span>
+              <span className="block text-xs text-cmut">
+                {me.allowNonContacts ? 'Anyone on CALL can message you' : 'Only your contacts can message you'}
+              </span>
+            </span>
+            <span className={`relative h-6 w-11 flex-none rounded-full transition ${me.allowNonContacts ? 'bg-cgreen' : 'bg-[#C9D2E4]'}`}>
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${me.allowNonContacts ? 'left-[22px]' : 'left-0.5'}`} />
+            </span>
+          </button>
           <Row Icon={ShieldCheck} label="Privacy & security" sub="Peer-to-peer encrypted calls" />
           <Row Icon={Wifi} label="Connection" sub="WebRTC + realtime socket" />
           <Row Icon={Globe2} label="Language" sub="English" />

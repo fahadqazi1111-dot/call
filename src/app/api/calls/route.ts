@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       },
     })
 
-    let message = null
+    let message: { id: string; type: string; content: string; duration: number | null; createdAt: string; readAt: null; mine: boolean } | null = null
     if (body.addMessage) {
       const conv = await getOrCreateConversation(me.id, peerId)
       const msg = await db.message.create({

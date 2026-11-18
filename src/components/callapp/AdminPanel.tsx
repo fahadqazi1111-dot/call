@@ -3,16 +3,17 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  X, Users, Gift, Package, Gem, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
-  Loader2, Ban, Coins, Radio, Clapperboard, Trash2, Plus, Mail, Send,
+  X, Users, Gift, Banknote, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
+  Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
+  Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { StaffTick } from './StaffTick'
-import type { GiftItem, CoinPackage } from '@/lib/callapp/types'
+import type { AdminPaymentRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'packages' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
 
 interface StaffMember {
   id: string
@@ -67,11 +68,11 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
   const navItems = (
     [
       { id: 'overview', label: 'Overview', Icon: ShieldAlert, adminOnly: false },
+      { id: 'finance', label: 'Finance', Icon: DollarSign, adminOnly: false },
       { id: 'users', label: 'Users', Icon: Users, adminOnly: false },
       { id: 'team', label: 'Team', Icon: UserPlus, adminOnly: true },
-      { id: 'gifts', label: 'Gifts', Icon: Gift, adminOnly: false },
-      { id: 'packages', label: 'Coin packages', Icon: Package, adminOnly: false },
-      { id: 'withdrawals', label: 'Withdrawals', Icon: Gem, adminOnly: false },
+      { id: 'gifts', label: 'Gifts & pricing', Icon: Gift, adminOnly: false },
+      { id: 'withdrawals', label: 'Withdrawals', Icon: Landmark, adminOnly: false },
       { id: 'moderation', label: 'Moderation', Icon: Radio, adminOnly: false },
       { id: 'ai', label: 'CALL AI', Icon: Bot, adminOnly: false },
       { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
@@ -137,7 +138,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'users' && <UsersSection />}
           {section === 'team' && isAdmin && <TeamSection />}
           {section === 'gifts' && <GiftsSection />}
-          {section === 'packages' && <PackagesSection />}
+          {section === 'finance' && <FinanceSection />}
           {section === 'withdrawals' && <WithdrawalsSection />}
           {section === 'moderation' && <ModerationSection />}
           {section === 'ai' && <AiSection />}
@@ -153,21 +154,29 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
 /* ================= sections ================= */
 
 function OverviewSection() {
-  const [stats, setStats] = useState<{ users: number; rooms: number; lives: number; txCount: number } | null>(null)
+  const [stats, setStats] = useState<{ users: number; rooms: number; lives: number; wdPending: number } | null>(null)
+  const [finance, setFinance] = useState<FinanceSummary | null>(null)
   useEffect(() => {
     void (async () => {
       try {
-        const [u, m] = await Promise.all([api.adminUsers(), api.adminModeration()])
+        const [u, m, f] = await Promise.all([api.adminUsers(), api.adminModeration(), api.adminFinance()])
         const w = await api.adminWithdrawals()
-        setStats({ users: u.users.length, rooms: m.rooms.length, lives: m.lives.length, txCount: w.withdrawals.length })
+        setStats({
+          users: u.users.length,
+          rooms: m.rooms.length,
+          lives: m.lives.length,
+          wdPending: w.withdrawals.filter((x) => x.status === 'pending' || x.status === 'under_review').length,
+        })
+        setFinance(f.summary)
       } catch {}
     })()
   }, [])
+  const money = (n: number) => `$${(n || 0).toFixed(2)}`
   const cards = [
     { label: 'Users (sampled)', value: stats?.users ?? '—', Icon: Users },
     { label: 'Live rooms', value: stats?.rooms ?? '—', Icon: Radio },
     { label: 'Live broadcasts', value: stats?.lives ?? '—', Icon: Clapperboard },
-    { label: 'Withdrawal requests', value: stats?.txCount ?? '—', Icon: Gem },
+    { label: 'Withdrawals awaiting review', value: stats?.wdPending ?? '—', Icon: Landmark },
   ]
   return (
     <div>
@@ -181,8 +190,40 @@ function OverviewSection() {
           </div>
         ))}
       </div>
+      {finance && (
+        <div className="pt-5">
+          <h4 className="pb-2 text-[13.5px] font-extrabold text-cink">Real money at a glance</h4>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="rounded-[16px] border border-cline bg-white p-4">
+              <DollarSign size={17} className="text-cbrand" />
+              <p className="pt-2 text-[20px] font-extrabold text-cink">{money(finance.giftRevenue.gross)}</p>
+              <p className="text-[11px] text-cmut">Gift revenue (verified)</p>
+            </div>
+            <div className="rounded-[16px] border border-cline bg-white p-4">
+              <Percent size={17} className="text-cbrand" />
+              <p className="pt-2 text-[20px] font-extrabold text-cink">{money(finance.giftRevenue.platformCommission)}</p>
+              <p className="text-[11px] text-cmut">Platform commission ({finance.config.platformCommission}%)</p>
+            </div>
+            <div className="rounded-[16px] border border-cline bg-white p-4">
+              <TrendingUp size={17} className="text-cbrand" />
+              <p className="pt-2 text-[20px] font-extrabold text-cink">{money(finance.giftRevenue.creatorNet)}</p>
+              <p className="text-[11px] text-cmut">Creator earnings</p>
+            </div>
+            <div className="rounded-[16px] border border-cline bg-white p-4">
+              <Banknote size={17} className="text-cbrand" />
+              <p className="pt-2 text-[20px] font-extrabold text-cink">{money(finance.adRevenue.total)}</p>
+              <p className="text-[11px] text-cmut">Ad campaign revenue</p>
+            </div>
+          </div>
+          {finance.testMode.count > 0 && (
+            <p className="flex items-center gap-1.5 pt-3 text-[12px] font-semibold text-[#B7791F]">
+              <FlaskConical size={13} /> {finance.testMode.count} test transactions ({money(finance.testMode.gross)}) are flagged sandbox and excluded from real revenue.
+            </p>
+          )}
+        </div>
+      )}
       <p className="pt-4 text-[12px] text-cmut">
-        Use the sections on the left to manage users, gifts, packages, withdrawals, moderation, the CALL AI, ads and broadcasts.
+        Use the sections on the left to manage the finance ledger, users, gifts, withdrawals, moderation, the CALL AI, ads and broadcasts.
       </p>
     </div>
   )
@@ -191,7 +232,7 @@ function OverviewSection() {
 function UsersSection() {
   const me = useApp((s) => s.me)
   const isAdmin = me?.role === 'admin'
-  const [users, setUsers] = useState<Array<{ id: string; name: string; phone: string; role: string; blocked: boolean; coins: number; earnings: number }>>([])
+  const [users, setUsers] = useState<Array<{ id: string; name: string; username: string; phone: string; email: string | null; role: string; blocked: boolean; available: number; reserved: number; totalEarned: number; totalWithdrawn: number }>>([])
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -207,13 +248,26 @@ function UsersSection() {
     queueMicrotask(() => void load())
   }, [])
 
-  const act = async (id: string, action: string, value?: number) => {
+  const act = async (id: string, action: string, value?: number, note?: string) => {
     try {
-      await api.adminUserAction(id, action, value)
+      await api.adminUserAction(id, action, value, note)
       await load(q)
+      toast.success('Done')
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message)
     }
+  }
+
+  const adjustBalance = (u: { id: string; name: string }) => {
+    const raw = prompt(`Adjust balance for ${u.name}\nPositive = credit, negative = debit (USD):`, '10')
+    if (!raw) return
+    const amount = Number(raw)
+    if (!amount || isNaN(amount)) {
+      toast.error('Invalid amount')
+      return
+    }
+    const note = prompt('Reason / note (recorded in the ledger):', 'Support adjustment') || 'Admin adjustment'
+    void act(u.id, 'adjust_balance', amount, note)
   }
 
   return (
@@ -222,7 +276,7 @@ function UsersSection() {
         <h3 className="flex-1 text-[15px] font-extrabold text-cink">Users</h3>
         <input
           className="h-10 w-48 rounded-[12px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
-          placeholder="Search name/phone"
+          placeholder="Search name/phone/email/@user"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void load(q)}
@@ -242,25 +296,16 @@ function UsersSection() {
                 {u.blocked && <Ban size={13} className="text-cred" />}
               </p>
               <p className="text-[11px] text-cmut">
-                {u.email ? `${u.email} · ` : ''}+{u.phone} · 🪙 {u.coins} · 💎 {u.earnings}
+                {u.email ? `${u.email} · ` : ''}+{u.phone} · @{u.username}
               </p>
             </div>
+            <div className="rounded-[12px] bg-cbg px-3 py-1.5 text-right">
+              <p className="text-[12.5px] font-extrabold text-cink">${u.available.toFixed(2)}</p>
+              <p className="text-[9.5px] text-cmut">available{u.reserved > 0 ? ` · $${u.reserved.toFixed(2)} reserved` : ''}</p>
+            </div>
             {isAdmin && (
-              <input
-                type="number"
-                placeholder="coins"
-                className="h-9 w-20 rounded-[10px] bg-[#F0F3FA] px-2 text-[12px] outline-none"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const v = Number((e.target as HTMLInputElement).value)
-                    if (v > 0) void act(u.id, 'grant_coins', v)
-                  }
-                }}
-              />
-            )}
-            {isAdmin && (
-              <button className="rounded-full bg-green-50 px-3 py-1.5 text-[11px] font-bold text-green-700" onClick={() => void act(u.id, 'grant_coins', Number(prompt('Grant how many coins?')))}>
-                <Coins size={12} className="mr-1 inline" /> Grant
+              <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => adjustBalance(u)}>
+                <DollarSign size={12} className="mr-1 inline" /> Adjust
               </button>
             )}
             {isAdmin && (
@@ -320,15 +365,18 @@ function GiftsSection() {
     const name = prompt('Gift name:')
     if (!name) return
     const emoji = prompt('Emoji (e.g. 🎁):') || '🎁'
-    const priceCoins = Number(prompt('Price (coins):') || '10')
-    const earnValue = priceCoins * 0.5
-    await api.adminGiftCreate({ name, emoji, priceCoins, earnValue, category: 'both' })
+    const priceUsd = Number(prompt('Price in USD (real money, e.g. 0.60):') || '1')
+    if (!priceUsd || priceUsd <= 0) {
+      toast.error('Invalid price')
+      return
+    }
+    await api.adminGiftCreate({ name, emoji, priceUsd, category: 'both' })
     queueMicrotask(() => void load())
   }
   const update = async (g: GiftItem) => {
-    const price = Number(prompt(`New price for ${g.name} (current ${g.priceCoins}):`, String(g.priceCoins)))
-    if (!price) return
-    await api.adminGiftUpdate(g.id, { priceCoins: price, earnValue: price * 0.5 })
+    const price = Number(prompt(`New USD price for ${g.name} (current $${g.priceUsd.toFixed(2)}):`, String(g.priceUsd)))
+    if (!price || price <= 0) return
+    await api.adminGiftUpdate(g.id, { priceUsd: price })
     queueMicrotask(() => void load())
   }
   const toggle = async (g: GiftItem) => {
@@ -344,18 +392,22 @@ function GiftsSection() {
   if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
   return (
     <div>
-      <div className="flex items-center gap-2 pb-3">
-        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Gifts & pricing</h3>
+      <div className="flex items-center gap-2 pb-2">
+        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Gifts & pricing (real money)</h3>
         <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void create()}>
           <Plus size={14} /> New gift
         </button>
       </div>
+      <p className="pb-3 text-[12px] text-cmut">
+        Every gift has its own money price — buyers pay directly per gift (no coins/diamonds). Creators earn the net
+        amount after the platform commission and payment processing fee.
+      </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {gifts.map((g) => (
           <div key={g.id} className={`rounded-[16px] border border-cline p-3.5 text-center ${g.active ? '' : 'opacity-45'}`}>
             <p className="text-[30px]">{g.emoji}</p>
             <p className="text-[13px] font-bold text-cink">{g.name}</p>
-            <p className="text-[11px] text-cmut">🪙 {g.priceCoins} → 💎 {g.earnValue}</p>
+            <p className="text-[13px] font-extrabold text-[#D6336C]">${g.priceUsd.toFixed(2)}</p>
             <p className="text-[10px] text-cmut">{g.category}</p>
             <div className="flex justify-center gap-1.5 pt-2">
               <button className="rounded-full bg-csoft px-2.5 py-1 text-[10px] font-bold text-cbrand" onClick={() => void update(g)}>
@@ -375,81 +427,172 @@ function GiftsSection() {
   )
 }
 
-function PackagesSection() {
-  const [packages, setPackages] = useState<CoinPackage[]>([])
+function FinanceSection() {
+  const [summary, setSummary] = useState<FinanceSummary | null>(null)
+  const [txs, setTxs] = useState<AdminPaymentRow[]>([])
   const [loading, setLoading] = useState(true)
-  const load = async () => {
+  const [filters, setFilters] = useState<{ status: string; purpose: string; provider: string }>({ status: '', purpose: '', provider: '' })
+  const [cfg, setCfg] = useState<{ platformCommission: number; minWithdrawal: number; paymentFeePercent: number; paymentFeeFixed: number } | null>(null)
+  const [savingCfg, setSavingCfg] = useState(false)
+  const load = async (f = filters) => {
     setLoading(true)
     try {
-      const res = await api.adminPackages()
-      setPackages(res.packages)
+      const res = await api.adminFinance({ status: f.status || undefined, purpose: f.purpose || undefined, provider: f.provider || undefined })
+      setSummary(res.summary)
+      setTxs(res.transactions)
+      setCfg({
+        platformCommission: res.summary.config.platformCommission,
+        minWithdrawal: res.summary.config.minWithdrawal,
+        paymentFeePercent: res.summary.config.paymentFeePercent,
+        paymentFeeFixed: res.summary.config.paymentFeeFixed,
+      })
     } catch {}
     setLoading(false)
   }
   useEffect(() => {
     queueMicrotask(() => void load())
   }, [])
-  const create = async () => {
-    const name = prompt('Package name:')
-    if (!name) return
-    const coins = Number(prompt('Coins:') || '100')
-    const bonus = Number(prompt('Bonus coins (0):') || '0')
-    const priceUsd = Number(prompt('Price USD:') || '0.99')
-    await api.adminPackageCreate({ name, coins, bonus, priceUsd })
-    queueMicrotask(() => void load())
-  }
-  if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+  const money = (n: number) => `$${(n || 0).toFixed(2)}`
+  const wd = summary?.withdrawalTotals ?? {}
   return (
     <div>
-      <div className="flex items-center gap-2 pb-3">
-        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Coin packages</h3>
-        <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void create()}>
-          <Plus size={14} /> New package
-        </button>
+      <div className="flex flex-wrap items-center gap-2 pb-3">
+        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Finance — verified transactions only</h3>
+        <select className="h-10 rounded-[12px] bg-[#F0F3FA] px-3 text-[12.5px] outline-none" value={filters.status} onChange={(e) => { const f = { ...filters, status: e.target.value }; setFilters(f); void load(f) }}>
+          <option value="">All statuses</option>
+          <option value="successful">Successful</option>
+          <option value="pending">Pending</option>
+          <option value="failed">Failed</option>
+          <option value="refunded">Refunded</option>
+        </select>
+        <select className="h-10 rounded-[12px] bg-[#F0F3FA] px-3 text-[12.5px] outline-none" value={filters.purpose} onChange={(e) => { const f = { ...filters, purpose: e.target.value }; setFilters(f); void load(f) }}>
+          <option value="">All purposes</option>
+          <option value="gift">Gift</option>
+          <option value="room_entry">Room entry</option>
+          <option value="ad_campaign">Ad campaign</option>
+        </select>
+        <select className="h-10 rounded-[12px] bg-[#F0F3FA] px-3 text-[12.5px] outline-none" value={filters.provider} onChange={(e) => { const f = { ...filters, provider: e.target.value }; setFilters(f); void load(f) }}>
+          <option value="">All providers</option>
+          <option value="stripe">Stripe</option>
+          <option value="sandbox">Sandbox (test)</option>
+        </select>
+        <button className="rounded-full bg-cbrand px-3 py-2 text-[12px] font-bold text-white" onClick={() => void load()}>Refresh</button>
       </div>
-      <div className="space-y-2">
-        {packages.map((p) => (
-          <div key={p.id} className={`flex items-center gap-3 rounded-[14px] border border-cline px-3.5 py-2.5 ${p.active ? '' : 'opacity-45'}`}>
-            <Coins size={18} className="text-[#F59E0B]" />
-            <div className="flex-1">
-              <p className="text-[14px] font-bold text-cink">
-                {p.name} — {p.coins}{p.bonus ? ` +${p.bonus}` : ''} coins
-              </p>
-              <p className="text-[11px] text-cmut">${p.priceUsd}</p>
-            </div>
-            <button
-              className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut"
-              onClick={async () => {
-                await api.adminPackageUpdate(p.id, { active: !p.active })
-                void load()
-              }}
-            >
-              {p.active ? 'Disable' : 'Enable'}
-            </button>
-            <button
-              className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
-              onClick={async () => {
-                if (!confirm(`Delete ${p.name}?`)) return
-                await api.adminPackageDelete(p.id)
-                void load()
-              }}
-            >
-              <Trash2 size={12} />
-            </button>
+
+      {cfg && (
+        <div className="mb-4 rounded-[16px] border border-cline bg-white p-4">
+          <h4 className="pb-1 text-[13.5px] font-extrabold text-cink">Commission & payouts configuration</h4>
+          <p className="pb-3 text-[11.5px] text-cmut">Applies to every new gift / room entry — historical transactions keep their recorded split.</p>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <label className="block">
+              <span className="text-[11.5px] font-semibold text-cmut">Platform commission (%)</span>
+              <input type="number" min={0} max={90} className="mt-1 h-10 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] outline-none"
+                value={cfg.platformCommission} onChange={(e) => setCfg({ ...cfg, platformCommission: Number(e.target.value) })} />
+            </label>
+            <label className="block">
+              <span className="text-[11.5px] font-semibold text-cmut">Minimum withdrawal ($)</span>
+              <input type="number" min={1} className="mt-1 h-10 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] outline-none"
+                value={cfg.minWithdrawal} onChange={(e) => setCfg({ ...cfg, minWithdrawal: Number(e.target.value) })} />
+            </label>
+            <label className="block">
+              <span className="text-[11.5px] font-semibold text-cmut">Provider fee (%) — tracked separately</span>
+              <input type="number" step="0.1" min={0} className="mt-1 h-10 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] outline-none"
+                value={cfg.paymentFeePercent} onChange={(e) => setCfg({ ...cfg, paymentFeePercent: Number(e.target.value) })} />
+            </label>
+            <label className="block">
+              <span className="text-[11.5px] font-semibold text-cmut">Provider fixed fee ($)</span>
+              <input type="number" step="0.01" min={0} className="mt-1 h-10 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] outline-none"
+                value={cfg.paymentFeeFixed} onChange={(e) => setCfg({ ...cfg, paymentFeeFixed: Number(e.target.value) })} />
+            </label>
           </div>
-        ))}
-      </div>
+          <button
+            className="mt-3 h-10 rounded-[14px] bg-brand-grad px-6 text-[13px] font-bold text-white disabled:opacity-50"
+            disabled={savingCfg}
+            onClick={async () => {
+              setSavingCfg(true)
+              try {
+                await api.adminSaveSettings('finance', cfg)
+                toast.success('Commission settings saved')
+                void load()
+              } catch (e) {
+                toast.error((e as Error).message)
+              } finally {
+                setSavingCfg(false)
+              }
+            }}
+          >
+            {savingCfg ? <Loader2 className="mx-auto animate-spin" size={16} /> : 'Save configuration'}
+          </button>
+        </div>
+      )}
+
+      {loading || !summary ? (
+        <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {([
+              ['Gross gift revenue', money(summary.giftRevenue.gross), `${summary.giftRevenue.count} gifts`, DollarSign],
+              ['Platform commission', money(summary.giftRevenue.platformCommission), `${summary.config.platformCommission}% of gross`, Percent],
+              ['Provider fees (separate)', money(summary.giftRevenue.providerFees), 'never merged into commission', ReceiptText],
+              ['Creator earnings (net)', money(summary.giftRevenue.creatorNet), 'credited to wallets', TrendingUp],
+              ['Ad campaign revenue', money(summary.adRevenue.total), `${summary.adRevenue.count} campaigns`, Banknote],
+              ['Successful payments', money(summary.payments.successful.amount), `${summary.payments.successful.count} transactions`, Check],
+              ['Failed payments', money(summary.payments.failed.amount), `${summary.payments.failed.count} transactions`, X],
+              ['Refunded payments', money(summary.payments.refunded.amount), `${summary.payments.refunded.count} transactions`, ReceiptText],
+              ['Withdrawals pending', money(wd.pending?.amount ?? 0), `${wd.pending?.count ?? 0} requests`, Landmark],
+              ['Withdrawals approved', money(wd.approved?.amount ?? 0), `${wd.approved?.count ?? 0} awaiting bank transfer`, Landmark],
+              ['Withdrawals paid', money(wd.paid?.amount ?? 0), `${wd.paid?.count ?? 0} completed transfers`, Landmark],
+              ['Withdrawals rejected', money(wd.rejected?.amount ?? 0), `${wd.rejected?.count ?? 0} — funds released`, Landmark],
+            ] as [string, string, string, typeof DollarSign][]).map(([label, value, note, Icon]) => (
+              <div key={label} className="rounded-[16px] border border-cline bg-white p-4">
+                <Icon size={16} className="text-cbrand" />
+                <p className="pt-1.5 text-[19px] font-extrabold text-cink">{value}</p>
+                <p className="text-[11px] font-semibold text-cink">{label}</p>
+                <p className="text-[10px] text-cmut">{note}</p>
+              </div>
+            ))}
+          </div>
+          {summary.testMode.count > 0 && (
+            <p className="flex items-center gap-1.5 pt-3 text-[12px] font-semibold text-[#B7791F]">
+              <FlaskConical size={13} /> {summary.testMode.count} sandbox transactions ({money(summary.testMode.gross)} gross / {money(summary.testMode.commission)} commission) — permanently flagged as test, excluded from all real figures above.
+            </p>
+          )}
+
+          <h4 className="pb-2 pt-5 text-[13.5px] font-extrabold text-cink">Transactions (latest {txs.length})</h4>
+          <div className="overflow-hidden rounded-[14px] border border-cline">
+            <div className="max-h-[420px] overflow-y-auto app-scroll">
+              {txs.length === 0 && <p className="p-5 text-center text-[12.5px] text-cmut">No transactions match the filters</p>}
+              {txs.map((t) => (
+                <div key={t.id} className="flex items-center gap-2.5 border-b border-cline px-3.5 py-2.5 last:border-b-0">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-bold text-cink">
+                      {t.description} {t.isTest && <span className="rounded-full bg-[#FFF7E6] px-1.5 py-0.5 text-[9px] font-bold text-[#B7791F]">TEST</span>}
+                    </p>
+                    <p className="truncate text-[11px] text-cmut">
+                      {t.user.name} (@{t.user.username}) · {t.purpose} · {t.provider} · {new Date(t.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold capitalize ${t.status === 'successful' ? 'bg-green-50 text-green-700' : t.status === 'failed' ? 'bg-red-50 text-cred' : 'bg-amber-50 text-[#B7791F]'}`}>{t.status}</span>
+                  <span className="w-20 text-right text-[13px] font-extrabold text-cink">{money(t.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
 function WithdrawalsSection() {
-  const [items, setItems] = useState<Array<{ id: string; amount: number; method: string; destination: string; status: string; user: { name: string }; createdAt: string }>>([])
+  const [items, setItems] = useState<AdminWithdrawalRow[]>([])
   const [loading, setLoading] = useState(true)
-  const load = async () => {
+  const [statusFilter, setStatusFilter] = useState('')
+  const load = async (status = statusFilter) => {
     setLoading(true)
     try {
-      const res = await api.adminWithdrawals()
+      const res = await api.adminWithdrawals(status || undefined)
       setItems(res.withdrawals)
     } catch {}
     setLoading(false)
@@ -457,44 +600,98 @@ function WithdrawalsSection() {
   useEffect(() => {
     queueMicrotask(() => void load())
   }, [])
-  const review = async (id: string, action: 'approve' | 'reject') => {
-    const note = action === 'reject' ? prompt('Rejection note (optional):') || '' : ''
+  const act = async (w: AdminWithdrawalRow, action: 'under_review' | 'approve' | 'reject' | 'paid') => {
     try {
-      await api.adminWithdrawalReview(id, action, note)
+      if (action === 'reject') {
+        const note = prompt('Rejection note (the reserved amount is released back to the creator):') || ''
+        await api.adminWithdrawalReview(w.id, 'reject', note)
+      } else if (action === 'paid') {
+        const ref = prompt('Bank transfer reference (required, recorded in the audit trail):')
+        if (!ref) return
+        await api.adminWithdrawalReview(w.id, 'paid', undefined, ref)
+      } else if (action === 'approve') {
+        await api.adminWithdrawalReview(w.id, 'approve')
+      } else {
+        await api.adminWithdrawalReview(w.id, 'under_review')
+      }
+      toast.success(`Marked ${action === 'paid' ? 'paid' : action.replace('_', ' ')}`)
       void load()
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message)
     }
   }
-  if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+  const STATUS_CLS: Record<string, string> = {
+    pending: 'bg-amber-50 text-[#B7791F]',
+    under_review: 'bg-[#EEF2FF] text-[#4338CA]',
+    approved: 'bg-green-50 text-green-700',
+    paid: 'bg-green-100 text-green-800',
+    rejected: 'bg-red-50 text-cred',
+  }
   return (
     <div>
-      <h3 className="pb-3 text-[15px] font-extrabold text-cink">Withdrawal requests</h3>
+      <div className="flex flex-wrap items-center gap-2 pb-3">
+        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Withdrawals — bank transfer only</h3>
+        <select
+          className="h-10 rounded-[12px] bg-[#F0F3FA] px-3 text-[12.5px] outline-none"
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); void load(e.target.value) }}
+        >
+          <option value="">All</option>
+          <option value="pending">Pending</option>
+          <option value="under_review">Under review</option>
+          <option value="approved">Approved</option>
+          <option value="paid">Paid</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+      <p className="pb-3 text-[12px] text-cmut">
+        Requesting does NOT destroy the money — it moves to <b>reserved</b>. Marking <b>Paid</b> (after the real bank
+        transfer) finalizes the deduction; rejecting releases the funds back to the creator.
+      </p>
+      {loading && <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />}
       <div className="space-y-2">
-        {items.length === 0 && <p className="pt-6 text-center text-[13px] text-cmut">No requests</p>}
+        {items.length === 0 && !loading && <p className="pt-6 text-center text-[13px] text-cmut">No requests</p>}
         {items.map((w) => (
-          <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-[14px] border border-cline px-3.5 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-bold text-cink">
-                {w.amount.toLocaleString()} 💎 · {w.method.toUpperCase()}
-              </p>
-              <p className="truncate text-[11px] text-cmut">
-                {w.user.name} → {w.destination} · {new Date(w.createdAt).toLocaleString()}
-              </p>
-            </div>
-            <span className={`rounded-full px-3 py-1 text-[11px] font-bold capitalize ${w.status === 'approved' ? 'bg-green-50 text-green-700' : w.status === 'rejected' ? 'bg-red-50 text-cred' : 'bg-amber-50 text-[#B7791F]'}`}>
-              {w.status}
-            </span>
-            {w.status === 'pending' && (
-              <>
-                <button className="rounded-full bg-green-600 px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void review(w.id, 'approve')}>
+          <div key={w.id} className="rounded-[14px] border border-cline px-3.5 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-bold text-cink">
+                  ${w.amount.toFixed(2)} · {w.method.toUpperCase()}
+                  <span className={`ml-2 rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${STATUS_CLS[w.status] ?? ''}`}>{w.status.replace('_', ' ')}</span>
+                </p>
+                <p className="truncate text-[11px] text-cmut">
+                  {w.user.name} ({w.user.username}) · {new Date(w.createdAt).toLocaleString()}
+                  {w.transferRef ? ` · ref ${w.transferRef}` : ''}
+                </p>
+              </div>
+              {w.status === 'pending' && (
+                <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void act(w, 'under_review')}>
+                  Under review
+                </button>
+              )}
+              {['pending', 'under_review'].includes(w.status) && (
+                <button className="rounded-full bg-green-600 px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(w, 'approve')}>
                   Approve
                 </button>
-                <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => void review(w.id, 'reject')}>
+              )}
+              {w.status === 'approved' && (
+                <button className="rounded-full bg-brand-grad px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(w, 'paid')}>
+                  Mark paid
+                </button>
+              )}
+              {!['paid', 'rejected'].includes(w.status) && (
+                <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(w, 'reject')}>
                   Reject
                 </button>
-              </>
-            )}
+              )}
+            </div>
+            <div className="mt-2 rounded-[12px] bg-cbg px-3 py-2 text-[11.5px] leading-[17px] text-cmut">
+              <b className="text-cink">Bank details:</b> {w.bank.holderName} · {w.bank.bankName} ({w.bank.countryCode}) ·
+              acct {w.bank.accountNumber}
+              {w.bank.iban ? ` · IBAN ${w.bank.iban}` : ''}
+              {w.bank.swift ? ` · SWIFT ${w.bank.swift}` : ''}
+            </div>
+            {w.adminNote && <p className="mt-1.5 px-1 text-[11px] text-cmut">Note: {w.adminNote}</p>}
           </div>
         ))}
       </div>
@@ -503,7 +700,7 @@ function WithdrawalsSection() {
 }
 
 function ModerationSection() {
-  const [data, setData] = useState<{ rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean }>; lives: Array<{ id: string; title: string; host: string; viewerCount: number }>; stories: Array<{ id: string; kind: string; user: string; privacy: string }> } | null>(null)
+  const [data, setData] = useState<{ rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean; entryFee: number }>; lives: Array<{ id: string; title: string; host: string; viewerCount: number; mode: string }>; stories: Array<{ id: string; kind: string; user: string; privacy: string }> } | null>(null)
   const load = async () => {
     try {
       setData(await api.adminModeration())
@@ -528,7 +725,7 @@ function ModerationSection() {
             <div className="flex-1">
               <p className="text-[13px] font-bold text-cink">{r.title}</p>
               <p className="text-[11px] text-cmut">
-                {r.host} · {r.participants} people {r.isPaid ? `· 💰 ${r.entryFee}` : ''}
+                {r.host} · {r.participants} people {r.isPaid ? `· $${r.entryFee.toFixed(2)} entry` : ''}
               </p>
             </div>
             <button className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act('room', r.id)}>
@@ -670,68 +867,189 @@ function AiSection() {
 }
 
 function AdsSection() {
-  const [ads, setAds] = useState<Array<{ id: string; title: string; body: string; active: boolean; placements: string; impressions: number; clicks: number }>>([])
+  const [tab, setTab] = useState<'campaigns' | 'packages'>('campaigns')
+  const [ads, setAds] = useState<Array<{
+    id: string; title: string; body: string; imageUrl: string | null; linkUrl: string | null
+    placements: string; status: string; isUserAd: boolean
+    owner: { id: string; name: string; username: string; email: string | null } | null
+    pkg: { id: string; name: string; durationDays: number; priceUsd: number } | null
+    budget: number; totalCost: number; rejectionReason: string | null
+    impressions: number; clicks: number; createdAt: string
+  }>>([])
+  const [packages, setPackages] = useState<Array<{ id: string; name: string; description: string; priceUsd: number; durationDays: number; placements: string; minBudget: number; order: number; active: boolean }>>([])
   const [loading, setLoading] = useState(true)
+
   const load = async () => {
     setLoading(true)
     try {
-      const res = await api.adminAds()
-      setAds(res.ads)
+      const [c, p] = await Promise.all([api.adminAds(), api.adminAdPackages()])
+      setAds(c.ads)
+      setPackages(p.packages)
     } catch {}
     setLoading(false)
   }
   useEffect(() => {
     queueMicrotask(() => void load())
   }, [])
-  const create = async () => {
+
+  const act = async (id: string, action: 'approve' | 'reject' | 'activate' | 'pause' | 'complete') => {
+    try {
+      const reason = action === 'reject' ? prompt('Rejection reason (shown to the advertiser):') || 'Does not meet content guidelines' : undefined
+      await api.adminAdAction(id, action, reason)
+      toast.success(`Campaign ${action}d`)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+  const createHouseAd = async () => {
     const title = prompt('Ad title:')
     if (!title) return
     const body = prompt('Ad body:') || ''
     const linkUrl = prompt('Link URL (optional):') || undefined
     await api.adminAdCreate({ title, body, linkUrl, placements: ['chats', 'rooms'] })
-    queueMicrotask(() => void load())
+    void load()
   }
+  const createPackage = async () => {
+    const name = prompt('Package name:')
+    if (!name) return
+    const priceUsd = Number(prompt('Price USD:', '15') || '15')
+    const durationDays = Number(prompt('Duration (days):', '7') || '7')
+    const minBudget = Number(prompt('Minimum budget USD (0 = none):', '0') || '0')
+    await api.adminAdPackageCreate({ name, priceUsd, durationDays, minBudget, placements: 'chats,rooms,profile' })
+    void load()
+  }
+
+  const STATUS_CLS: Record<string, string> = {
+    active: 'bg-green-50 text-green-700',
+    paused: 'bg-amber-50 text-[#B7791F]',
+    pending_payment: 'bg-[#EEF2FF] text-[#4338CA]',
+    payment_completed: 'bg-[#EEF2FF] text-[#4338CA]',
+    pending_approval: 'bg-[#FFF7E6] text-[#B7791F]',
+    approved: 'bg-green-50 text-green-700',
+    rejected: 'bg-red-50 text-cred',
+    completed: 'bg-cbg text-cmut',
+  }
+
   if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
   return (
     <div>
       <div className="flex items-center gap-2 pb-3">
-        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Ads (non-intrusive placements)</h3>
-        <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void create()}>
-          <Plus size={14} /> New ad
-        </button>
+        <div className="flex gap-1.5">
+          <button className={`h-9 rounded-full px-4 text-[12px] font-bold ${tab === 'campaigns' ? 'bg-cink text-white' : 'bg-csoft text-cmut'}`} onClick={() => setTab('campaigns')}>
+            Campaigns
+          </button>
+          <button className={`h-9 rounded-full px-4 text-[12px] font-bold ${tab === 'packages' ? 'bg-cink text-white' : 'bg-csoft text-cmut'}`} onClick={() => setTab('packages')}>
+            Ad packages
+          </button>
+        </div>
+        <div className="flex-1" />
+        {tab === 'campaigns' ? (
+          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void createHouseAd()}>
+            <Plus size={14} /> New house ad
+          </button>
+        ) : (
+          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void createPackage()}>
+            <Plus size={14} /> New package
+          </button>
+        )}
       </div>
-      <div className="space-y-2">
-        {ads.length === 0 && <p className="pt-4 text-[13px] text-cmut">No ads configured</p>}
-        {ads.map((a) => (
-          <div key={a.id} className={`flex items-center gap-3 rounded-[14px] border border-cline px-3.5 py-2.5 ${a.active ? '' : 'opacity-45'}`}>
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-bold text-cink">{a.title}</p>
-              <p className="truncate text-[11px] text-cmut">
-                {a.body} · {a.placements} · {a.impressions} views / {a.clicks} clicks
-              </p>
+
+      {tab === 'campaigns' ? (
+        <div className="space-y-2">
+          {ads.length === 0 && <p className="pt-4 text-[13px] text-cmut">No ads or campaigns yet</p>}
+          {ads.map((a) => (
+            <div key={a.id} className="rounded-[14px] border border-cline px-3.5 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-bold text-cink">
+                    {a.title}
+                    <span className={`ml-2 rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${STATUS_CLS[a.status] ?? 'bg-cbg text-cmut'}`}>
+                      {a.status.replace('_', ' ')}
+                    </span>
+                    {a.isUserAd && <span className="ml-1.5 rounded-full bg-[#EEF2FF] px-2 py-0.5 text-[10px] font-bold text-cbrand">USER CAMPAIGN</span>}
+                  </p>
+                  <p className="truncate text-[11px] text-cmut">
+                    {a.isUserAd && a.owner ? `${a.owner.name} (@${a.owner.username}) · ` : 'House ad · '}
+                    {a.pkg ? `${a.pkg.name} — $${a.pkg.priceUsd} / ${a.pkg.durationDays}d · ` : ''}
+                    {a.placements} · {a.impressions} impressions / {a.clicks} clicks
+                  </p>
+                  {a.rejectionReason && <p className="text-[11px] text-cred">Rejected: {a.rejectionReason}</p>}
+                </div>
+                {a.isUserAd && a.status === 'pending_approval' && (
+                  <>
+                    <button className="rounded-full bg-green-600 px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(a.id, 'approve')}>
+                      Approve & activate
+                    </button>
+                    <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(a.id, 'reject')}>
+                      Reject
+                    </button>
+                  </>
+                )}
+                {a.status === 'active' && (
+                  <>
+                    <button className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut" onClick={() => void act(a.id, 'pause')}>
+                      Pause
+                    </button>
+                    <button className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut" onClick={() => void act(a.id, 'complete')}>
+                      Complete
+                    </button>
+                  </>
+                )}
+                {['paused', 'approved'].includes(a.status) && (
+                  <button className="rounded-full bg-green-600 px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(a.id, 'activate')}>
+                    Activate
+                  </button>
+                )}
+                {!a.isUserAd && (
+                  <button
+                    className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
+                    onClick={async () => {
+                      if (!confirm('Delete this ad?')) return
+                      await api.adminAdDelete(a.id)
+                      void load()
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </div>
-            <button
-              className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut"
-              onClick={async () => {
-                await api.adminAdUpdate(a.id, { active: !a.active })
-                void load()
-              }}
-            >
-              {a.active ? 'Disable' : 'Enable'}
-            </button>
-            <button
-              className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
-              onClick={async () => {
-                if (!confirm('Delete this ad?')) return
-                await api.adminAdDelete(a.id)
-                void load()
-              }}
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {packages.length === 0 && <p className="pt-4 text-[13px] text-cmut">No packages — user campaigns cannot be created until one exists</p>}
+          {packages.map((p) => (
+            <div key={p.id} className={`flex flex-wrap items-center gap-3 rounded-[14px] border border-cline px-3.5 py-2.5 ${p.active ? '' : 'opacity-45'}`}>
+              <Banknote size={17} className="text-cbrand" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-bold text-cink">{p.name} — ${p.priceUsd.toFixed(2)} / {p.durationDays} days</p>
+                <p className="text-[11px] text-cmut">{p.description} · placements: {p.placements}{p.minBudget > 0 ? ` · min budget $${p.minBudget}` : ''}</p>
+              </div>
+              <button
+                className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut"
+                onClick={async () => {
+                  await api.adminAdPackageUpdate(p.id, { active: !p.active })
+                  void load()
+                }}
+              >
+                {p.active ? 'Disable' : 'Enable'}
+              </button>
+              <button
+                className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
+                onClick={async () => {
+                  if (!confirm(`Delete package ${p.name}?`)) return
+                  await api.adminAdPackageDelete(p.id)
+                  void load()
+                }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -756,6 +1074,8 @@ function BroadcastSection() {
   const [welcomeText, setWelcomeText] = useState(WELCOME_TEMPLATE_DEFAULT)
   const [welcomeLoading, setWelcomeLoading] = useState(true)
   const [savingWelcome, setSavingWelcome] = useState(false)
+  // ---- delivery history ----
+  const [history, setHistory] = useState<BroadcastRow[]>([])
 
   const load = async () => {
     try {
@@ -770,6 +1090,10 @@ function BroadcastSection() {
       if (m.welcomeSenderId) setWelcomeSenderId(m.welcomeSenderId)
       setWelcomeText(typeof m.welcomeText === 'string' && m.welcomeText.trim() ? m.welcomeText : WELCOME_TEMPLATE_DEFAULT)
     } catch {}
+    try {
+      const h = await api.adminBroadcasts()
+      setHistory(h.broadcasts)
+    } catch {}
     setWelcomeLoading(false)
   }
   useEffect(() => {
@@ -781,10 +1105,13 @@ function BroadcastSection() {
     setMsg('')
     try {
       const res = await api.adminBroadcast(title, body, senderId || undefined)
-      setMsg(`Delivered to ${res.delivered} users as "${res.senderName}"`)
+      setMsg(
+        `Delivered to ${res.delivered}/${res.total} users as "${res.senderName}"${res.failed > 0 ? ` — ${res.failed} failed (retry below)` : ''}`
+      )
       setTitle('')
       setBody('')
-      toast.success(`Broadcast sent to ${res.delivered} users`)
+      toast.success(`Broadcast delivered to ${res.delivered}/${res.total} users`)
+      void load()
     } catch (e) {
       setMsg((e as Error).message)
     } finally {
@@ -910,6 +1237,53 @@ function BroadcastSection() {
             </>
           )}
         </button>
+      </div>
+
+      {/* ---------- delivery records ---------- */}
+      <div className="rounded-[16px] border border-cline p-4">
+        <h3 className="text-[15px] font-extrabold text-cink">Broadcast delivery records</h3>
+        <p className="pb-3 pt-1 text-[12px] text-cmut">
+          Every recipient is tracked individually — duplicates are impossible (one delivery per user per broadcast) and
+          failed sends can be retried.
+        </p>
+        {history.length === 0 ? (
+          <p className="py-4 text-center text-[12.5px] text-cmut">No broadcasts sent yet</p>
+        ) : (
+          <div className="space-y-2">
+            {history.map((b) => (
+              <div key={b.id} className="rounded-[12px] bg-cbg px-3.5 py-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13.5px] font-bold text-cink">{b.title}</p>
+                    <p className="text-[11px] text-cmut">
+                      from {b.sender.isOfficial ? `${b.sender.name} (Official)` : b.sender.name} ·{' '}
+                      {new Date(b.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-green-50 px-2.5 py-1 text-[10.5px] font-bold text-green-700">
+                    {b.deliveredCount}/{b.totalTargets} delivered
+                  </span>
+                  {b.failedCount > 0 && (
+                    <button
+                      className="rounded-full bg-amber-100 px-3 py-1.5 text-[10.5px] font-bold text-[#B7791F]"
+                      onClick={async () => {
+                        try {
+                          const res = await api.adminBroadcastRetry(b.id)
+                          toast.success(`Retry complete — ${res.fixed} recovered, ${res.failedCount} still failed`)
+                          void load()
+                        } catch (e) {
+                          toast.error((e as Error).message)
+                        }
+                      }}
+                    >
+                      {b.failedCount} failed — retry
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1137,7 +1511,7 @@ function SmtpSection() {
     setSaving(true)
     try {
       await api.adminSaveSettings('smtp', { ...form, port: Number(form.port) || 587 })
-      setConfigured(complete)
+      setConfigured(Boolean(complete))
       toast.success('SMTP settings saved')
     } catch (e) {
       toast.error((e as Error).message)
