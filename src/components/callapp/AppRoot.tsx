@@ -11,15 +11,54 @@ import { AuthScreen } from './AuthScreen'
 import { ChatsTab } from './ChatsTab'
 import { ChatScreen } from './ChatScreen'
 import { CallsTab } from './CallsTab'
+import { RoomsTab } from './RoomsTab'
+import { LiveTab } from './LiveTab'
 import { ContactsTab } from './ContactsTab'
 import { ProfileTab } from './ProfileTab'
 import { TabBar } from './TabBar'
 import { CallOverlay } from './CallOverlay'
 import { DesktopShell } from './DesktopShell'
 import { AuthBranding } from './AuthBranding'
+import { StoryComposer } from './StoryComposer'
+import { AiScreen } from './AiScreen'
+import { WalletScreen } from './WalletScreen'
+import { NotificationCenter } from './NotificationCenter'
+import { AdminPanel } from './AdminPanel'
+import { BattleInviteBridge } from './BattleInviteUI'
 import { useIsDesktop } from './useMediaQuery'
 
 let handlersBound = false
+
+/** Global overlay host: renders store-driven overlays above any layout. */
+function OverlayHost() {
+  const overlay = useApp((s) => s.overlay)
+  const setOverlay = useApp((s) => s.setOverlay)
+  if (!overlay) return null
+  return (
+    <>
+      {overlay === 'ai' && <AiScreen onClose={() => setOverlay(null)} />}
+      {overlay === 'wallet' && <WalletScreen onClose={() => setOverlay(null)} />}
+      {overlay === 'notifications' && <NotificationCenter onClose={() => setOverlay(null)} />}
+      {overlay === 'admin' && <AdminPanel onClose={() => setOverlay(null)} />}
+      {overlay === 'story-composer' && <StoryComposer onClose={() => setOverlay(null)} />}
+    </>
+  )
+}
+
+/** Notification deep-links: open a room / live from the notification center. */
+function DeepLinkHandler() {
+  useEffect(() => {
+    const openRoom = () => useApp.getState().setTab('rooms')
+    const openLive = () => useApp.getState().setTab('live')
+    window.addEventListener('call:open-room', openRoom)
+    window.addEventListener('call:open-live', openLive)
+    return () => {
+      window.removeEventListener('call:open-room', openRoom)
+      window.removeEventListener('call:open-live', openLive)
+    }
+  }, [])
+  return null
+}
 
 export function AppRoot() {
   const phase = useApp((s) => s.phase)
@@ -71,6 +110,8 @@ export function AppRoot() {
     return (
       <div className="relative w-full">
         <DesktopShell />
+        <OverlayHost />
+        <BattleInviteBridge />
         {call && <CallOverlay state={call} />}
         <Toaster position="bottom-right" richColors />
       </div>
@@ -101,6 +142,8 @@ export function AppRoot() {
           <div className="flex-1 overflow-hidden">
             {tab === 'chats' && <ChatsTab />}
             {tab === 'calls' && <CallsTab />}
+            {tab === 'rooms' && <RoomsTab />}
+            {tab === 'live' && <LiveTab />}
             {tab === 'contacts' && <ContactsTab />}
             {tab === 'profile' && <ProfileTab />}
           </div>
@@ -113,6 +156,9 @@ export function AppRoot() {
         <OnboardingScreen />
       )}
 
+      <OverlayHost />
+      <BattleInviteBridge />
+      <DeepLinkHandler />
       {call && <CallOverlay state={call} />}
       <Toaster position="top-center" richColors />
     </div>

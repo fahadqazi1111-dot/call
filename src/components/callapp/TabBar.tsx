@@ -1,13 +1,15 @@
 'use client'
 
-import { MessageCircle, Phone, Users, User } from 'lucide-react'
+import { MessageCircle, Phone, Users, User, Radio, Clapperboard } from 'lucide-react'
 import { useApp, type AppTab } from '@/lib/callapp/store'
 
 const TABS: { key: AppTab; label: string; Icon: typeof MessageCircle }[] = [
   { key: 'chats', label: 'Chats', Icon: MessageCircle },
   { key: 'calls', label: 'Calls', Icon: Phone },
+  { key: 'rooms', label: 'Rooms', Icon: Radio },
+  { key: 'live', label: 'Live', Icon: Clapperboard },
   { key: 'contacts', label: 'Contacts', Icon: Users },
-  { key: 'profile', label: 'Profile', Icon: User },
+  { key: 'profile', label: 'Me', Icon: User },
 ]
 
 export function TabBar() {
@@ -26,13 +28,13 @@ export function TabBar() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`relative flex w-1/4 flex-col items-center gap-1 pt-3 text-[11px] font-semibold transition-colors ${
+            className={`relative flex w-1/6 flex-col items-center gap-1 pt-3 text-[10px] font-semibold transition-colors ${
               active ? 'text-cbrand' : 'text-[#7A8499]'
             }`}
             aria-current={active ? 'page' : undefined}
           >
             <span className={`relative ${active ? 'text-cbrand' : ''}`}>
-              <Icon size={23} strokeWidth={active ? 2.2 : 1.8} />
+              <Icon size={22} strokeWidth={active ? 2.2 : 1.8} />
               {key === 'chats' && unreadTotal > 0 && (
                 <span className="absolute -right-2.5 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-cbrand px-1 text-[10px] font-bold text-white">
                   {unreadTotal > 99 ? '99+' : unreadTotal}
@@ -40,7 +42,7 @@ export function TabBar() {
               )}
             </span>
             {label}
-            {active && <span className="absolute -top-[1px] h-[3px] w-7 rounded-full bg-cbrand" />}
+            {active && <span className="absolute -top-[1px] h-[3px] w-6 rounded-full bg-cbrand" />}
           </button>
         )
       })}

@@ -8,20 +8,32 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(cuid())
-  phone      String   @unique
-  name       String
-  about      String   @default("Available on CALL")
-  avatarKey  Int      @default(0)
-  avatarUrl  String?
-  createdAt  DateTime @default(now())
-  lastSeen   DateTime @default(now())
-  contacts   Contact[]       @relation("ContactOwner")
-  convA      Conversation[]  @relation("ConvA")
-  convB      Conversation[]  @relation("ConvB")
-  messages   Message[]       @relation("MsgSender")
-  callsMade  Call[]          @relation("CallCaller")
-  callsRecv  Call[]          @relation("CallCallee")
+  id            String         @id @default(cuid())
+  phone         String         @unique
+  email         String?        @unique
+  emailVerified Boolean        @default(false)
+  passwordHash  String?
+  googleId      String?        @unique
+  role          String         @default("user") // user | admin
+  blocked       Boolean        @default(false)
+  name          String
+  about         String         @default("Available on CALL")
+  avatarKey     Int            @default(0)
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+  lastSeen      DateTime       @default(now())
+  contacts      Contact[]      @relation("ContactOwner")
+  convA         Conversation[] @relation("ConvA")
+  convB         Conversation[] @relation("ConvB")
+  messages      Message[]      @relation("MsgSender")
+  callsMade     Call[]         @relation("CallCaller")
+  callsRecv     Call[]         @relation("CallCallee")
+  roomsHosted   VoiceRoom[]    @relation("RoomHost")
+  livesHosted   LiveSession[]  @relation("LiveHost")
+  withdrawals   Withdrawal[]   @relation("UserWithdrawals")
+  stories       Story[]        @relation("UserStories")
+  storyViews    StoryView[]    @relation("UserStoryViews")
+  wallet        Wallet?
 }
 
 model Otp {
@@ -33,6 +45,17 @@ model Otp {
   createdAt DateTime @default(now())
 
   @@index([phone])
+}
+
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
 
 model Contact {
@@ -47,12 +70,12 @@ model Contact {
 }
 
 model Conversation {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   userAId       String
-  userA         User     @relation("ConvA", fields: [userAId], references: [id], onDelete: Cascade)
+  userA         User      @relation("ConvA", fields: [userAId], references: [id], onDelete: Cascade)
   userBId       String
-  userB         User     @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
-  lastMessageAt DateTime @default(now())
+  userB         User      @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime  @default(now())
   messages      Message[]
 
   @@unique([userAId, userBId])
@@ -64,7 +87,7 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   senderId       String
   sender         User         @relation("MsgSender", fields: [senderId], references: [id], onDelete: Cascade)
-  type           String // text | voice | call
+  type           String // text | voice | call | image
   content        String // text body, media id, or call summary json
   duration       Int? // voice seconds
   createdAt      DateTime     @default(now())
@@ -87,4 +110,342 @@ model Call {
 
   @@index([callerId, startedAt])
   @@index([calleeId, startedAt])
+}
+
+/**
+ * ==================== WALLET / COINS / FINANCE ====================
+ */
+
+model Wallet {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coins       Int      @default(0) // spendable coins
+  earnings    Float    @default(0) // withdrawable creator earnings (diamonds)
+  totalTopUp  Int      @default(0)
+  totalSpent  Int      @default(0)
+  totalEarned Float    @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+model WalletTx {
+  id             String   @id @default(cuid())
+  userId         String
+  kind           String // purchase | gift_sent | gift_received | room_entry | room_income | live_gift_sent | live_gift_received | withdrawal | withdrawal_refund | admin_credit
+  coins          Int      @default(0) // coin delta (negative = spend)
+  earnings       Float    @default(0) // earnings delta
+  note           String   @default("")
+  refId          String? // giftSendId / roomId / liveId / withdrawalId
+  idempotencyKey String?  @unique
+  balanceAfter   Int      @default(0)
+  earningsAfter  Float    @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model CoinPackage {
+  id       String  @id @default(cuid())
+  name     String
+  coins    Int
+  priceUsd Float
+  bonus    Int     @default(0)
+  active   Boolean @default(true)
+  order    Int     @default(0)
+}
+
+model Withdrawal {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("UserWithdrawals", fields: [userId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      String // bank | jazzcash | easypaisa | usdt | other (admin-configured list)
+  destination String
+  status      String    @default("pending") // pending | approved | rejected
+  adminNote   String    @default("")
+  createdAt   DateTime  @default(now())
+  reviewedAt  DateTime?
+
+  @@index([userId, createdAt])
+}
+
+/**
+ * ==================== GIFTS ====================
+ */
+
+model Gift {
+  id         String  @id @default(cuid())
+  name       String
+  emoji      String // visual anchor
+  animKind   String // rose | heart | flower | crown | diamond | car | rocket | dragon | lion | superlion | fireworks | castle | generic
+  sound      String  @default("gift") // soundKit key
+  category   String  @default("room") // room | live | both
+  priceCoins Int
+  earnValue  Float // credited to recipient earnings
+  durationMs Int     @default(2200)
+  active     Boolean @default(true)
+  sortOrder  Int     @default(0)
+}
+
+model GiftSend {
+  id           String   @id @default(cuid())
+  giftId       String
+  senderId     String
+  recipientId  String
+  context      String // room | live | battle
+  roomId       String?
+  liveId       String?
+  battleId     String?
+  battleSide   Int?
+  coinsSpent   Int
+  earnCredited Float
+  createdAt    DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+}
+
+/**
+ * ==================== STORIES ====================
+ */
+
+model Story {
+  id          String          @id @default(cuid())
+  userId      String
+  author      User            @relation("UserStories", fields: [userId], references: [id], onDelete: Cascade)
+  groupId     String // sequential clips of one story share a groupId
+  clipIndex   Int             @default(0)
+  kind        String // photo | video | text | voice
+  mediaId     String?
+  text        String? // caption / text-story body
+  overlayJson String? // JSON [{type:'text'|'emoji', text, x, y, size, color}]
+  bgColor     String          @default("#2F5BE0")
+  durationMs  Int             @default(5000)
+  privacy     String          @default("all") // all | contacts
+  createdAt   DateTime        @default(now())
+  expiresAt   DateTime
+  views       StoryView[]
+  reactions   StoryReaction[]
+
+  @@index([userId, expiresAt])
+  @@index([groupId])
+}
+
+model StoryView {
+  id        String   @id @default(cuid())
+  storyId   String
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewerId  String
+  viewer    User     @relation("UserStoryViews", fields: [viewerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([storyId, viewerId])
+  @@index([storyId])
+}
+
+model StoryReaction {
+  id        String   @id @default(cuid())
+  storyId   String
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([storyId, userId])
+}
+
+/**
+ * ==================== VOICE ROOMS ====================
+ */
+
+model VoiceRoom {
+  id           String            @id @default(cuid())
+  hostId       String
+  host         User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  title        String
+  description  String            @default("")
+  coverUrl     String?
+  isPaid       Boolean           @default(false)
+  entryFee     Int               @default(0)
+  status       String            @default("live") // live | ended
+  createdAt    DateTime          @default(now())
+  endedAt      DateTime?
+  participants RoomParticipant[]
+  messages     RoomMessage[]
+
+  @@index([status, createdAt])
+}
+
+model RoomParticipant {
+  id         String    @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String
+  role       String    @default("listener") // host | cohost | speaker | listener
+  muted      Boolean   @default(false)
+  handRaised Boolean   @default(false)
+  blocked    Boolean   @default(false)
+  joinedAt   DateTime  @default(now())
+  leftAt     DateTime?
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+}
+
+model RoomMessage {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  text      String
+  createdAt DateTime  @default(now())
+
+  @@index([roomId, createdAt])
+}
+
+/**
+ * ==================== VIDEO LIVE + BATTLES ====================
+ */
+
+model LiveSession {
+  id          String        @id @default(cuid())
+  hostId      String
+  host        User          @relation("LiveHost", fields: [hostId], references: [id], onDelete: Cascade)
+  title       String        @default("Live")
+  status      String        @default("live") // live | ended
+  mode        String        @default("solo") // solo | battle
+  battleId    String?
+  viewerCount Int           @default(0)
+  peakViewers Int           @default(0)
+  startedAt   DateTime      @default(now())
+  endedAt     DateTime?
+  comments    LiveComment[]
+
+  @@index([status, startedAt])
+}
+
+model LiveComment {
+  id        String      @id @default(cuid())
+  liveId    String
+  session   LiveSession @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  text      String
+  createdAt DateTime    @default(now())
+
+  @@index([liveId, createdAt])
+}
+
+model Battle {
+  id           String              @id @default(cuid())
+  mode         String // 1v1 | 2v2
+  liveId       String
+  status       String              @default("inviting") // inviting | countdown | live | ended
+  durationSec  Int                 @default(120)
+  startedAt    DateTime?
+  endsAt       DateTime?
+  endedAt      DateTime?
+  winnerSide   Int?
+  createdAt    DateTime            @default(now())
+  participants BattleParticipant[]
+
+  @@index([liveId])
+}
+
+model BattleParticipant {
+  id        String  @id @default(cuid())
+  battleId  String
+  battle    Battle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  userId    String
+  side      Int // 0 | 1 (team)
+  slot      Int // 0 | 1 (position in team)
+  name      String
+  avatarKey Int     @default(0)
+  avatarUrl String?
+  accepted  Boolean @default(false)
+  score     Int     @default(0)
+  connected Boolean @default(false)
+
+  @@unique([battleId, userId])
+}
+
+/**
+ * ==================== NOTIFICATIONS ====================
+ */
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String // message | missed_call | story_reaction | story_reply | room_invite | live_started | gift | battle_invite | battle_result | wallet | withdrawal | ai | security
+  title     String
+  body      String   @default("")
+  refType   String?
+  refId     String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+}
+
+/**
+ * ==================== CALL AI ASSISTANT ====================
+ */
+
+model AiConversation {
+  id        String      @id @default(cuid())
+  userId    String
+  title     String      @default("New conversation")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  messages  AiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant
+  kind           String         @default("text") // text | image | voice
+  text           String         @default("")
+  mediaId        String?
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model AiUsage {
+  id         String   @id @default(cuid())
+  userId     String
+  day        String // YYYY-MM-DD
+  textCount  Int      @default(0)
+  imageCount Int      @default(0)
+  voiceCount Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, day])
+}
+
+/**
+ * ==================== ADMIN + ADS ====================
+ */
+
+model AdminSetting {
+  key       String   @id
+  value     String // JSON string
+  updatedAt DateTime @updatedAt
+}
+
+model Ad {
+  id          String  @id @default(cuid())
+  title       String
+  body        String  @default("")
+  imageUrl    String?
+  linkUrl     String?
+  placements  String  @default("chats") // chats | rooms | profile
+  active      Boolean @default(true)
+  weight      Int     @default(1)
+  impressions Int     @default(0)
+  clicks      Int     @default(0)
 }

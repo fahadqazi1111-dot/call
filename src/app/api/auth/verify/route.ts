@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { signToken, normalizePhone, publicUser } from '@/lib/callapp/server'
+import { signToken, normalizePhone, publicUser, ensureWallet } from '@/lib/callapp/server'
 
 /**
  * Verify OTP. If the phone is not registered yet, respond { needName: true } so
@@ -47,6 +47,7 @@ export async function POST(req: Request) {
       }
     }
     await db.user.update({ where: { id: user.id }, data: { lastSeen: new Date() } })
+    await ensureWallet(user.id)
     return NextResponse.json({
       ok: true,
       token: signToken(user.id),

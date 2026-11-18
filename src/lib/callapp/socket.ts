@@ -44,6 +44,31 @@ class SocketClient {
       'msg:incoming',
       'msg:read',
       'typing',
+      'notify:incoming',
+      // voice rooms
+      'room:state',
+      'room:chat',
+      'room:react',
+      'room:gift',
+      'room:signal',
+      'room:moderate',
+      'room:closed',
+      'room:removed',
+      // video live + battles
+      'live:viewers',
+      'live:viewer:join',
+      'live:viewer:leave',
+      'live:signal',
+      'live:chat',
+      'live:react',
+      'live:gift',
+      'live:ended',
+      'battle:invite',
+      'battle:update',
+      'battle:started',
+      'battle:score',
+      'battle:timeup',
+      'battle:ended',
     ]) {
       s.on(ev, (payload: unknown) => this.dispatch(ev, payload))
     }

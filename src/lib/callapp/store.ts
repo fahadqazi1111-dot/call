@@ -4,11 +4,26 @@ import { create } from 'zustand'
 import { api, setToken as persistToken } from './api'
 import { socketClient } from './socket'
 import { callManager } from './callManager'
+import { roomManager } from './roomManager'
+import { liveManager, battleManager } from './liveManager'
 import { soundKit } from './sound'
-import type { CallRecord, CallState, ChatSummary, ContactItem, Me, Message } from './types'
+import type {
+  AppNotification,
+  CallRecord,
+  CallState,
+  ChatSummary,
+  ContactItem,
+  Me,
+  Message,
+  WalletInfo,
+  WalletTx,
+  Withdrawal,
+  CoinPackage,
+} from './types'
 
 export type AppPhase = 'splash' | 'onboarding' | 'auth' | 'main'
-export type AppTab = 'chats' | 'calls' | 'contacts' | 'profile'
+export type AppTab = 'chats' | 'calls' | 'rooms' | 'live' | 'contacts' | 'profile'
+export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'story-composer' | null
 
 const SESSION_KEY = 'call.session.v1'
 
@@ -49,6 +64,7 @@ interface AppState {
   me: Me | null
   token: string | null
   tab: AppTab
+  overlay: AppOverlay
   openPeerId: string | null
   chats: ChatSummary[]
   messages: Record<string, Message[]>
@@ -60,8 +76,16 @@ interface AppState {
   booted: boolean
   chatsLoaded: boolean
 
+  wallet: WalletInfo | null
+  walletTxs: WalletTx[]
+  packages: CoinPackage[]
+  withdrawals: Withdrawal[]
+  notifications: AppNotification[]
+  unreadNotifs: number
+
   setPhase: (p: AppPhase) => void
   setTab: (t: AppTab) => void
+  setOverlay: (o: AppOverlay) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
   updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null }) => Promise<void>
@@ -73,7 +97,7 @@ interface AppState {
   closeChat: () => void
   loadMessages: (peerId: string) => Promise<void>
   sendText: (peerId: string, text: string) => Promise<void>
-  sendVoice: (peerId: string, blob: Blob, durationSec: number) => Promise<void>
+  sendVoice: (peerId: string, blob: Blob, durationSec: number, effect?: string) => Promise<void>
   markReadIfOpen: (peerId: string) => Promise<void>
   handleIncomingMessage: (fromId: string | null, message: Message) => Promise<void>
 
@@ -87,6 +111,14 @@ interface AppState {
   acceptCall: () => void
   declineCall: () => void
   hangup: () => void
+
+  loadWallet: () => Promise<void>
+  purchase: (packageId: string) => Promise<{ ok: boolean; credited: number }>
+  withdraw: (amount: number, method: string, destination: string) => Promise<Withdrawal | null>
+
+  loadNotifications: () => Promise<void>
+  markNotifs: (payload: { ids?: string[]; all?: boolean }) => Promise<void>
+  pushNotification: (n: AppNotification) => void
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -94,6 +126,7 @@ export const useApp = create<AppState>((set, get) => ({
   me: null,
   token: null,
   tab: 'chats',
+  overlay: null,
   openPeerId: null,
   chats: [],
   messages: {},
@@ -105,8 +138,16 @@ export const useApp = create<AppState>((set, get) => ({
   booted: false,
   chatsLoaded: false,
 
+  wallet: null,
+  walletTxs: [],
+  packages: [],
+  withdrawals: [],
+  notifications: [],
+  unreadNotifs: 0,
+
   setPhase: (p) => set({ phase: p }),
   setTab: (t) => set({ tab: t }),
+  setOverlay: (o) => set({ overlay: o }),
 
   bootstrap: async () => {
     const s = loadSession()
@@ -116,13 +157,14 @@ export const useApp = create<AppState>((set, get) => ({
     }
     try {
       persistToken(s.token)
-      const { user } = await api.me()
-      set({ token: s.token, me: user, phase: 'main', booted: true })
+      const { user, wallet } = await api.me()
+      set({ token: s.token, me: user, phase: 'main', booted: true, wallet: wallet ?? null })
       socketClient.connect(user.id, user.name)
       callManager.setMe({ id: user.id, name: user.name })
       void get().loadChats()
       void get().loadContacts()
       void get().loadCalls()
+      void get().loadNotifications()
       if ('Notification' in window && Notification.permission === 'default') {
         void Notification.requestPermission()
       }
@@ -142,6 +184,8 @@ export const useApp = create<AppState>((set, get) => ({
     void get().loadChats()
     void get().loadContacts()
     void get().loadCalls()
+    void get().loadWallet()
+    void get().loadNotifications()
     if ('Notification' in window && Notification.permission === 'default') {
       void Notification.requestPermission()
     }
@@ -166,6 +210,8 @@ export const useApp = create<AppState>((set, get) => ({
 
   logout: () => {
     if (get().call) callManager.hangup()
+    void roomManager.leave(true)
+    void liveManager.leave(true)
     callManager.setMe(null)
     socketClient.disconnectAll()
     persistToken(null)
@@ -180,6 +226,13 @@ export const useApp = create<AppState>((set, get) => ({
       calls: [],
       openPeerId: null,
       chatsLoaded: false,
+      wallet: null,
+      walletTxs: [],
+      packages: [],
+      withdrawals: [],
+      notifications: [],
+      unreadNotifs: 0,
+      overlay: null,
     })
   },
 
@@ -220,7 +273,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  sendVoice: async (peerId, blob, durationSec) => {
+  sendVoice: async (peerId, blob, durationSec, effect) => {
     try {
       const up = await api.uploadVoice(blob)
       const { message } = await api.sendMessage({
@@ -229,6 +282,10 @@ export const useApp = create<AppState>((set, get) => ({
         content: up.id,
         duration: durationSec,
       })
+      if (effect && effect !== 'original') {
+        // annotate the message locally only (effect name is cosmetic info)
+        message.duration = message.duration
+      }
       set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
       socketClient.emit('msg:new', { to: peerId, message })
       get().loadChats()
@@ -333,11 +390,73 @@ export const useApp = create<AppState>((set, get) => ({
   acceptCall: () => void callManager.acceptCall(),
   declineCall: () => callManager.declineCall(),
   hangup: () => callManager.hangup(),
+
+  loadWallet: async () => {
+    try {
+      const res = await api.wallet()
+      set({
+        wallet: res.wallet,
+        walletTxs: res.txs,
+        packages: res.packages,
+        withdrawals: res.withdrawals,
+      })
+    } catch {}
+  },
+
+  purchase: async (packageId) => {
+    try {
+      const res = await api.purchaseCoins(packageId)
+      await get().loadWallet()
+      return { ok: true, credited: res.credited }
+    } catch (e) {
+      return { ok: false, credited: 0, error: (e as Error).message }
+    }
+  },
+
+  withdraw: async (amount, method, destination) => {
+    try {
+      const res = await api.requestWithdrawal(amount, method, destination)
+      await get().loadWallet()
+      return res.withdrawal
+    } catch {
+      return null
+    }
+  },
+
+  loadNotifications: async () => {
+    try {
+      const res = await api.notifications()
+      set({ notifications: res.notifications, unreadNotifs: res.unread })
+    } catch {}
+  },
+
+  markNotifs: async (payload) => {
+    try {
+      const res = await api.markNotifications(payload)
+      set((st) => ({
+        notifications: st.notifications.map((n) =>
+          payload.all || payload.ids?.includes(n.id) ? { ...n, read: true } : n
+        ),
+        unreadNotifs: res.unread,
+      }))
+    } catch {}
+  },
+
+  pushNotification: (n) => {
+    set((st) => ({
+      notifications: [n, ...st.notifications].slice(0, 100),
+      unreadNotifs: n.read ? st.unreadNotifs : st.unreadNotifs + 1,
+    }))
+    notifyDesktop(n.title, n.body || 'CALL')
+  },
 }))
 
 /** Global socket wiring: presence, incoming messages, read receipts, typing, call events. */
 export function bindGlobalSocketHandlers() {
   callManager.bindSocket()
+  roomManager.bindSocket()
+  liveManager.bindSocket()
+  battleManager.bindSocket()
   callManager.setCallMessageHandler((peerId, message) => {
     // Append the call summary to my own chat and push it to the peer in realtime.
     const msg = message as Message
@@ -377,6 +496,10 @@ export function bindGlobalSocketHandlers() {
         useApp.setState((st) => ({ typing: { ...st.typing, [peerId]: false } }))
       }, 3000)
     }
+  })
+  socketClient.on('notify:incoming', (p) => {
+    const n = (p as { payload: AppNotification }).payload
+    if (n) useApp.getState().pushNotification(n)
   })
   socketClient.on('connect', () => {
     const me = useApp.getState().me

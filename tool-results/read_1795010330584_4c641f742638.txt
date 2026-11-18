@@ -1,0 +1,665 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useMemo, useRef, useState } from 'react'
+     4→import { Avatar } from './Avatar'
+     5→import {
+     6→  Search,
+     7→  Plus,
+     8→  UserPlus,
+     9→  Download,
+    10→  MessageCircle,
+    11→  Phone,
+    12→  Video,
+    13→  Smartphone,
+    14→  Loader2,
+    15→  Upload,
+    16→  FileUp,
+    17→  ClipboardPaste,
+    18→  X,
+    19→  Share2,
+    20→  ShieldCheck,
+    21→  Zap,
+    22→  Users,
+    23→} from 'lucide-react'
+    24→import { useApp } from '@/lib/callapp/store'
+    25→import { toast } from 'sonner'
+    26→import { shareInvite } from '@/lib/callapp/invite'
+    27→import { parseContactsSource, parseContactFile, type ParsedContact } from '@/lib/callapp/importContacts'
+    28→
+    29→interface PickerContact {
+    30→  name: string[]
+    31→  tel: string[]
+    32→}
+    33→
+    34→type ContactsPicker = { select: (props: string[], opts?: { multiple?: boolean }) => Promise<PickerContact[]> }
+    35→
+    36→const pickerSupported = (): boolean => {
+    37→  const nav = navigator as Navigator & { contacts?: ContactsPicker }
+    38→  return typeof nav.contacts?.select === 'function'
+    39→}
+    40→
+    41→export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
+    42→  const contacts = useApp((s) => s.contacts)
+    43→  const online = useApp((s) => s.online)
+    44→  const openChat = useApp((s) => s.openChat)
+    45→  const startCall = useApp((s) => s.startCall)
+    46→  const addContact = useApp((s) => s.addContact)
+    47→  const syncDeviceContacts = useApp((s) => s.syncDeviceContacts)
+    48→  const setTab = useApp((s) => s.setTab)
+    49→  const [query, setQuery] = useState('')
+    50→  const [showAdd, setShowAdd] = useState(false)
+    51→  const [newName, setNewName] = useState('')
+    52→  const [newPhone, setNewPhone] = useState('')
+    53→  const [busy, setBusy] = useState(false)
+    54→
+    55→  // contact-access permission sheet (WhatsApp-style explainer before any fetch)
+    56→  const [showPerm, setShowPerm] = useState(false)
+    57→  const [permBusy, setPermBusy] = useState(false)
+    58→
+    59→  // import dialog state
+    60→  const [showImport, setShowImport] = useState(false)
+    61→  const [importTab, setImportTab] = useState<'file' | 'paste'>('file')
+    62→  const [parsed, setParsed] = useState<ParsedContact[]>([])
+    63→  const [pasteText, setPasteText] = useState('')
+    64→  const [fileName, setFileName] = useState('')
+    65→  const fileRef = useRef<HTMLInputElement>(null)
+    66→  const desk = variant === 'desktop'
+    67→
+    68→  /** Open a conversation and land on the chats section (required by the desktop shell). */
+    69→  const messageUser = (id: string) => {
+    70→    openChat(id)
+    71→    setTab('chats')
+    72→  }
+    73→
+    74→  /** Desktop shell: main panel CTA asks the list panel to open the add-contact dialog. */
+    75→  useEffect(() => {
+    76→    if (!desk) return
+    77→    const open = () => setShowAdd(true)
+    78→    window.addEventListener('call:open-add-contact', open)
+    79→    return () => window.removeEventListener('call:open-add-contact', open)
+    80→  }, [desk])
+    81→
+    82→  const groups = useMemo(() => {
+    83→    const q = query.trim().toLowerCase()
+    84→    const filtered = contacts.filter(
+    85→      (c) => !q || c.name.toLowerCase().includes(q) || c.phone.includes(q)
+    86→    )
+    87→    const byLetter = new Map<string, typeof filtered>()
+    88→    for (const c of filtered) {
+    89→      const letter = (c.name[0] ?? '#').toUpperCase()
+    90→      const arr = byLetter.get(letter) ?? []
+    91→      arr.push(c)
+    92→      byLetter.set(letter, arr)
+    93→    }
+    94→    return Array.from(byLetter.entries()).sort(([a], [b]) => a.localeCompare(b))
+    95→  }, [contacts, query])
+    96→
+    97→  const registeredCount = contacts.filter((c) => c.user).length
+    98→  const canPick = pickerSupported()
+    99→
+   100→  /** Ask once per device, like WhatsApp does on first open of Contacts. */
+   101→  useEffect(() => {
+   102→    if (contacts.length > 0) return
+   103→    try {
+   104→      if (localStorage.getItem('call.contactsAsked') === '1') return
+   105→    } catch {}
+   106→    setShowPerm(true)
+   107→  }, [])
+   108→
+   109→  const rememberAsked = () => {
+   110→    try {
+   111→      localStorage.setItem('call.contactsAsked', '1')
+   112→    } catch {}
+   113→  }
+   114→
+   115→  /**
+   116→   * The actual access step, shown after the user taps "Allow".
+   117→   * Chrome Android: the browser's own native permission + picker UI.
+   118→   * Everywhere else: the universal import dialog (.vcf / CSV / paste).
+   119→   */
+   120→  const runAccess = async () => {
+   121→    rememberAsked()
+   122→    setShowPerm(false)
+   123→    if (!canPick) {
+   124→      setShowImport(true)
+   125→      setImportTab('file')
+   126→      return
+   127→    }
+   128→    try {
+   129→      setPermBusy(true)
+   130→      const picked = await (navigator as Navigator & { contacts: ContactsPicker }).contacts.select(
+   131→        ['name', 'tel'],
+   132→        { multiple: true }
+   133→      )
+   134→      if (!picked?.length) return
+   135→      setBusy(true)
+   136→      const mapped = picked
+   137→        .map((p) => ({ name: p.name?.[0] ?? '', phone: p.tel?.[0] ?? '' }))
+   138→        .filter((c) => c.phone)
+   139→      const res = await syncDeviceContacts(mapped)
+   140→      if (res) {
+   141→        toast.success(
+   142→          res.matched > 0
+   143→            ? `${res.matched} friend${res.matched > 1 ? 's' : ''} already on CALL out of ${res.saved} contacts`
+   144→            : `Synced ${res.saved} contacts — none on CALL yet, send invites below`
+   145→        )
+   146→      }
+   147→    } catch {
+   148→      // user denied in the browser picker or cancelled — offer the import path
+   149→      toast.error('Contact access was not granted — you can import a file instead')
+   150→      setShowImport(true)
+   151→      setImportTab('file')
+   152→    } finally {
+   153→      setPermBusy(false)
+   154→      setBusy(false)
+   155→    }
+   156→  }
+   157→
+   158→  /** Every sync entry point goes through the permission explainer first. */
+   159→  const startSyncFlow = () => {
+   160→    if (permBusy) return
+   161→    setShowPerm(true)
+   162→  }
+   163→
+   164→  /* ---------- import dialog helpers ---------- */
+   165→
+   166→  const resetImport = () => {
+   167→    setShowImport(false)
+   168→    setParsed([])
+   169→    setPasteText('')
+   170→    setFileName('')
+   171→    if (fileRef.current) fileRef.current.value = ''
+   172→  }
+   173→
+   174→  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   175→    const file = e.target.files?.[0]
+   176→    if (!file) return
+   177→    try {
+   178→      const text = await file.text()
+   179→      const list = parseContactFile(file.name, text)
+   180→      setParsed(list)
+   181→      setFileName(file.name)
+   182→      if (!list.length) {
+   183→        toast.error(`No phone numbers found in ${file.name}. Export a .vcf or CSV from Google Contacts / iPhone.`)
+   184→      }
+   185→    } catch {
+   186→      toast.error('Could not read that file')
+   187→    }
+   188→  }
+   189→
+   190→  const runImport = async () => {
+   191→    if (!parsed.length) return
+   192→    setBusy(true)
+   193→    const res = await syncDeviceContacts(parsed)
+   194→    setBusy(false)
+   195→    if (res) {
+   196→      toast.success(`Imported ${res.saved} contacts — ${res.matched} already on CALL`)
+   197→      resetImport()
+   198→    } else {
+   199→      toast.error('Import failed — please try again')
+   200→    }
+   201→  }
+   202→
+   203→  const submitAdd = async () => {
+   204→    if (!newName.trim() || newPhone.replace(/\D/g, '').length < 7) return
+   205→    setBusy(true)
+   206→    const ok = await addContact(newName.trim(), newPhone)
+   207→    setBusy(false)
+   208→    if (ok) {
+   209→      toast.success(`${newName.trim()} added to contacts`)
+   210→      setShowAdd(false)
+   211→      setNewName('')
+   212→      setNewPhone('')
+   213→    } else {
+   214→      toast.error('Could not add contact')
+   215→    }
+   216→  }
+   217→
+   218→  return (
+   219→    <div className="flex h-full flex-col">
+   220→      <header
+   221→        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}
+   222→      >
+   223→        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
+   224→          Contacts
+   225→        </h1>
+   226→        <button
+   227→          className={`flex items-center justify-center rounded-full bg-cbrand text-white transition hover:bg-cbrand-deep ${
+   228→            desk ? 'h-10 w-10' : 'h-11 w-11'
+   229→          }`}
+   230→          aria-label="New contact"
+   231→          onClick={() => setShowAdd(true)}
+   232→        >
+   233→          <Plus size={21} />
+   234→        </button>
+   235→      </header>
+   236→
+   237→      <div
+   238→        className={`flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499] ${
+   239→          desk ? 'mx-4 mt-4' : 'mx-6 mt-4'
+   240→        }`}
+   241→      >
+   242→        <Search size={19} />
+   243→        <input
+   244→          className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
+   245→          placeholder={`Search ${contacts.length} contacts`}
+   246→          value={query}
+   247→          onChange={(e) => setQuery(e.target.value)}
+   248→        />
+   249→      </div>
+   250→
+   251→      <div className={`app-scroll mt-2 flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
+   252→        <div className="px-4 py-2">
+   253→          <button
+   254→            className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
+   255→            onClick={startSyncFlow}
+   256→            disabled={busy || permBusy}
+   257→          >
+   258→            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cbrand">
+   259→              {busy || permBusy ? <Loader2 size={24} className="animate-spin" /> : <Download size={24} />}
+   260→            </span>
+   261→            <div>
+   262→              <div className="text-[16px] font-bold text-cink">
+   263→                {canPick ? 'Sync device contacts' : 'Import contacts'}
+   264→              </div>
+   265→              <div className="mt-0.5 flex items-center gap-1 text-sm text-[#4A5568]">
+   266→                {canPick ? (
+   267→                  <>
+   268→                    <Smartphone size={14} /> Allow access, find friends on CALL
+   269→                  </>
+   270→                ) : (
+   271→                  <>
+   272→                    <FileUp size={14} /> Upload .vcf / CSV or paste numbers
+   273→                  </>
+   274→                )}
+   275→              </div>
+   276→            </div>
+   277→          </button>
+   278→          <button
+   279→            className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
+   280→            onClick={() => setShowAdd(true)}
+   281→          >
+   282→            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cbrand">
+   283→              <UserPlus size={24} />
+   284→            </span>
+   285→            <div>
+   286→              <div className="text-[16px] font-bold text-cink">New contact</div>
+   287→              <div className="mt-0.5 text-sm text-[#4A5568]">Add someone by number</div>
+   288→            </div>
+   289→          </button>
+   290→          <button
+   291→            className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
+   292→            onClick={() => void shareInvite()}
+   293→          >
+   294→            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cgreen">
+   295→              <Share2 size={24} />
+   296→            </span>
+   297→            <div>
+   298→              <div className="text-[16px] font-bold text-cink">Invite friends</div>
+   299→              <div className="mt-0.5 text-sm text-[#4A5568]">Share CALL — free forever</div>
+   300→            </div>
+   301→          </button>
+   302→        </div>
+   303→
+   304→        {groups.length === 0 ? (
+   305→          <div className="flex flex-col items-center pt-12 text-center">
+   306→            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-cbrand">
+   307→              <Users size={34} />
+   308→            </div>
+   309→            <p className="mt-5 text-lg font-bold text-cink">No contacts yet</p>
+   310→            <p className="mt-1 px-10 text-sm text-cmut">
+   311→              Allow access to your contacts — friends already on CALL appear here automatically, just like WhatsApp.
+   312→            </p>
+   313→            <button
+   314→              className="btn-p mt-6 w-[230px]"
+   315→              onClick={startSyncFlow}
+   316→              disabled={busy || permBusy}
+   317→            >
+   318→              {busy || permBusy ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+   319→              {canPick ? 'Sync contacts' : 'Import contacts'}
+   320→            </button>
+   321→            <button
+   322→              className="mt-3 flex h-11 items-center gap-2 rounded-full px-5 text-sm font-bold text-cbrand transition hover:bg-csoft"
+   323→              onClick={() => void shareInvite()}
+   324→            >
+   325→              <Share2 size={17} /> Invite friends instead
+   326→            </button>
+   327→          </div>
+   328→        ) : (
+   329→          groups.map(([letter, arr]) => (
+   330→            <div key={letter}>
+   331→              <div className={`pb-1 pt-3 text-xs font-bold text-cbrand ${desk ? 'px-5' : 'px-6'}`}>{letter}</div>
+   332→              {arr.map((c) => (
+   333→                <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-5' : 'px-6'}`}>
+   334→                  <Avatar
+   335→                    name={c.name}
+   336→                    avatarKey={c.user?.avatarKey ?? 0}
+   337→                    size={desk ? 42 : 46}
+   338→                    online={c.user ? online[c.user.id] : undefined}
+   339→                    src={c.user?.avatarUrl ?? null}
+   340→                  />
+   341→                  <div className="min-w-0 flex-1">
+   342→                    <div className="flex items-center gap-2 text-[15px] font-bold text-cink">
+   343→                      <span className="truncate">{c.name}</span>
+   344→                      {c.user && (
+   345→                        <span className="flex-none rounded-full bg-[#E3EBFF] px-2 py-0.5 text-[10px] font-bold text-cbrand-deep">
+   346→                          ON CALL
+   347→                        </span>
+   348→                      )}
+   349→                    </div>
+   350→                    <div className="mt-0.5 truncate text-[13px] text-[#4A5568]">
+   351→                      {c.user
+   352→                        ? online[c.user.id]
+   353→                          ? 'Online now'
+   354→                          : c.phone
+   355→                        : `Not on CALL · ${c.phone}`}
+   356→                    </div>
+   357→                  </div>
+   358→                  {c.user ? (
+   359→                    <>
+   360→                      <button
+   361→                        className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand hover:bg-csoft"
+   362→                        aria-label={`Message ${c.user.name}`}
+   363→                        onClick={() => messageUser(c.user!.id)}
+   364→                      >
+   365→                        <MessageCircle size={20} />
+   366→                      </button>
+   367→                      <button
+   368→                        className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand hover:bg-csoft"
+   369→                        aria-label={`Voice call ${c.user.name}`}
+   370→                        onClick={() => startCall(c.user!, 'voice')}
+   371→                      >
+   372→                        <Phone size={19} />
+   373→                      </button>
+   374→                      <button
+   375→                        className="flex h-10 w-10 items-center justify-center rounded-full text-cbrand hover:bg-csoft"
+   376→                        aria-label={`Video call ${c.user.name}`}
+   377→                        onClick={() => startCall(c.user!, 'video')}
+   378→                      >
+   379→                        <Video size={20} />
+   380→                      </button>
+   381→                    </>
+   382→                  ) : (
+   383→                    <button
+   384→                      className="flex h-9 flex-none items-center gap-1.5 rounded-full bg-[#DFF3E7] px-3.5 text-xs font-bold text-[#0B8A46] transition hover:bg-[#CFEDDC]"
+   385→                      aria-label={`Invite ${c.name} to CALL`}
+   386→                      onClick={() => void shareInvite({ name: c.name, phone: c.phone })}
+   387→                    >
+   388→                      <Share2 size={14} /> Invite
+   389→                    </button>
+   390→                  )}
+   391→                </div>
+   392→              ))}
+   393→            </div>
+   394→          ))
+   395→        )}
+   396→
+   397→        <p className={`pt-4 text-center text-xs text-[#9AA8C7] ${desk ? 'px-5' : 'px-6'}`}>
+   398→          {registeredCount} of {contacts.length} contacts are on CALL
+   399→        </p>
+   400→      </div>
+   401→
+   402→      {/* ---------- contact access permission explainer (WhatsApp-style) ---------- */}
+   403→      {showPerm && (
+   404→        <div
+   405→          className={`inset-0 z-50 flex bg-black/45 ${
+   406→            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+   407→          }`}
+   408→          onClick={() => {
+   409→            rememberAsked()
+   410→            setShowPerm(false)
+   411→          }}
+   412→        >
+   413→          <div
+   414→            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+   415→            onClick={(e) => e.stopPropagation()}
+   416→            role="dialog"
+   417→            aria-label="Contact access permission"
+   418→          >
+   419→            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+   420→            <div className="flex flex-col items-center text-center">
+   421→              <span className="flex h-[74px] w-[74px] items-center justify-center rounded-[24px] bg-csoft text-cbrand">
+   422→                <Users size={36} />
+   423→              </span>
+   424→              <h2 className="mt-4 text-xl font-extrabold text-cink">Find friends on CALL</h2>
+   425→              <p className="mt-1.5 text-[15px] leading-6 text-cmut">
+   426→                Allow CALL to read your contacts so friends already here show up automatically —
+   427→                just like WhatsApp.
+   428→              </p>
+   429→            </div>
+   430→
+   431→            <ul className="mt-5 space-y-3 text-left">
+   432→              <li className="flex items-start gap-3">
+   433→                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+   434→                  <ShieldCheck size={19} />
+   435→                </span>
+   436→                <div>
+   437→                  <div className="text-[14px] font-bold text-cink">Private by design</div>
+   438→                  <div className="text-[13px] text-cmut">
+   439→                    Numbers are only matched, never sold or posted anywhere.
+   440→                  </div>
+   441→                </div>
+   442→              </li>
+   443→              <li className="flex items-start gap-3">
+   444→                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+   445→                  <Zap size={19} />
+   446→                </span>
+   447→                <div>
+   448→                  <div className="text-[14px] font-bold text-cink">Instant friend list</div>
+   449→                  <div className="text-[13px] text-cmut">
+   450→                    Anyone already registered appears with an ON CALL badge — ready to call or chat.
+   451→                  </div>
+   452→                </div>
+   453→              </li>
+   454→              <li className="flex items-start gap-3">
+   455→                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-[#DFF3E7] text-[#0B8A46]">
+   456→                  <Share2 size={19} />
+   457→                </span>
+   458→                <div>
+   459→                  <div className="text-[14px] font-bold text-cink">One-tap invite</div>
+   460→                  <div className="text-[13px] text-cmut">
+   461→                    Friends not on CALL yet get an invite button — share via SMS or any app.
+   462→                  </div>
+   463→                </div>
+   464→              </li>
+   465→            </ul>
+   466→
+   467→            {canPick ? (
+   468→              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+   469→                {permBusy ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
+   470→                {permBusy ? 'Waiting for permission…' : 'Allow contact access'}
+   471→              </button>
+   472→            ) : (
+   473→              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+   474→                {permBusy ? <Loader2 size={18} className="animate-spin" /> : <FileUp size={18} />}
+   475→                Choose how to import
+   476→              </button>
+   477→            )}
+   478→            <button
+   479→              className="mt-3 h-11 w-full text-sm font-bold text-cmut transition hover:text-cink"
+   480→              onClick={() => {
+   481→                rememberAsked()
+   482→                setShowPerm(false)
+   483→              }}
+   484→            >
+   485→              Not now
+   486→            </button>
+   487→          </div>
+   488→        </div>
+   489→      )}
+   490→
+   491→      {/* ---------- add single contact ---------- */}
+   492→      {showAdd && (
+   493→        <div
+   494→          className={`inset-0 z-50 flex bg-black/45 ${
+   495→            desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
+   496→          }`}
+   497→          onClick={() => setShowAdd(false)}
+   498→        >
+   499→          <div
+   500→            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+   501→            onClick={(e) => e.stopPropagation()}
+   502→            role="dialog"
+   503→            aria-label="Add contact"
+   504→          >
+   505→            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+   506→            <h2 className="text-xl font-extrabold text-cink">New contact</h2>
+   507→            <p className="mt-1 text-sm text-cmut">Save a number to call and chat for free.</p>
+   508→            <div className="mt-5 space-y-3">
+   509→              <input className="app-input" placeholder="Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+   510→              <input
+   511→                className="app-input"
+   512→                inputMode="tel"
+   513→                placeholder="Phone number (with country code)"
+   514→                value={newPhone}
+   515→                onChange={(e) => setNewPhone(e.target.value)}
+   516→              />
+   517→            </div>
+   518→            <button
+   519→              className="btn-p mt-5 w-full disabled:opacity-50"
+   520→              disabled={busy || !newName.trim() || newPhone.replace(/\D/g, '').length < 7}
+   521→              onClick={() => void submitAdd()}
+   522→            >
+   523→              <Plus size={18} /> Save contact
+   524→            </button>
+   525→          </div>
+   526→        </div>
+   527→      )}
+   528→
+   529→      {/* ---------- universal import (desktop browsers, iPhone, Google Contacts) ---------- */}
+   530→      {showImport && (
+   531→        <div
+   532→          className={`inset-0 z-50 flex bg-black/45 ${desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'}`}
+   533→          onClick={resetImport}
+   534→        >
+   535→          <div
+   536→            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-7 shadow-2xl`}
+   537→            onClick={(e) => e.stopPropagation()}
+   538→            role="dialog"
+   539→            aria-label="Import contacts"
+   540→          >
+   541→            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+   542→            <div className="flex items-start justify-between gap-3">
+   543→              <div>
+   544→                <h2 className="text-xl font-extrabold text-cink">Import contacts</h2>
+   545→                <p className="mt-1 text-sm text-cmut">
+   546→                  Free &amp; private — works in any browser, nothing leaves your contacts book.
+   547→                </p>
+   548→              </div>
+   549→              <button
+   550→                className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-cbg text-cmut hover:bg-csoft"
+   551→                aria-label="Close import"
+   552→                onClick={resetImport}
+   553→              >
+   554→                <X size={16} />
+   555→              </button>
+   556→            </div>
+   557→
+   558→            {/* tabs */}
+   559→            <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-[16px] bg-cbg p-1.5">
+   560→              <button
+   561→                className={`flex h-10 items-center justify-center gap-2 rounded-[12px] text-sm font-bold transition ${
+   562→                  importTab === 'file' ? 'bg-white text-cbrand shadow-sm' : 'text-cmut hover:text-cink'
+   563→                }`}
+   564→                onClick={() => setImportTab('file')}
+   565→                aria-pressed={importTab === 'file'}
+   566→              >
+   567→                <FileUp size={16} /> Upload file
+   568→              </button>
+   569→              <button
+   570→                className={`flex h-10 items-center justify-center gap-2 rounded-[12px] text-sm font-bold transition ${
+   571→                  importTab === 'paste' ? 'bg-white text-cbrand shadow-sm' : 'text-cmut hover:text-cink'
+   572→                }`}
+   573→                onClick={() => {
+   574→                  setImportTab('paste')
+   575→                  setParsed(pasteText.trim() ? parseContactsSource('paste', pasteText) : [])
+   576→                }}
+   577→                aria-pressed={importTab === 'paste'}
+   578→              >
+   579→                <ClipboardPaste size={16} /> Paste numbers
+   580→              </button>
+   581→            </div>
+   582→
+   583→            {importTab === 'file' ? (
+   584→              <div className="mt-4">
+   585→                <label
+   586→                  className="flex cursor-pointer flex-col items-center gap-2 rounded-[18px] border-2 border-dashed border-[#C9D3EC] px-4 py-7 text-center transition hover:border-cbrand hover:bg-csoft/60"
+   587→                  onDragOver={(e) => e.preventDefault()}
+   588→                  onDrop={(e) => {
+   589→                    e.preventDefault()
+   590→                    if (e.dataTransfer.files?.[0] && fileRef.current) {
+   591→                      fileRef.current.files = e.dataTransfer.files
+   592→                      void onFileChosen({ target: fileRef.current } as React.ChangeEvent<HTMLInputElement>)
+   593→                    }
+   594→                  }}
+   595→                >
+   596→                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-csoft text-cbrand">
+   597→                    <Upload size={22} />
+   598→                  </span>
+   599→                  <span className="text-[15px] font-bold text-cink">
+   600→                    {fileName ? fileName : 'Choose a .vcf or CSV file'}
+   601→                  </span>
+   602→                  <span className="text-[13px] text-cmut">
+   603→                    Google Contacts → Export → vCard, or iPhone share contact
+   604→                  </span>
+   605→                  <input
+   606→                    ref={fileRef}
+   607→                    type="file"
+   608→                    accept=".vcf,.csv,.txt,text/vcard,text/csv,text/plain"
+   609→                    className="hidden"
+   610→                    onChange={(e) => void onFileChosen(e)}
+   611→                  />
+   612→                </label>
+   613→              </div>
+   614→            ) : (
+   615→              <div className="mt-4">
+   616→                <textarea
+   617→                  className="app-input app-scroll h-[132px] w-full resize-none py-3 leading-6"
+   618→                  placeholder={'One per line:\nAli Khan, +92 300 1234567\nSara Ahmed 0321 8887766\n+14155550123'}
+   619→                  value={pasteText}
+   620→                  onChange={(e) => {
+   621→                    setPasteText(e.target.value)
+   622→                    setParsed(e.target.value.trim() ? parseContactsSource('paste', e.target.value) : [])
+   623→                  }}
+   624→                  aria-label="Paste contact numbers"
+   625→                />
+   626→                <p className="mt-1.5 text-[13px] text-cmut">Paste any list — name and number per line, or just numbers.</p>
+   627→              </div>
+   628→            )}
+   629→
+   630→            {/* preview */}
+   631→            {parsed.length > 0 && (
+   632→              <div className="mt-3 rounded-[16px] border border-cline bg-cbg/70 p-3">
+   633→                <div className="flex items-center justify-between">
+   634→                  <span className="text-sm font-bold text-cink">Found {parsed.length} contacts</span>
+   635→                  <span className="text-xs font-semibold text-cmut">max 2000</span>
+   636→                </div>
+   637→                <div className="app-scroll mt-1.5 max-h-[92px] overflow-y-auto">
+   638→                  {parsed.slice(0, 12).map((c, i) => (
+   639→                    <div key={i} className="flex items-center justify-between py-0.5 text-[13px]">
+   640→                      <span className="truncate font-semibold text-cink">{c.name}</span>
+   641→                      <span className="flex-none text-cmut">{c.phone}</span>
+   642→                    </div>
+   643→                  ))}
+   644→                  {parsed.length > 12 && (
+   645→                    <div className="py-0.5 text-[13px] text-cmut">+ {parsed.length - 12} more…</div>
+   646→                  )}
+   647→                </div>
+   648→              </div>
+   649→            )}
+   650→
+   651→            <button
+   652→              className="btn-p mt-4 w-full disabled:opacity-50"
+   653→              disabled={busy || parsed.length === 0}
+   654→              onClick={() => void runImport()}
+   655→            >
+   656→              {busy ? <Loader2 size={18} className="animate-spin" /> : <UserPlus size={18} />}
+   657→              {busy ? 'Importing…' : parsed.length ? `Import ${parsed.length} contacts` : 'Import contacts'}
+   658→            </button>
+   659→          </div>
+   660→        </div>
+   661→      )}
+   662→    </div>
+   663→  )
+   664→}
+   665→

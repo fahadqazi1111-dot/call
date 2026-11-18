@@ -78,6 +78,31 @@ class SoundKit {
     this.beep(340, 250, 0.06)
     this.beep(260, 320, 0.06, 240)
   }
+
+  /** Gift whoosh+chime, sized by gift tier. */
+  gift(tier = 0) {
+    const base = 500 + tier * 60
+    this.beep(base, 120, 0.05)
+    this.beep(base * 1.25, 140, 0.05, 110)
+    this.beep(base * 1.5, 180, 0.06, 230)
+    if (tier >= 2) {
+      this.beep(base * 2, 260, 0.07, 420)
+      this.beep(base * 2.5, 320, 0.08, 620)
+    }
+  }
+
+  /** Rising countdown tick for battle starts. */
+  countdownTick(n = 0) {
+    this.beep(440 + n * 110, 120, 0.07)
+  }
+
+  /** Winner fanfare. */
+  fanfare() {
+    this.beep(523, 160, 0.07)
+    this.beep(659, 160, 0.07, 150)
+    this.beep(784, 160, 0.07, 300)
+    this.beep(1047, 420, 0.09, 450)
+  }
 }
 
 export const soundKit = new SoundKit()

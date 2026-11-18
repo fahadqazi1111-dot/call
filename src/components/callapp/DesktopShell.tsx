@@ -1,12 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { MessageCircle, Phone, Users, User, Lock, Mic, Video, BadgeCheck, Search, LogOut } from 'lucide-react'
+import {
+  MessageCircle, Phone, Users, User, Lock, Mic, Video, BadgeCheck, Search, LogOut,
+  Radio, Clapperboard, Bot, Coins, Bell, Shield,
+} from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { CallLogoMark } from './CallLogo'
 import { Avatar } from './Avatar'
 import { ChatsTab } from './ChatsTab'
 import { CallsTab } from './CallsTab'
+import { RoomsTab } from './RoomsTab'
+import { LiveTab } from './LiveTab'
 import { ContactsTab } from './ContactsTab'
 import { ProfileTab } from './ProfileTab'
 import { ChatScreen } from './ChatScreen'
@@ -20,7 +25,9 @@ export function DesktopShell() {
   const openPeerId = useApp((s) => s.openPeerId)
   const me = useApp((s) => s.me)
   const setTab = useApp((s) => s.setTab)
+  const setOverlay = useApp((s) => s.setOverlay)
   const unreadTotal = useApp((s) => s.chats.reduce((n, c) => n + c.unread, 0))
+  const unreadNotifs = useApp((s) => s.unreadNotifs)
 
   if (!me) return null
 
@@ -31,19 +38,19 @@ export function DesktopShell() {
         className="flex w-[72px] shrink-0 flex-col items-center border-r border-cline bg-white py-4"
         aria-label="Main navigation"
       >
-        <div className="mb-6" title="CALL — One World. One Call.">
-          <CallLogoMark size={38} />
+        <div className="mb-5" title="CALL — One World. One Call.">
+          <CallLogoMark size={36} />
         </div>
 
-        <RailButton
-          active={tab === 'chats'}
-          label="Chats"
-          onClick={() => setTab('chats')}
-          badge={unreadTotal}
-          Icon={MessageCircle}
-        />
+        <RailButton active={tab === 'chats'} label="Chats" onClick={() => setTab('chats')} badge={unreadTotal} Icon={MessageCircle} />
         <RailButton active={tab === 'calls'} label="Calls" Icon={Phone} onClick={() => setTab('calls')} />
+        <RailButton active={tab === 'rooms'} label="Voice Rooms" Icon={Radio} onClick={() => setTab('rooms')} />
+        <RailButton active={tab === 'live'} label="Video Live" Icon={Clapperboard} onClick={() => setTab('live')} />
         <RailButton active={tab === 'contacts'} label="Contacts" Icon={Users} onClick={() => setTab('contacts')} />
+        <RailButton label="CALL AI" Icon={Bot} onClick={() => setOverlay('ai')} />
+        <RailButton label="Wallet" Icon={Coins} onClick={() => setOverlay('wallet')} />
+        <RailButton label="Notifications" Icon={Bell} onClick={() => setOverlay('notifications')} badge={unreadNotifs} />
+        {me.role === 'admin' && <RailButton label="Admin" Icon={Shield} onClick={() => setOverlay('admin')} />}
         <RailButton active={tab === 'profile'} label="Profile" Icon={User} onClick={() => setTab('profile')} />
 
         <div className="mt-auto">
@@ -68,6 +75,8 @@ export function DesktopShell() {
       >
         {tab === 'chats' && <ChatsTab variant="desktop" />}
         {tab === 'calls' && <CallsTab variant="desktop" />}
+        {tab === 'rooms' && <RoomsTab variant="desktop" />}
+        {tab === 'live' && <LiveTab variant="desktop" />}
         {tab === 'contacts' && <ContactsTab variant="desktop" />}
         {tab === 'profile' && <ProfileListPanel />}
       </aside>
@@ -80,6 +89,12 @@ export function DesktopShell() {
           ) : (
             <MainWelcome />
           ))}
+        {tab === 'rooms' && (
+          <RoomsMainPanel />
+        )}
+        {tab === 'live' && (
+          <LiveMainPanel />
+        )}
         {tab === 'calls' && (
           <MainPlaceholder
             Icon={Phone}
@@ -99,6 +114,32 @@ export function DesktopShell() {
         {tab === 'profile' && <ProfileTab variant="desktop" />}
       </main>
     </div>
+  )
+}
+
+/* ---------------- rooms welcome (desktop main panel) ---------------- */
+
+function RoomsMainPanel() {
+  const setTab = useApp((s) => s.setTab)
+  return (
+    <MainPlaceholder
+      Icon={Radio}
+      title="Voice Rooms"
+      sub="Join live audio rooms — free hangouts or paid rooms that earn diamonds for the host. Pick a room on the left."
+      cta={{ label: 'Create a room', action: () => setTab('rooms') }}
+    />
+  )
+}
+
+function LiveMainPanel() {
+  const setTab = useApp((s) => s.setTab)
+  return (
+    <MainPlaceholder
+      Icon={Clapperboard}
+      title="Video Live & Battles"
+      sub="TikTok-style live broadcasts with 1v1 and 2v2 battles, gift scoring and winner announcements. Pick a stream on the left."
+      cta={{ label: 'Go live', action: () => setTab('live') }}
+    />
   )
 }
 

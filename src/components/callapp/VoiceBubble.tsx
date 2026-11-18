@@ -3,16 +3,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { barsFromSeed, fmtDuration } from '@/lib/callapp/utils'
+import { getMediaUrl } from '@/lib/callapp/media'
 import type { Message } from '@/lib/callapp/types'
 
 export function VoiceBubble({ msg, mine }: { msg: Message; mine: boolean }) {
-  const url = `/api/media/${msg.content}`
+  const [url, setUrl] = useState<string | null>(msg.mediaUrl ?? null)
   const bars = barsFromSeed(msg.id, 26)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [audioDuration, setAudioDuration] = useState<number | null>(null)
   const duration = audioDuration ?? msg.duration ?? 0
+
+  useEffect(() => {
+    if (url) return
+    void getMediaUrl(msg.content).then((u) => u && setUrl(u))
+  }, [msg.content, url])
 
   useEffect(() => {
     const el = audioRef.current

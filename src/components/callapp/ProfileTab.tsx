@@ -19,6 +19,9 @@ import {
   Wifi,
   BadgeCheck,
   Loader2,
+  Coins,
+  Bot,
+  Shield,
 } from 'lucide-react'
 
 /** Center-crop an image file to a square and downscale to max 512px (jpeg). */
@@ -66,6 +69,8 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const updateMe = useApp((s) => s.updateMe)
   const updateAvatar = useApp((s) => s.updateAvatar)
   const logout = useApp((s) => s.logout)
+  const setOverlay = useApp((s) => s.setOverlay)
+  const wallet = useApp((s) => s.wallet)
   const [showEdit, setShowEdit] = useState(false)
   const [editName, setEditName] = useState(me?.name ?? '')
   const [editAbout, setEditAbout] = useState(me?.about ?? '')
@@ -176,8 +181,15 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       </div>
 
       <div className="mx-6 mt-6 overflow-hidden rounded-[20px] border border-cline bg-white">
-        <Row Icon={User} label="Account" sub={me.phone} />
-        <Row Icon={Bell} label="Notifications" sub="New messages & calls" onClick={enableNotifications} />
+        <Row Icon={Coins} label="Wallet & coins" sub={wallet ? `🪙 ${wallet.coins} coins · 💎 ${wallet.earnings} diamonds` : 'Coins, gifts & withdrawals'} onClick={() => setOverlay('wallet')} />
+        <Row Icon={Bot} label="CALL AI Assistant" sub="Chat, voice & image intelligence" onClick={() => setOverlay('ai')} />
+        <Row Icon={Bell} label="Notifications" sub="Messages, gifts & battles" onClick={() => setOverlay('notifications')} />
+        {me.role === 'admin' && <Row Icon={Shield} label="Admin panel" sub="Manage the CALL platform" onClick={() => setOverlay('admin')} />}
+      </div>
+
+      <div className="mx-6 mt-3 overflow-hidden rounded-[20px] border border-cline bg-white">
+        <Row Icon={User} label="Account" sub={me.email ? `${me.email}${me.emailVerified ? ' ✓ verified' : ''}` : me.phone} />
+        <Row Icon={Bell} label="Push notifications" sub="New messages & calls" onClick={enableNotifications} />
         <Row Icon={ShieldCheck} label="Privacy & security" sub="Peer-to-peer encrypted calls" />
         <Row Icon={Zap} label="Free & unlimited" sub="Zero budget app — no charges ever" />
       </div>

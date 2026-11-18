@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, publicUser } from '@/lib/callapp/server'
+import { requireUser, publicUser, ensureWallet } from '@/lib/callapp/server'
 
 export async function GET(req: Request) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  return NextResponse.json({ user: publicUser(me) })
+  const wallet = await ensureWallet(me.id)
+  return NextResponse.json({
+    user: publicUser(me),
+    wallet: { coins: wallet.coins, earnings: wallet.earnings },
+  })
 }
 
 export async function PUT(req: Request) {

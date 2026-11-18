@@ -52,3 +52,7 @@ prompt
 server.log
 # Skills directory
 /skills/
+# private user data
+db/custom.db
+db/uploads/
+db/*.db

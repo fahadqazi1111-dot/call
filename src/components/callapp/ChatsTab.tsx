@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from 'react'
 import { Avatar } from './Avatar'
+import { StoriesTray } from './StoriesTray'
 import { Search, Plus, Mic, Video, Phone, Check, CheckCheck, MessageSquare, Camera } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { fmtChatListTime, fmtDuration } from '@/lib/callapp/utils'
+import { AdBanner } from './GiftsUI'
 import type { ChatSummary } from '@/lib/callapp/types'
 
 export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
@@ -115,7 +117,11 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
         </button>
       </div>
 
+      {/* stories tray */}
+      <StoriesTray variant={variant} />
+
       <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
+        <AdBanner placement="chats" />
         {list.length === 0 ? (
           <div className="flex flex-col items-center pt-24 text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-cbrand">
