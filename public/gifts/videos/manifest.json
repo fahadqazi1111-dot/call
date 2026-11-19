@@ -4,5 +4,17 @@
     "bytes": 1679932,
     "taskId": "20261120041013041fb9bf94964be6",
     "generatedAt": "2026-11-19T20:17:37.601Z"
+  },
+  "superlion": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/c4629bb4-e456-11f1-858c-f21fdb5d8223_0.mp4",
+    "bytes": 5140531,
+    "taskId": "20261120042113fb5219550484464b",
+    "generatedAt": "2026-11-19T20:22:15.325Z"
+  },
+  "car": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/0591c00a-e458-11f1-8360-92d9c959708e_0.mp4",
+    "bytes": 1985826,
+    "taskId": "20261120043012d51d73f2271d4bc4",
+    "generatedAt": "2026-11-19T20:31:13.852Z"
   }
 }
