@@ -52,5 +52,11 @@
     "bytes": 2541962,
     "taskId": "202611200540132e2e33b2520a45ac",
     "generatedAt": "2026-11-19T21:41:14.335Z"
+  },
+  "rose": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/7438e3b6-e463-11f1-8360-92d9c959708e_0.mp4",
+    "bytes": 1824257,
+    "taskId": "202611200552021112191a50924bff",
+    "generatedAt": "2026-11-19T21:53:04.090Z"
   }
 }
