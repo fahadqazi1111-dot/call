@@ -626,7 +626,7 @@ export function AuthScreen() {
                       />
                       <button
                         type="button"
-                        className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                        className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
                         onClick={() => setShowPw((v) => !v)}
                         aria-label={showPw ? 'Hide password' : 'Show password'}
                       >
@@ -807,7 +807,7 @@ export function AuthScreen() {
                         />
                         <button
                           type="button"
-                          className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                          className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
                           onClick={() => setShowPw((v) => !v)}
                           aria-label={showPw ? 'Hide password' : 'Show password'}
                         >
@@ -1047,7 +1047,7 @@ export function AuthScreen() {
                     />
                     <button
                       type="button"
-                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                      className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
                       onClick={() => setShowPw2((v) => !v)}
                       aria-label={showPw2 ? 'Hide password' : 'Show password'}
                     >

@@ -2,14 +2,18 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 /**
- * INTERNAL — used by the CALL socket mini-service to verify room/live roles.
- * The socket service has no database access, so it calls this endpoint
- * (guarded by the shared internal relay secret) instead of trusting
- * client-provided roles.
+ * INTERNAL — used by the CALL socket mini-service to verify room/live roles and
+ * to gate 1:1 calls (user safety). The socket service has no database access,
+ * so it calls this endpoint (guarded by the shared internal relay secret)
+ * instead of trusting client-provided roles.
  *
- * POST { kind: 'room' | 'live', id, userId }
+ * POST { kind: 'room' | 'live' | 'call', id, userId }
  *  room → { ok, exists, role, canModerate, blocked }
  *  live → { ok, exists, isLive, isHost, isParticipant }
+ *  call → { ok, reason?: 'banned' | 'blocked' | 'restricted' }
+ *         id = target user, userId = caller. ok=false when the target is
+ *         banned, a block exists in either direction, or the target has
+ *         restricted the caller.
  */
 export async function POST(req: Request) {
   if (req.headers.get('x-internal-secret') !== 'call-internal-relay-v1') {
@@ -56,6 +60,37 @@ export async function POST(req: Request) {
         isHost,
         isParticipant: !!participant,
       })
+    }
+
+    if (kind === 'call') {
+      // call gating: id = the user being called, userId = the caller
+      const target = await db.user.findUnique({ where: { id }, select: { id: true, blocked: true } })
+      if (!target || target.blocked) {
+        return NextResponse.json({ ok: false, reason: 'banned' })
+      }
+      const block = await db.userBlock.findFirst({
+        where: {
+          OR: [
+            { blockerId: userId, blockedId: id },
+            { blockerId: id, blockedId: userId },
+          ],
+        },
+        select: { id: true },
+      })
+      if (block) return NextResponse.json({ ok: false, reason: 'blocked' })
+      const [userAId, userBId] = id < userId ? [id, userId] : [userId, id]
+      const conv = await db.conversation.findUnique({
+        where: { userAId_userBId: { userAId, userBId } },
+        select: { id: true },
+      })
+      if (conv) {
+        const st = await db.conversationState.findUnique({
+          where: { conversationId_userId: { conversationId: conv.id, userId: id } },
+          select: { restricted: true },
+        })
+        if (st?.restricted) return NextResponse.json({ ok: false, reason: 'restricted' })
+      }
+      return NextResponse.json({ ok: true })
     }
 
     return NextResponse.json({ ok: false, error: 'bad_kind' }, { status: 400 })

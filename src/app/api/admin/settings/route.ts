@@ -27,7 +27,7 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json()
     const key = String(body.key || '')
-    const allowed = ['finance', 'rooms', 'live', 'ai', 'ads', 'auth', 'smtp', 'messaging']
+    const allowed = ['finance', 'rooms', 'live', 'calls', 'ai', 'ads', 'auth', 'smtp', 'messaging']
     if (!allowed.includes(key)) return NextResponse.json({ error: 'Unknown settings key' }, { status: 400 })
     const existing = await getSetting<Record<string, unknown>>(key, {})
     const merged = { ...existing, ...body.value }

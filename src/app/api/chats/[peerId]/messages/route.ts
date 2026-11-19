@@ -12,8 +12,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ peerId: string 
   if (!peer) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
   const conv = await getOrCreateConversation(me.id, peerId)
+  // per-user "clear chat": anything sent before my clearedBeforeAt stays hidden for me
+  const myState = await db.conversationState.findUnique({
+    where: { conversationId_userId: { conversationId: conv.id, userId: me.id } },
+    select: { clearedBeforeAt: true },
+  })
   const messages = await db.message.findMany({
-    where: { conversationId: conv.id },
+    where: {
+      conversationId: conv.id,
+      ...(myState?.clearedBeforeAt ? { createdAt: { gt: myState.clearedBeforeAt } } : {}),
+    },
     orderBy: { createdAt: 'asc' },
     take: 300,
   })

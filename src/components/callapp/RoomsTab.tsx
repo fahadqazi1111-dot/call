@@ -69,8 +69,8 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
 
   return (
     <div className="flex h-full flex-col">
-      <header className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}>
-        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>Voice Rooms</h1>
+      <header className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-5 pt-[max(env(safe-area-inset-top),16px)]'}`}>
+        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[30px]'}`}>Voice Rooms</h1>
         <button
           className="flex h-10 items-center gap-1.5 rounded-full bg-cbg px-3 text-[12px] font-bold text-cmut hover:text-cbrand"
           onClick={() => setShowHistory(true)}
@@ -87,19 +87,19 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
         </button>
       </header>
 
-      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll' : 'pb-[96px]'}`}>
+      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll' : 'pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]'}`}>
         <AdBanner placement="rooms" />
         {loading ? (
           <div className="flex justify-center pt-16">
             <Loader2 className="animate-spin text-cbrand" size={26} />
           </div>
         ) : rooms.length === 0 ? (
-          <div className="flex flex-col items-center pt-20 text-center">
+          <div className="flex flex-col items-center px-6 py-16 text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-cbrand">
               <Radio size={34} />
             </div>
             <p className="mt-5 text-lg font-bold text-cink">No live rooms</p>
-            <p className="mt-1 px-10 text-sm text-cmut">
+            <p className="mt-1 text-sm text-cmut">
               Create a free room and talk with friends, or host a paid room and earn real money from entries.
             </p>
             <button className="mt-5 rounded-full bg-brand-grad px-6 py-3 text-sm font-semibold text-white" onClick={() => setShowCreate(true)}>
@@ -228,7 +228,7 @@ function CreateRoomSheet({ onClose, onCreated }: { onClose: () => void; onCreate
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/40" onClick={onClose}>
-      <div className="rounded-t-[24px] border-t border-cline bg-white p-5 pb-10" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Create a voice room">
+      <div className="rounded-t-[24px] border-t border-cline bg-white p-5 pb-[max(env(safe-area-inset-bottom),20px)]" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Create a voice room">
         <h3 className="text-lg font-extrabold text-cink">Create a Voice Room</h3>
         <input
           className="mt-4 h-12 w-full rounded-[14px] bg-[#F0F3FA] px-4 text-[15px] outline-none placeholder:text-[#7A8499]"
@@ -238,7 +238,7 @@ function CreateRoomSheet({ onClose, onCreated }: { onClose: () => void; onCreate
           onChange={(e) => setTitle(e.target.value)}
         />
         <textarea
-          className="mt-3 h-20 w-full resize-none rounded-[14px] bg-[#F0F3FA] px-4 py-3 text-[14px] outline-none placeholder:text-[#7A8499]"
+          className="mt-3 min-h-[90px] w-full resize-none rounded-[14px] bg-[#F0F3FA] px-4 py-3 text-[14px] outline-none placeholder:text-[#7A8499]"
           placeholder="Description (optional)"
           value={description}
           maxLength={200}
@@ -262,13 +262,13 @@ function CreateRoomSheet({ onClose, onCreated }: { onClose: () => void; onCreate
         </div>
         {isPaid && (
           <div className="mt-3 flex items-center gap-3">
-            <label className="text-sm font-semibold text-cmut">Entry fee (USD, max ${maxFee}) — paid by joiners via card</label>
+            <label className="min-w-0 flex-1 text-sm font-semibold text-cmut">Entry fee (USD, max ${maxFee}) — paid by joiners via card</label>
             <input
               type="number"
               min={0.5}
               max={maxFee}
               step="0.5"
-              className="h-11 w-28 rounded-[12px] bg-[#F0F3FA] px-3 text-[15px] font-bold outline-none"
+              className="h-11 w-28 flex-none rounded-[12px] bg-[#F0F3FA] px-3 text-[15px] font-bold outline-none"
               value={entryFee}
               onChange={(e) => setEntryFee(e.target.value)}
             />

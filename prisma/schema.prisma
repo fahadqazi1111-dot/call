@@ -44,6 +44,11 @@ model User {
   giftReceived     GiftSend[]     @relation("GiftRecipient")
   adCampaigns      Ad[]           @relation("AdOwner")
   broadcastsSent   Broadcast[]    @relation("BroadcastSender")
+  convStates       ConversationState[] @relation("ConvStateOwner")
+  blocksIssued     UserBlock[]         @relation("BlocksIssued")
+  blocksReceived   UserBlock[]         @relation("BlocksReceived")
+  reportsFiled     UserReport[]        @relation("ReportsFiled")
+  reportsReceived  UserReport[]        @relation("ReportsReceived")
 }
 
 model Otp {
@@ -88,6 +93,7 @@ model Conversation {
   userB         User      @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
   lastMessageAt DateTime  @default(now())
   messages      Message[]
+  states        ConversationState[]
 
   @@unique([userAId, userBId])
 }
@@ -106,6 +112,60 @@ model Message {
   readAt         DateTime?
 
   @@index([conversationId, createdAt])
+}
+
+/**
+ * ==================== USER SAFETY (block / restrict / report) ====================
+ * Per-user conversation state (archive, mute, restrict, cleared history, hidden).
+ * UserBlock cuts messaging + calls both ways once either side blocks.
+ * UserReport feeds the admin moderation queue (App Store compliance).
+ */
+
+model ConversationState {
+  id              String       @id @default(cuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation("ConvStateOwner", fields: [userId], references: [id], onDelete: Cascade)
+  archived        Boolean      @default(false)
+  muted           Boolean      @default(false)
+  restricted      Boolean      @default(false)
+  clearedBeforeAt DateTime?
+  deleted         Boolean      @default(false)
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([conversationId, userId])
+}
+
+model UserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blocker   User     @relation("BlocksIssued", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model UserReport {
+  id         String    @id @default(cuid())
+  reporterId String
+  reporter   User      @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId String
+  reported   User      @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reason     String // spam | harassment | inappropriate | scam | other
+  details    String?
+  messageId  String?
+  status     String    @default("open") // open | resolved | dismissed
+  adminNote  String?
+  resolvedBy String?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([status])
+  @@index([reportedId])
 }
 
 model Call {

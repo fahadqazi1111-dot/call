@@ -61,8 +61,8 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
 
   return (
     <div className="flex h-full flex-col">
-      <header className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-6 pt-14'}`}>
-        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>Video Live</h1>
+      <header className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-5 pt-[max(env(safe-area-inset-top),16px)]'}`}>
+        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[30px]'}`}>Video Live</h1>
         <button
           className="flex h-11 items-center gap-1.5 rounded-full bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] px-4 text-[13px] font-bold text-white"
           onClick={() => setShowCreate(true)}
@@ -71,7 +71,7 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
         </button>
       </header>
 
-      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll' : 'pb-[96px]'}`}>
+      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll' : 'pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]'}`}>
         <AdBanner placement="rooms" />
         {loading ? (
           <div className="flex justify-center pt-16">

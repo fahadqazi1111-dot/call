@@ -26,6 +26,7 @@ import { AdsScreen } from './AdsScreen'
 import { NotificationCenter } from './NotificationCenter'
 import { AdminPanel } from './AdminPanel'
 import { BattleInviteBridge } from './BattleInviteUI'
+import { ConferenceInviteUI, ConferenceComposerSheet } from './ConferenceUI'
 import { useIsDesktop } from './useMediaQuery'
 
 let handlersBound = false
@@ -124,10 +125,12 @@ export function AppRoot() {
   /* ---------- desktop / tablet: WhatsApp-Web style shell ---------- */
   if (isDesktop && inMain) {
     return (
-      <div className="relative w-full">
+      <div className="relative h-[100dvh] w-full overflow-hidden">
         <DesktopShell />
         <OverlayHost />
         <BattleInviteBridge />
+        <ConferenceInviteUI />
+        <ConferenceComposerSheet />
         {call && <CallOverlay state={call} />}
         <Toaster position="bottom-right" richColors />
       </div>
@@ -174,6 +177,8 @@ export function AppRoot() {
 
       <OverlayHost />
       <BattleInviteBridge />
+      <ConferenceInviteUI />
+      <ConferenceComposerSheet />
       <DeepLinkHandler />
       {call && <CallOverlay state={call} />}
       <Toaster position="top-center" richColors />

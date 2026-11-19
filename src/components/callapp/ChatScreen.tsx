@@ -9,8 +9,21 @@ import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
 import { StaffTick } from './StaffTick'
 import { SponsoredAdCard, type ServedAd } from './GiftsUI'
-import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck } from 'lucide-react'
+import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
+import { toast } from 'sonner'
+import { PeerProfileSheet } from './PeerProfileSheet'
+import {
+  ChatActionDialogs,
+  ChatMenuItem,
+  MenuDivider,
+  MenuShell,
+  setChatArchived,
+  setChatMuted,
+  unblockUserAction,
+  unrestrictUserAction,
+  type PendingAction,
+} from './ChatActions'
 import type { Message } from '@/lib/callapp/types'
 
 const EMOJIS = ['😀', '😂', '🥰', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😭', '😮', '🤝']
@@ -28,6 +41,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const sendVoice = useApp((s) => s.sendVoice)
   const startCall = useApp((s) => s.startCall)
   const loadMessages = useApp((s) => s.loadMessages)
+  const blockedMap = useApp((s) => s.blockedIds)
 
   /** Resolve the peer from existing chats, falling back to contacts (fresh conversation). */
   const peer = useMemo(() => {
@@ -42,7 +56,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         phone: '',
         about: fromContact.about,
         avatarKey: fromContact.avatarKey,
-        avatarUrl: fromContact.avatarUrl,
+        avatarUrl: fromContact.avatarUrl ?? null,
         lastSeen: fromContact.lastSeen,
         role: fromContact.role,
         isOfficial: fromContact.isOfficial,
@@ -61,6 +75,17 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const recorder = useRecorder()
   const desk = variant === 'desktop'
   const official = !!peer?.isOfficial
+
+  /* safety state for this conversation (server flags + locally-tracked blocks) */
+  const chatRow = useMemo(() => chats.find((c) => c.peer.id === peerId), [chats, peerId])
+  const muted = !!chatRow?.muted
+  const blockedByMe = !!chatRow?.blocked || !!blockedMap[peerId]
+  const blockedByPeer = !!chatRow?.blockedMe
+  const composerLocked = blockedByMe || blockedByPeer
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [pending, setPending] = useState<PendingAction>(null)
+  const menuWrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (peer) {
@@ -88,16 +113,17 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
 
   const send = async () => {
     const text = draft.trim()
-    if (!text || sending) return
+    if (!text || sending || composerLocked) return
     setSending(true)
     try {
       emitTyping(false)
       setDraft('')
       setShowEmoji(false)
       await sendText(peerId, text)
-    } catch {
+    } catch (e) {
       setDraft(text)
-      alert('Message failed to send. Try again.')
+      // surfaces server rejections too (e.g. 403 "You blocked this contact…")
+      toast.error(e instanceof Error && e.message ? e.message : 'Message failed to send. Try again.')
     } finally {
       setSending(false)
       inputRef.current?.focus()
@@ -109,9 +135,18 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
     if (!res) return
     try {
       await sendVoice(peerId, res.blob, res.durationSec)
-    } catch {
-      alert('Voice message failed to upload. Try again.')
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : 'Voice message failed to upload. Try again.')
     }
+  }
+
+  /** archive/unarchive from the header menu — close the screen on success */
+  const onMenuArchive = () => {
+    setMenuOpen(false)
+    const next = !chatRow?.archived
+    void setChatArchived(peerId, next).then((ok) => {
+      if (ok) closeChat()
+    })
   }
 
   const groups = useMemo(() => {
@@ -188,7 +223,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       {/* header */}
       <header
         className={`relative z-10 flex items-center gap-2 border-b border-cline bg-white/95 backdrop-blur-md ${
-          desk ? 'px-4 py-2.5' : 'px-2 pb-3 pt-12'
+          desk ? 'px-4 py-2.5' : 'px-2 pb-2.5 pt-[max(env(safe-area-inset-top),10px)]'
         }`}
       >
         <button
@@ -200,16 +235,23 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         >
           <ChevronLeft size={22} />
         </button>
-        {peer.isOfficial ? <OfficialAvatar size={42} /> : <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</span>
-            <StaffTick role={peer.role} isOfficial={peer.isOfficial} />
-          </div>
-          <div className={`text-xs font-semibold ${typing ? 'text-cgreen' : online[peer.id] ? 'text-cgreen' : 'text-cmut'}`}>
-            {official ? 'Official account' : typing ? 'typing…' : lastSeenLabel(peer.lastSeen, online[peer.id])}
-          </div>
-        </div>
+        <button
+          type="button"
+          className="-mx-1 flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-1 py-1 text-left transition-colors hover:bg-cbg"
+          onClick={() => setProfileOpen(true)}
+          aria-label={`View ${peer.name}'s profile`}
+        >
+          {peer.isOfficial ? <OfficialAvatar size={42} /> : <Avatar name={peer.name} avatarKey={peer.avatarKey} size={42} online={online[peer.id]} src={peer.avatarUrl} />}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="truncate text-[16px] font-bold leading-5 text-cink">{peer.name}</span>
+              <StaffTick role={peer.role} isOfficial={peer.isOfficial} />
+            </span>
+            <span className={`block text-xs font-semibold ${typing ? 'text-cgreen' : online[peer.id] ? 'text-cgreen' : 'text-cmut'}`}>
+              {official ? 'Official account' : typing ? 'typing…' : lastSeenLabel(peer.lastSeen, online[peer.id])}
+            </span>
+          </span>
+        </button>
         {official ? (
           <span className="mr-1 flex items-center gap-1.5 rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand">
             <ShieldCheck size={13} /> Official
@@ -232,7 +274,107 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
             </button>
           </>
         )}
+        {/* three-dot chat menu — available for every conversation incl. official accounts */}
+        <div className="relative flex-none" ref={menuWrapRef}>
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-cink transition hover:bg-cbg"
+            aria-label="More options"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen((o) => !o)
+            }}
+          >
+            <MoreVertical size={20} />
+          </button>
+          <MenuShell open={menuOpen} onClose={() => setMenuOpen(false)} wrapRef={menuWrapRef}>
+            <ChatMenuItem
+              icon={<CircleUserRound size={17} />}
+              label="View profile"
+              onClick={() => {
+                setMenuOpen(false)
+                setProfileOpen(true)
+              }}
+            />
+            <ChatMenuItem
+              icon={muted ? <Bell size={17} /> : <BellOff size={17} />}
+              label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              onClick={() => {
+                setMenuOpen(false)
+                void setChatMuted(peerId, !muted)
+              }}
+            />
+            <ChatMenuItem
+              icon={<ShieldBan size={17} />}
+              label={chatRow?.restricted ? 'Unrestrict user' : 'Restrict user'}
+              onClick={() => {
+                setMenuOpen(false)
+                if (chatRow?.restricted) void unrestrictUserAction(peerId, peer.name)
+                else setPending('restrict')
+              }}
+            />
+            <ChatMenuItem
+              icon={<Ban size={17} />}
+              label={blockedByMe ? `Unblock ${peer.name}` : 'Block user'}
+              danger
+              onClick={() => {
+                setMenuOpen(false)
+                if (blockedByMe) void unblockUserAction(peerId, peer.name)
+                else setPending('block')
+              }}
+            />
+            <ChatMenuItem
+              icon={<Flag size={17} />}
+              label="Report user"
+              danger
+              onClick={() => {
+                setMenuOpen(false)
+                setPending('report')
+              }}
+            />
+            <MenuDivider />
+            <ChatMenuItem
+              icon={<Trash2 size={17} />}
+              label="Delete chat"
+              danger
+              onClick={() => {
+                setMenuOpen(false)
+                setPending('delete')
+              }}
+            />
+            <ChatMenuItem
+              icon={chatRow?.archived ? <ArchiveRestore size={17} /> : <Archive size={17} />}
+              label={chatRow?.archived ? 'Unarchive chat' : 'Archive chat'}
+              onClick={onMenuArchive}
+            />
+          </MenuShell>
+        </div>
       </header>
+
+      {/* blocked / blocked-by-peer banners — pinned above the message canvas */}
+      {blockedByMe && (
+        <div className="flex items-center gap-3 border-b border-cline bg-[#FEF2F2] px-4 py-3">
+          <Ban size={17} className="flex-none text-cred" aria-hidden="true" />
+          <p className="min-w-0 flex-1 text-[12.5px] font-semibold leading-5 text-cred">
+            You blocked {peer.name} — unblock to send messages
+          </p>
+          <button
+            type="button"
+            className="flex-none rounded-full border border-cred/40 px-3.5 py-1.5 text-[12px] font-bold text-cred transition hover:bg-cred/10"
+            onClick={() => void unblockUserAction(peer.id, peer.name)}
+          >
+            Unblock
+          </button>
+        </div>
+      )}
+      {!blockedByMe && blockedByPeer && (
+        <div className="flex items-center gap-3 border-b border-cline bg-csoft px-4 py-3">
+          <Ban size={17} className="flex-none text-cmut" aria-hidden="true" />
+          <p className="min-w-0 flex-1 text-[12.5px] font-semibold leading-5 text-cmut">You can&apos;t send messages to this contact</p>
+        </div>
+      )}
 
       {/* messages */}
       <div
@@ -255,17 +397,19 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
                 <p className="mt-1 px-12 text-sm text-cmut">
                   Messages and calls are peer-to-peer. Start the conversation — it&apos;s free.
                 </p>
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  {['Assalam-o-Alaikum!', 'Hey, free to talk?', 'Call me when free'].map((q) => (
-                    <button
-                      key={q}
-                      className="rounded-full bg-white px-4 py-2 text-sm font-medium text-cbrand shadow-sm"
-                      onClick={() => void sendText(peerId, q)}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+                {!composerLocked && (
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    {['Assalam-o-Alaikum!', 'Hey, free to talk?', 'Call me when free'].map((q) => (
+                      <button
+                        key={q}
+                        className="rounded-full bg-white px-4 py-2 text-sm font-medium text-cbrand shadow-sm"
+                        onClick={() => void sendText(peerId, q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -313,7 +457,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
 
       {/* composer / recorder */}
       {official ? (
-        <div className={`border-t border-cline bg-white px-4 ${desk ? 'pb-3.5 pt-3' : 'pb-[92px] pt-3'}`}>
+        <div className={`border-t border-cline bg-white px-4 ${desk ? 'pb-3.5 pt-3' : 'pb-[max(env(safe-area-inset-bottom),16px)] pt-3'}`}>
           <div className="flex items-center justify-center gap-2 rounded-[16px] bg-cbg px-4 py-3 text-center">
             <ShieldCheck size={16} className="flex-none text-cbrand" />
             <span className="text-[12.5px] font-medium leading-5 text-cmut">
@@ -322,7 +466,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           </div>
         </div>
       ) : recorder.status === 'recording' ? (
-        <div className={`flex items-center gap-3 border-t border-cline bg-white px-4 ${desk ? 'h-[84px] py-4' : 'h-[92px] pb-4'}`}>
+        <div className={`flex items-center gap-3 border-t border-cline bg-white px-4 ${desk ? 'h-[84px] py-4' : 'py-3.5 pb-[max(env(safe-area-inset-bottom),16px)]'}`}>
           <button
             className="flex h-12 w-12 flex-none items-center justify-center rounded-full text-cred hover:bg-[#FEF0EF]"
             aria-label="Cancel recording"
@@ -353,7 +497,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           </button>
         </div>
       ) : (
-        <div className={`border-t border-cline bg-white ${desk ? 'px-4 pb-3.5 pt-3' : 'px-4 pb-[92px] pt-3'}`}>
+        <div className={`border-t border-cline bg-white ${desk ? 'px-4 pb-3.5 pt-3' : 'px-4 pb-[max(env(safe-area-inset-bottom),14px)] pt-3'}`}>
           {showEmoji && (
             <div className="mb-2 flex flex-wrap gap-1.5 rounded-2xl bg-cbg p-3">
               {EMOJIS.map((e) => (
@@ -369,8 +513,9 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           )}
           <div className="flex items-center gap-2.5">
             <button
-              className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-csoft text-cbrand"
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-csoft text-cbrand disabled:opacity-50"
               aria-label="Emoji"
+              disabled={composerLocked}
               onClick={() => setShowEmoji((s) => !s)}
             >
               <Smile size={21} />
@@ -378,8 +523,9 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
             <div className="flex h-12 flex-1 items-center rounded-[24px] bg-[#F0F3FA] px-4">
               <input
                 ref={inputRef}
-                className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
-                placeholder="Type a message"
+                className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499] disabled:opacity-60"
+                placeholder={blockedByMe ? 'You blocked this contact' : blockedByPeer ? "You can't message this contact" : 'Type a message'}
+                disabled={composerLocked}
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => {
@@ -392,15 +538,16 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
               <button
                 className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.35)] disabled:opacity-60"
                 aria-label="Send message"
-                disabled={sending}
+                disabled={sending || composerLocked}
                 onClick={() => void send()}
               >
                 <Send size={21} />
               </button>
             ) : (
               <button
-                className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.35)]"
+                className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.35)] disabled:opacity-60"
                 aria-label="Record voice message"
+                disabled={composerLocked}
                 onClick={() => void recorder.start()}
               >
                 <Mic size={22} />
@@ -409,6 +556,8 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           </div>
         </div>
       )}
+      {profileOpen && <PeerProfileSheet peer={peer} desk={desk} onClose={() => setProfileOpen(false)} />}
+      <ChatActionDialogs peer={peer} pending={pending} onClose={() => setPending(null)} />
     </div>
   )
 }

@@ -28,6 +28,9 @@ async function main() {
       battleDurations: [60, 120, 180],
       allowBattles: true,
     },
+    calls: {
+      maxConferenceParticipants: 5, // group-call / conference cap
+    },
     ai: {
       provider: 'zai',
       defaultModel: 'default',

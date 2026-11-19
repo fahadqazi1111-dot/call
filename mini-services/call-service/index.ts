@@ -173,6 +173,14 @@ const io = new Server(httpServer, {
  *                      live:chat / live:react / live:gift / live:signal
  *                      live:ended / battle:* (relayed)
  *
+ * CONFERENCES (multi-party mesh calls, capacity enforced server-side):
+ *  conf:create {type, user}            conf:invite {confId, to[]}
+ *  conf:respond {confId, action, user} conf:leave {confId}
+ *  conf:signal {confId, to, data}      conf:media {confId, muted, cameraOn}
+ *  conf:sync {}                        conf:end {confId}
+ * Server -> conf:state {conf} / conf:incoming / conf:declined / conf:full /
+ *           conf:ended {confId} / conf:signal {confId, from, data} / conf:sync_state {conf|null}
+ *
  * NOTIFICATIONS:
  *  notify:new {to, payload} -> notify:incoming {payload}
  */
@@ -232,6 +240,107 @@ function broadcastViewers(liveId: string) {
 // battleId -> endsAt backup timer
 const battleTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+/* ================= conferences (multi-party calls) ================= */
+
+interface ConfParticipant {
+  userId: string
+  name: string
+  avatarKey: number
+  avatarUrl: string | null
+  muted: boolean
+  cameraOn: boolean
+  joinedAt: number
+}
+
+interface Conference {
+  id: string
+  hostId: string
+  type: 'voice' | 'video'
+  max: number
+  createdAt: number
+  participants: Map<string, ConfParticipant>
+}
+
+// confId -> conference
+const conferences = new Map<string, Conference>()
+// userId -> confId (one conference per user)
+const userConf = new Map<string, string>()
+// confId -> (userId -> invitedAt) — 30s TTL dedupe of ring spam
+const confInvited = new Map<string, Map<string, number>>()
+
+function confPayload(conf: Conference) {
+  return {
+    id: conf.id,
+    type: conf.type,
+    max: conf.max,
+    hostId: conf.hostId,
+    createdAt: conf.createdAt,
+    participants: Array.from(conf.participants.values()),
+  }
+}
+
+function broadcastConfState(confId: string) {
+  const conf = conferences.get(confId)
+  if (!conf) return
+  const payload = { conf: confPayload(conf) }
+  for (const uid of conf.participants.keys()) {
+    for (const id of socketsOf(uid)) io.to(id).emit('conf:state', payload)
+  }
+}
+
+/** Remove a participant; ends the conference when it empties or the host leaves. */
+function removeConfParticipant(userId: string, confId: string) {
+  const conf = conferences.get(confId)
+  if (!conf || !conf.participants.has(userId)) return
+  conf.participants.delete(userId)
+  userConf.delete(userId)
+  confInvited.get(confId)?.clear()
+  if (conf.participants.size === 0 || conf.hostId === userId) {
+    // notify remaining members BEFORE tearing down so clients can clean up
+    const remaining = Array.from(conf.participants.keys())
+    conferences.delete(confId)
+    confInvited.delete(confId)
+    for (const uid of remaining) {
+      userConf.delete(uid)
+      for (const id of socketsOf(uid)) io.to(id).emit('conf:ended', { confId })
+    }
+    return
+  }
+  broadcastConfState(confId)
+}
+
+/** Host-initiated destroy (conf:end). */
+function endConf(confId: string) {
+  const conf = conferences.get(confId)
+  if (!conf) return
+  const members = Array.from(conf.participants.keys())
+  conferences.delete(confId)
+  confInvited.delete(confId)
+  for (const uid of members) {
+    if (userConf.get(uid) === confId) userConf.delete(uid)
+    for (const id of socketsOf(uid)) io.to(id).emit('conf:ended', { confId })
+  }
+}
+
+/** Admin-configurable capacity, cached 30s; clamped 2..12, default 5. */
+let confMaxCache: { max: number; at: number } | null = null
+async function confMax(): Promise<number> {
+  if (confMaxCache && Date.now() - confMaxCache.at < 30_000) return confMaxCache.max
+  try {
+    const res = await fetch(`${VERIFY_URL}/api/internal/conference-config`, {
+      headers: { 'x-internal-secret': RELAY_SECRET },
+      signal: AbortSignal.timeout(3000),
+    })
+    if (res.ok) {
+      const data = (await res.json()) as { maxParticipants?: number }
+      const max = Math.max(2, Math.min(12, Math.round(Number(data.maxParticipants)) || 5))
+      confMaxCache = { max, at: Date.now() }
+      return max
+    }
+  } catch {}
+  return confMaxCache?.max ?? 5
+}
+
 io.on('connection', (socket: Socket) => {
   let myUserId: string | null = null
   const myRooms = new Set<string>()
@@ -263,7 +372,27 @@ io.on('connection', (socket: Socket) => {
       socket.emit('call:unavailable', { callId: p.callId })
       return
     }
-    for (const id of ids) io.to(id).emit('call:incoming', { callId: p.callId, from: p.from, type: p.type })
+    // SAFETY GATE — the caller may be blocked / restricted by the backend.
+    // The socket service has no DB access, so it verifies against the Next.js
+    // backend; a transient verify failure fails OPEN (call is allowed).
+    void (async () => {
+      try {
+        const res = await fetch(`${VERIFY_URL}/api/internal/verify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-internal-secret': RELAY_SECRET },
+          body: JSON.stringify({ kind: 'call', id: p.to, userId: p.from?.id || myUserId }),
+          signal: AbortSignal.timeout(4000),
+        })
+        if (res.ok) {
+          const v = (await res.json()) as { ok?: boolean; reason?: string }
+          if (v && v.ok === false) {
+            socket.emit('call:blocked', { callId: p.callId, reason: v.reason || 'blocked' })
+            return
+          }
+        }
+      } catch {}
+      for (const id of ids) io.to(id).emit('call:incoming', { callId: p.callId, from: p.from, type: p.type })
+    })()
   })
 
   socket.on('call:respond', (p: { callId: string; to: string; action: 'accept' | 'decline' | 'busy' }) => {
@@ -563,6 +692,160 @@ io.on('connection', (socket: Socket) => {
     battleTimers.delete(p.battleId)
   })
 
+  /* ================= conferences (multi-party, max enforced server-side) =================
+   *  conf:create  { type, user }                          -> conf:state { conf }
+   *  conf:invite  { confId, to: string[] }                -> conf:incoming { confId, from, inviterName, type, memberCount } | conf:full { confId, max }
+   *  conf:respond { confId, action, user }                -> conf:state (all) | conf:declined { confId, userId } | conf:full
+   *  conf:leave   { confId }                              -> conf:state | conf:ended { confId }
+   *  conf:signal  { confId, to, data:{kind,payload} }     -> conf:signal { confId, from, data } (verbatim relay)
+   *  conf:media   { confId, muted, cameraOn }             -> conf:state (all)
+   *  conf:sync    {}                                      -> conf:sync_state { conf | null }
+   *  conf:end     { confId }                              -> conf:ended { confId } (host only)
+   */
+
+  socket.on('conf:create', (p: { type: 'voice' | 'video'; user: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null } }) => {
+    if (!myUserId || !p?.type) return
+    // already in a conference? just re-send its state (idempotent)
+    const existingId = userConf.get(myUserId)
+    if (existingId) {
+      const conf = conferences.get(existingId)
+      if (conf) {
+        socket.emit('conf:state', { conf: confPayload(conf) })
+        return
+      }
+      userConf.delete(myUserId)
+    }
+    void (async () => {
+      const max = await confMax()
+      const conf: Conference = {
+        id: `cf${Date.now()}${Math.random().toString(36).slice(2, 8)}`,
+        hostId: myUserId,
+        type: p.type === 'video' ? 'video' : 'voice',
+        max,
+        createdAt: Date.now(),
+        participants: new Map(),
+      }
+      conf.participants.set(myUserId, {
+        userId: myUserId,
+        name: p.user?.name || names.get(myUserId) || 'Guest',
+        avatarKey: p.user?.avatarKey ?? 0,
+        avatarUrl: p.user?.avatarUrl ?? null,
+        muted: false,
+        cameraOn: conf.type === 'video',
+        joinedAt: Date.now(),
+      })
+      conferences.set(conf.id, conf)
+      userConf.set(myUserId, conf.id)
+      socket.emit('conf:state', { conf: confPayload(conf) })
+    })()
+  })
+
+  socket.on('conf:invite', (p: { confId: string; to: string[] }) => {
+    if (!myUserId || !p?.confId || !Array.isArray(p.to)) return
+    const conf = conferences.get(p.confId)
+    if (!conf || !conf.participants.has(myUserId)) return
+    const now = Date.now()
+    const invited = confInvited.get(conf.id) ?? new Map<string, number>()
+    confInvited.set(conf.id, invited)
+    // prune stale TTL entries
+    for (const [uid, ts] of Array.from(invited)) if (now - ts > 30_000) invited.delete(uid)
+    let fullNotified = false
+    for (const target of p.to) {
+      if (!target || target === myUserId || conf.participants.has(target)) continue
+      if (conf.participants.size >= conf.max) {
+        if (!fullNotified) {
+          socket.emit('conf:full', { confId: conf.id, max: conf.max })
+          fullNotified = true
+        }
+        continue
+      }
+      const ts = invited.get(target)
+      if (ts && now - ts < 30_000) continue // dedupe ring spam
+      invited.set(target, now)
+      const inviter = conf.participants.get(myUserId)
+      const payload = {
+        confId: conf.id,
+        from: inviter
+          ? { id: inviter.userId, name: inviter.name, avatarKey: inviter.avatarKey, avatarUrl: inviter.avatarUrl }
+          : { id: myUserId, name: names.get(myUserId) || 'Guest', avatarKey: 0, avatarUrl: null },
+        inviterName: inviter?.name || names.get(myUserId) || 'Someone',
+        type: conf.type,
+        memberCount: conf.participants.size,
+      }
+      for (const id of socketsOf(target)) io.to(id).emit('conf:incoming', payload)
+    }
+  })
+
+  socket.on('conf:respond', (p: { confId: string; action: 'accept' | 'decline'; user: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null } }) => {
+    if (!myUserId || !p?.confId || !p?.action) return
+    const conf = conferences.get(p.confId)
+    if (!conf) return
+    if (p.action === 'decline') {
+      for (const uid of conf.participants.keys()) {
+        for (const id of socketsOf(uid)) io.to(id).emit('conf:declined', { confId: conf.id, userId: myUserId })
+      }
+      return
+    }
+    if (conf.participants.has(myUserId)) {
+      socket.emit('conf:state', { conf: confPayload(conf) })
+      return
+    }
+    if (userConf.has(myUserId)) return // busy in another conference
+    // cap is re-checked at ACCEPT time — invites racing the limit lose
+    if (conf.participants.size >= conf.max) {
+      socket.emit('conf:full', { confId: conf.id, max: conf.max })
+      return
+    }
+    conf.participants.set(myUserId, {
+      userId: myUserId,
+      name: p.user?.name || names.get(myUserId) || 'Guest',
+      avatarKey: p.user?.avatarKey ?? 0,
+      avatarUrl: p.user?.avatarUrl ?? null,
+      muted: false,
+      cameraOn: conf.type === 'video',
+      joinedAt: Date.now(),
+    })
+    userConf.set(myUserId, conf.id)
+    broadcastConfState(conf.id)
+  })
+
+  socket.on('conf:leave', (p: { confId: string }) => {
+    if (!myUserId || !p?.confId) return
+    removeConfParticipant(myUserId, p.confId)
+  })
+
+  socket.on('conf:signal', (p: { confId: string; to: string; data: unknown }) => {
+    if (!p?.to || !myUserId || !p?.confId) return
+    // WebRTC signals may only flow between participants of the same conference
+    const conf = conferences.get(p.confId)
+    if (!conf || (!conf.participants.has(myUserId) && !conf.participants.has(p.to))) return
+    for (const id of socketsOf(p.to)) io.to(id).emit('conf:signal', { confId: p.confId, from: myUserId, data: p.data })
+  })
+
+  socket.on('conf:media', (p: { confId: string; muted?: boolean; cameraOn?: boolean }) => {
+    if (!myUserId || !p?.confId) return
+    const conf = conferences.get(p.confId)
+    const me = conf?.participants.get(myUserId)
+    if (!conf || !me) return
+    if (typeof p.muted === 'boolean') me.muted = p.muted
+    if (typeof p.cameraOn === 'boolean') me.cameraOn = p.cameraOn
+    broadcastConfState(conf.id)
+  })
+
+  socket.on('conf:sync', () => {
+    if (!myUserId) return
+    const confId = userConf.get(myUserId)
+    const conf = confId ? conferences.get(confId) : null
+    socket.emit('conf:sync_state', { conf: conf ? confPayload(conf) : null })
+  })
+
+  socket.on('conf:end', (p: { confId: string }) => {
+    if (!myUserId || !p?.confId) return
+    const conf = conferences.get(p.confId)
+    if (!conf || conf.hostId !== myUserId) return
+    endConf(conf.id)
+  })
+
   /* ================= disconnect cleanup ================= */
 
   socket.on('disconnect', () => {
@@ -595,6 +878,9 @@ io.on('connection', (socket: Socket) => {
     if (!set) return
     set.delete(socket.id)
     if (set.size === 0) {
+      // conference: only when the user's LAST socket drops (multi-device safe)
+      const confId = userConf.get(myUserId)
+      if (confId) removeConfParticipant(myUserId, confId)
       presence.delete(myUserId)
       io.emit('presence', { userId: myUserId, online: false })
     }

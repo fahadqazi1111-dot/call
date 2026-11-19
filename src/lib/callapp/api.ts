@@ -3,6 +3,7 @@ import type {
   AdItem,
   AdPackageItem,
   AdminPaymentRow,
+  AdminReportRow,
   AdminWithdrawalRow,
   AiConversationItem,
   AiMsg,
@@ -27,7 +28,9 @@ import type {
   Me,
   Message,
   PaymentInfo,
+  ReportReason,
   RoomChatMsg,
+  SafetyBlockedUser,
   StoryGroup,
   StoryViewer,
   VoiceRoomItem,
@@ -150,7 +153,11 @@ export const api = {
 
   /* ---------- chats ---------- */
   chats: () => request<{ chats: ChatSummary[] }>('/api/chats'),
+  chatsArchived: () => request<{ chats: ChatSummary[] }>('/api/chats?archived=1'),
   messages: (peerId: string) => request<{ peer: Me; messages: Message[] }>(`/api/chats/${peerId}/messages`),
+  deleteChat: (peerId: string) => request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'DELETE' }),
+  chatState: (peerId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute') =>
+    request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
   sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image'; content: string; duration?: number }) =>
     request<{ message: Message }>('/api/messages', { method: 'POST', body: JSON.stringify(payload) }),
   markRead: (peerId: string) =>
@@ -163,6 +170,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids }),
     }),
+
+  /* ---------- safety (block / restrict / report) ---------- */
+  safetyBlock: (userId: string) =>
+    request<{ ok: boolean }>('/api/safety/block', { method: 'POST', body: JSON.stringify({ userId }) }),
+  safetyUnblock: (userId: string) =>
+    request<{ ok: boolean }>('/api/safety/unblock', { method: 'POST', body: JSON.stringify({ userId }) }),
+  safetyList: () => request<{ blocked: SafetyBlockedUser[] }>('/api/safety'),
+  safetyRestrict: (userId: string) =>
+    request<{ ok: boolean }>('/api/safety/restrict', { method: 'POST', body: JSON.stringify({ userId }) }),
+  safetyUnrestrict: (userId: string) =>
+    request<{ ok: boolean }>('/api/safety/unrestrict', { method: 'POST', body: JSON.stringify({ userId }) }),
+  safetyReport: (payload: { userId: string; reason: ReportReason; details?: string; messageId?: string }) =>
+    request<{ ok: boolean; reportId: string }>('/api/safety/report', { method: 'POST', body: JSON.stringify(payload) }),
 
   /* ---------- contacts ---------- */
   contacts: () => request<{ contacts: ContactItem[] }>('/api/contacts'),
@@ -425,10 +445,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  aiSpeak: (text: string) => request<{ ok: boolean; mediaId: string; url: string }>('/api/ai/speak', {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  }),
+  aiSpeak: (text: string, init?: { signal?: AbortSignal }) =>
+    request<{ ok: boolean; mediaId: string; url: string }>('/api/ai/speak', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+      signal: init?.signal,
+    }),
   aiTranscribe: async (blob: Blob) => {
     const form = new FormData()
     form.append('file', blob, 'speech.webm')
@@ -501,10 +523,14 @@ export const api = {
     request<{
       rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean; entryFee: number }>,
       lives: Array<{ id: string; title: string; host: string; viewerCount: number; mode: string }>,
-      stories: Array<{ id: string; kind: string; user: string; privacy: string }>
+      stories: Array<{ id: string; kind: string; user: string; privacy: string }>,
+      reports: AdminReportRow[]
     }>('/api/admin/moderation'),
-  adminModerate: (type: 'room' | 'live' | 'story', id: string) =>
-    request<{ ok: boolean }>('/api/admin/moderation', { method: 'POST', body: JSON.stringify({ type, id }) }),
+  adminModerate: (type: 'room' | 'live' | 'story' | 'report', id: string, action?: 'resolve' | 'dismiss' | 'ban', note?: string) =>
+    request<{ ok: boolean }>('/api/admin/moderation', {
+      method: 'POST',
+      body: JSON.stringify({ type, id, action, note }),
+    }),
   adminBroadcasts: () => request<{ broadcasts: BroadcastRow[] }>('/api/admin/broadcast'),
   adminBroadcast: (title: string, body: string, senderId?: string) =>
     request<{ ok: boolean; broadcastId: string; delivered: number; failed: number; total: number; senderName: string }>('/api/admin/broadcast', {

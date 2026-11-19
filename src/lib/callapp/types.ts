@@ -45,6 +45,35 @@ export interface ChatSummary {
   } | null
   unread: number
   lastActivity: string
+  /* per-user conversation state + safety flags (set by GET /api/chats) */
+  archived?: boolean
+  muted?: boolean
+  restricted?: boolean
+  blocked?: boolean
+  blockedMe?: boolean
+}
+
+/* ================= safety (block / restrict / report) ================= */
+
+export interface SafetyBlockedUser {
+  id: string
+  name: string
+  username: string
+  avatarKey: number
+  avatarUrl: string | null
+}
+
+export type ReportReason = 'spam' | 'harassment' | 'inappropriate' | 'scam' | 'other'
+
+export interface AdminReportRow {
+  id: string
+  reporter: { id: string; name: string; username: string; blocked: boolean }
+  reported: { id: string; name: string; username: string; blocked: boolean }
+  reason: ReportReason
+  details: string | null
+  messageId: string | null
+  status: 'open' | 'resolved' | 'dismissed'
+  createdAt: string
 }
 
 export interface ContactItem {
@@ -79,6 +108,8 @@ export interface CallState {
   peerId: string
   peerName: string
   peerAvatarKey: number
+  /** true when I placed this call (controls like "Add people" are caller-only) */
+  isCaller: boolean
   muted: boolean
   cameraOn: boolean
   remoteCameraOn: boolean
@@ -301,6 +332,7 @@ export interface RoomUserState {
   role: 'host' | 'cohost' | 'speaker' | 'listener'
   muted: boolean
   handRaised: boolean
+  stageInvite?: boolean
 }
 
 export interface RoomState {

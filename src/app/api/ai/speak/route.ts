@@ -8,11 +8,35 @@ import { requireUser, getSetting, rateLimit } from '@/lib/callapp/server'
 
 const UPLOAD_DIR = '/home/z/my-project/db/uploads'
 
+/** Voices allowed by the TTS engine. 'kazi' (clear standard voice) is the
+ * default — far better for mixed English/Urdu content than the Chinese-accented
+ * warm voices like 'tongtong'. */
+const TTS_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo']
+const DEFAULT_VOICE = 'kazi'
+const MAX_TEXT_LEN = 1000
+
 function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/** POST { text } — spoken CALL reply (TTS), returns a playable media id. */
+/** Trim to maxLen chars at a sentence boundary (.!? followed by whitespace).
+ * Falls back to the last word boundary — never cuts mid-word when avoidable. */
+function truncateAtSentence(input: string, maxLen: number): string {
+  const text = input.trim()
+  if (text.length <= maxLen) return text
+  const clipped = text.slice(0, maxLen)
+  for (let i = clipped.length - 1; i >= Math.floor(maxLen * 0.5); i--) {
+    const ch = clipped[i]
+    const isSentenceEnd = ch === '.' || ch === '!' || ch === '?'
+    if (isSentenceEnd && (i === clipped.length - 1 || /\s/.test(clipped[i + 1] ?? ' '))) {
+      return clipped.slice(0, i + 1).trim()
+    }
+  }
+  const lastSpace = clipped.lastIndexOf(' ')
+  return (lastSpace > Math.floor(maxLen * 0.5) ? clipped.slice(0, lastSpace) : clipped).trim()
+}
+
+/** POST { text, voice?, speed? } — spoken CALL reply (TTS), returns a playable media id. */
 export async function POST(req: Request) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -21,8 +45,15 @@ export async function POST(req: Request) {
   }
   try {
     const body = await req.json()
-    const text = String(body.text || '').trim().slice(0, 1200)
+    const rawText = String(body.text || '').trim()
+    if (!rawText) return NextResponse.json({ error: 'Text required' }, { status: 400 })
+    const voiceRaw = String(body.voice ?? '')
+    const voice = TTS_VOICES.includes(voiceRaw) ? voiceRaw : DEFAULT_VOICE
+    const speedRaw = Number(body.speed)
+    const speed = Number.isFinite(speedRaw) ? Math.min(2, Math.max(0.5, speedRaw)) : 1
+    const text = truncateAtSentence(rawText, MAX_TEXT_LEN)
     if (!text) return NextResponse.json({ error: 'Text required' }, { status: 400 })
+
     const cfg = await getSetting<{ dailyVoiceLimit: number; voiceReplies: boolean }>('ai', {
       dailyVoiceLimit: 40,
       voiceReplies: true,
@@ -42,7 +73,8 @@ export async function POST(req: Request) {
     const zai = await ZAI.create()
     const response = await zai.audio.tts.create({
       input: text,
-      voice: 'tongtong',
+      voice,
+      speed,
       response_format: 'wav',
       stream: false,
     })

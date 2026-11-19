@@ -1,11 +1,14 @@
 'use client'
 
 import { create } from 'zustand'
+import { toast } from 'sonner'
 import { api, setToken as persistToken } from './api'
 import { socketClient } from './socket'
 import { callManager } from './callManager'
 import { roomManager } from './roomManager'
 import { liveManager, battleManager } from './liveManager'
+import { conferenceManager } from './conferenceManager'
+import type { ConferenceSnapshot, ConfInviteUser } from './conferenceTypes'
 import { soundKit } from './sound'
 import type {
   AppNotification,
@@ -77,6 +80,8 @@ interface AppState {
   online: Record<string, boolean>
   typing: Record<string, boolean>
   call: CallState | null
+  /** multi-party conference (mirrors conferenceManager state) */
+  conference: ConferenceSnapshot
   booted: boolean
   chatsLoaded: boolean
 
@@ -88,6 +93,8 @@ interface AppState {
   bankAccounts: BankAccountItem[]
   notifications: AppNotification[]
   unreadNotifs: number
+  /** userIds I blocked (safety) — refreshed by loadBlockedIds */
+  blockedIds: Record<string, boolean>
 
   setPhase: (p: AppPhase) => void
   setTab: (t: AppTab) => void
@@ -120,12 +127,28 @@ interface AppState {
   declineCall: () => void
   hangup: () => void
 
+  /* conferences */
+  startConference: (type: 'voice' | 'video') => Promise<void>
+  conferenceInvite: (users: ConfInviteUser[]) => void
+  confirmConferenceComposer: (users: ConfInviteUser[]) => Promise<void>
+  acceptConferenceInvite: () => Promise<void>
+  declineConferenceInvite: () => void
+  conferenceToggleMute: () => void
+  conferenceToggleCamera: () => Promise<void>
+  conferenceLeave: () => void
+  conferenceEnd: () => void
+  openConferenceComposer: (type: 'voice' | 'video') => void
+  closeConferenceComposer: () => void
+  upgradeCallToConference: () => Promise<void>
+
   loadWallet: () => Promise<void>
   withdraw: (amount: number, bankAccountId: string) => Promise<{ id: string; amount: number; status: string } | null>
 
   loadNotifications: () => Promise<void>
   markNotifs: (payload: { ids?: string[]; all?: boolean }) => Promise<void>
   pushNotification: (n: AppNotification) => void
+
+  loadBlockedIds: () => Promise<void>
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -143,6 +166,7 @@ export const useApp = create<AppState>((set, get) => ({
   online: {},
   typing: {},
   call: null,
+  conference: conferenceManager.snapshot(),
   booted: false,
   chatsLoaded: false,
 
@@ -154,6 +178,7 @@ export const useApp = create<AppState>((set, get) => ({
   bankAccounts: [],
   notifications: [],
   unreadNotifs: 0,
+  blockedIds: {},
 
   setPhase: (p) => set({ phase: p }),
   setTab: (t) => set({ tab: t }),
@@ -180,10 +205,12 @@ export const useApp = create<AppState>((set, get) => ({
       void get().loadWallet()
       socketClient.connect(user.id, user.name)
       callManager.setMe({ id: user.id, name: user.name })
+      conferenceManager.setMe({ id: user.id, name: user.name, avatarKey: user.avatarKey, avatarUrl: user.avatarUrl })
       void get().loadChats()
       void get().loadContacts()
       void get().loadCalls()
       void get().loadNotifications()
+      void get().loadBlockedIds()
       if ('Notification' in window && Notification.permission === 'default') {
         void Notification.requestPermission()
       }
@@ -201,11 +228,13 @@ export const useApp = create<AppState>((set, get) => ({
     set({ token, me: user, phase: 'main', staffView: staff ? 'console' : 'app' })
     socketClient.connect(user.id, user.name)
     callManager.setMe({ id: user.id, name: user.name })
+    conferenceManager.setMe({ id: user.id, name: user.name, avatarKey: user.avatarKey, avatarUrl: user.avatarUrl })
     void get().loadChats()
     void get().loadContacts()
     void get().loadCalls()
     void get().loadWallet()
     void get().loadNotifications()
+    void get().loadBlockedIds()
     if ('Notification' in window && Notification.permission === 'default') {
       void Notification.requestPermission()
     }
@@ -237,9 +266,11 @@ export const useApp = create<AppState>((set, get) => ({
 
   logout: () => {
     if (get().call) callManager.hangup()
+    conferenceManager.leave()
     void roomManager.leave(true)
     void liveManager.leave(true)
     callManager.setMe(null)
+    conferenceManager.setMe(null)
     socketClient.disconnectAll()
     persistToken(null)
     saveSession(null)
@@ -261,6 +292,7 @@ export const useApp = create<AppState>((set, get) => ({
       bankAccounts: [],
       notifications: [],
       unreadNotifs: 0,
+      blockedIds: {},
       overlay: null,
       staffView: 'app',
     })
@@ -270,6 +302,15 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const { chats } = await api.chats()
       set({ chats, chatsLoaded: true })
+    } catch {}
+  },
+
+  loadBlockedIds: async () => {
+    try {
+      const { blocked } = await api.safetyList()
+      const map: Record<string, boolean> = {}
+      for (const u of blocked) map[u.id] = true
+      set({ blockedIds: map })
     } catch {}
   },
 
@@ -369,9 +410,17 @@ export const useApp = create<AppState>((set, get) => ({
       return { messages: msgs, chats }
     })
     if (!st.chats.some((c) => c.peer.id === fromId)) void get().loadChats()
-    soundKit.pop(false)
-    const peer = st.chats.find((c) => c.peer.id === fromId)?.peer
-    notifyDesktop(peer?.name ?? 'New message', message.type === 'text' ? message.content : message.type === 'voice' ? 'Voice message' : 'Call log')
+    /* MUTED / BLOCKED SUPPRESSION — WhatsApp behavior: the unread badge above
+     * still increments silently, but muted chats (and blocked contacts, which
+     * the server rejects anyway — guarded here too) never play the received
+     * sound and never bump a desktop notification. */
+    const chatRow = st.chats.find((c) => c.peer.id === fromId)
+    const silent = !!chatRow?.muted || !!chatRow?.blockedMe || !!st.blockedIds[fromId]
+    if (!silent) {
+      soundKit.pop(false)
+      const peer = chatRow?.peer
+      notifyDesktop(peer?.name ?? 'New message', message.type === 'text' ? message.content : message.type === 'voice' ? 'Voice message' : 'Call log')
+    }
     // DELIVERY RECEIPT — acknowledge to the sender instantly + persist server-side
     socketClient.emit('msg:delivered', { to: fromId, ids: [message.id] })
     void api.markDelivered([message.id]).catch(() => {})
@@ -423,6 +472,24 @@ export const useApp = create<AppState>((set, get) => ({
   acceptCall: () => void callManager.acceptCall(),
   declineCall: () => callManager.declineCall(),
   hangup: () => callManager.hangup(),
+
+  /* conferences */
+  startConference: (type) => conferenceManager.createConference(type),
+  conferenceInvite: (users) => conferenceManager.invite(users),
+  confirmConferenceComposer: async (users) => {
+    const conf = conferenceManager.snapshot().conf
+    if (conf) conferenceManager.invite(users)
+    else await conferenceManager.createAndInvite(get().conference.composerOpen ?? 'voice', users)
+  },
+  acceptConferenceInvite: () => conferenceManager.acceptInvite(),
+  declineConferenceInvite: () => conferenceManager.declineInvite(),
+  conferenceToggleMute: () => conferenceManager.toggleMute(),
+  conferenceToggleCamera: () => conferenceManager.toggleCamera(),
+  conferenceLeave: () => conferenceManager.leave(),
+  conferenceEnd: () => conferenceManager.endConf(),
+  openConferenceComposer: (type) => conferenceManager.openComposer(type),
+  closeConferenceComposer: () => conferenceManager.closeComposer(),
+  upgradeCallToConference: () => conferenceManager.upgradeFromCall(),
 
   loadWallet: async () => {
     try {
@@ -482,6 +549,8 @@ export function bindGlobalSocketHandlers() {
   roomManager.bindSocket()
   liveManager.bindSocket()
   battleManager.bindSocket()
+  conferenceManager.bindSocket()
+  conferenceManager.setToast((msg) => toast.info(msg))
   callManager.setCallMessageHandler((peerId, message) => {
     // Append the call summary to my own chat and push it to the peer in realtime.
     const msg = message as Message
@@ -543,4 +612,5 @@ export function bindGlobalSocketHandlers() {
     if (me) socketClient.emit('register', { userId: me.id, name: me.name })
   })
   callManager.subscribe((s) => useApp.setState({ call: s }))
+  conferenceManager.subscribe((s) => useApp.setState({ conference: s }))
 }

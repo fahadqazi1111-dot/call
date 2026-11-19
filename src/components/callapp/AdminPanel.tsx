@@ -6,14 +6,14 @@ import {
   X, Users, Gift, Banknote, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
-  Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check,
+  Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { StaffTick } from './StaffTick'
-import type { AdminPaymentRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
+import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'broadcast' | 'smtp'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'broadcast' | 'smtp'
 
 interface StaffMember {
   id: string
@@ -75,6 +75,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
       { id: 'withdrawals', label: 'Withdrawals', Icon: Landmark, adminOnly: false },
       { id: 'moderation', label: 'Moderation', Icon: Radio, adminOnly: false },
       { id: 'ai', label: 'CALL AI', Icon: Bot, adminOnly: false },
+      { id: 'calls', label: 'Calls & Conference', Icon: PhoneCall, adminOnly: true },
       { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
       { id: 'broadcast', label: 'Messages', Icon: Megaphone, adminOnly: true },
       { id: 'smtp', label: 'Email / SMTP', Icon: Mail, adminOnly: true },
@@ -142,6 +143,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'withdrawals' && <WithdrawalsSection />}
           {section === 'moderation' && <ModerationSection />}
           {section === 'ai' && <AiSection />}
+          {section === 'calls' && isAdmin && <CallsSection />}
           {section === 'ads' && <AdsSection />}
           {section === 'broadcast' && isAdmin && <BroadcastSection />}
           {section === 'smtp' && isAdmin && <SmtpSection />}
@@ -275,7 +277,7 @@ function UsersSection() {
       <div className="flex items-center gap-2 pb-3">
         <h3 className="flex-1 text-[15px] font-extrabold text-cink">Users</h3>
         <input
-          className="h-10 w-48 rounded-[12px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
+          className="h-10 w-48 min-w-0 rounded-[12px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
           placeholder="Search name/phone/email/@user"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -700,7 +702,7 @@ function WithdrawalsSection() {
 }
 
 function ModerationSection() {
-  const [data, setData] = useState<{ rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean; entryFee: number }>; lives: Array<{ id: string; title: string; host: string; viewerCount: number; mode: string }>; stories: Array<{ id: string; kind: string; user: string; privacy: string }> } | null>(null)
+  const [data, setData] = useState<{ rooms: Array<{ id: string; title: string; host: string; participants: number; isPaid: boolean; entryFee: number }>; lives: Array<{ id: string; title: string; host: string; viewerCount: number; mode: string }>; stories: Array<{ id: string; kind: string; user: string; privacy: string }>; reports: AdminReportRow[] } | null>(null)
   const load = async () => {
     try {
       setData(await api.adminModeration())
@@ -713,9 +715,57 @@ function ModerationSection() {
     await api.adminModerate(type, id)
     queueMicrotask(() => void load())
   }
+  const reportAct = async (id: string, action: 'ban' | 'resolve' | 'dismiss') => {
+    try {
+      await api.adminModerate('report', id, action)
+      queueMicrotask(() => void load())
+    } catch (e) {
+      toast((e as Error).message)
+    }
+  }
   if (!data) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
   return (
     <div className="space-y-5">
+      <div>
+        <h3 className="pb-2 text-[15px] font-extrabold text-cink">User reports</h3>
+        {data.reports.length === 0 && <p className="text-[12px] text-cmut">No reports</p>}
+        {data.reports.map((r) => (
+          <div key={r.id} className="mb-2 rounded-[14px] border border-cline px-3.5 py-2.5">
+            <div className="flex items-center gap-3">
+              <Flag size={16} className="shrink-0 text-cred" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-bold text-cink">
+                  {r.reporter.name} <span className="font-normal text-cmut">({r.reporter.username})</span>
+                  <span className="mx-1.5 text-cmut">→</span>
+                  {r.reported.name} <span className="font-normal text-cmut">({r.reported.username})</span>
+                </p>
+                <p className="mt-1 flex items-center gap-2 text-[11px] text-cmut">
+                  <span className="rounded-full bg-csoft px-2 py-0.5 text-[10px] font-bold capitalize text-cbrand">{r.reason}</span>
+                  {new Date(r.createdAt).toLocaleString()}
+                  {r.status !== 'open' ? ` · ${r.status}` : ''}
+                </p>
+              </div>
+            </div>
+            {r.details && <p className="mt-1.5 line-clamp-2 px-0.5 text-[11.5px] leading-[17px] text-cmut">{r.details}</p>}
+            {r.reported.blocked && (
+              <p className="mt-1.5 px-0.5 text-[11px] font-bold text-cred">This user is already banned</p>
+            )}
+            {r.status === 'open' && (
+              <div className="mt-2 flex gap-2">
+                <button className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred" onClick={() => void reportAct(r.id, 'ban')}>
+                  Ban user
+                </button>
+                <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => void reportAct(r.id, 'resolve')}>
+                  Resolve
+                </button>
+                <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cmut" onClick={() => void reportAct(r.id, 'dismiss')}>
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
       <div>
         <h3 className="pb-2 text-[15px] font-extrabold text-cink">Live voice rooms</h3>
         {data.rooms.length === 0 && <p className="text-[12px] text-cmut">None live</p>}
@@ -862,6 +912,78 @@ function AiSection() {
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+function CallsSection() {
+  const [maxParticipants, setMaxParticipants] = useState<number>(5)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const load = async () => {
+    try {
+      const res = await api.adminSettings()
+      const calls = (res.settings?.calls ?? {}) as { maxConferenceParticipants?: number }
+      setMaxParticipants(Number(calls.maxConferenceParticipants ?? 5))
+    } catch {}
+    setLoading(false)
+  }
+  useEffect(() => {
+    queueMicrotask(() => void load())
+  }, [])
+  const save = async () => {
+    setSaving(true)
+    try {
+      const clamped = Math.min(12, Math.max(2, Math.floor(maxParticipants || 5)))
+      await api.adminSaveSettings('calls', { maxConferenceParticipants: clamped })
+      setMaxParticipants(clamped)
+      alert('Conference settings saved — new conferences will use this limit')
+    } catch (e) {
+      alert((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+  if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+  return (
+    <div className="max-w-xl">
+      <h3 className="pb-1 text-[15px] font-extrabold text-cink">Calls &amp; Conference configuration</h3>
+      <p className="pb-4 text-[12px] text-cmut">
+        Conference calls use an encrypted peer-to-peer mesh. The participant limit is enforced by the
+        call server — when the limit is reached, additional invitees are refused with a “conference is
+        full” message.
+      </p>
+      <label className="block">
+        <span className="text-[12px] font-semibold text-cmut">Maximum conference participants (2–12, default 5)</span>
+        <input
+          type="number"
+          min={2}
+          max={12}
+          className="mt-1 h-11 w-full rounded-[12px] bg-[#F0F3FA] px-3 text-[14px] outline-none"
+          value={maxParticipants}
+          onChange={(e) => setMaxParticipants(Number(e.target.value))}
+        />
+      </label>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {[3, 5, 8, 10].map((n) => (
+          <button
+            key={n}
+            className={`rounded-full px-4 py-2 text-[12.5px] font-bold transition ${
+              maxParticipants === n ? 'bg-cbrand text-white' : 'bg-csoft text-cmut hover:bg-[#e2e9fb]'
+            }`}
+            onClick={() => setMaxParticipants(n)}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <button
+        className="mt-4 h-12 rounded-[14px] bg-brand-grad px-8 text-[14px] font-bold text-white disabled:opacity-50"
+        disabled={saving}
+        onClick={() => void save()}
+      >
+        {saving ? <Loader2 className="mx-auto animate-spin" size={18} /> : 'Save conference settings'}
+      </button>
     </div>
   )
 }
@@ -1710,7 +1832,7 @@ function SmtpSection() {
         </p>
         <div className="flex flex-col gap-2.5 sm:flex-row">
           <input
-            className="h-11 flex-1 rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] outline-none placeholder:text-[#8a94a8]"
+            className="h-11 min-w-0 flex-1 rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] outline-none placeholder:text-[#8a94a8]"
             placeholder="Send test to… (default: SMTP username)"
             value={testTo}
             onChange={(e) => setTestTo(e.target.value)}

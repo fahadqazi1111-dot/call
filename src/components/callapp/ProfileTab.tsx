@@ -305,7 +305,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
 
   return (
     <div
-      className={`app-scroll h-full overflow-y-auto ${desk ? 'desk-scroll w-full pb-10' : 'pb-[100px]'}`}
+      className={`app-scroll h-full overflow-y-auto ${desk ? 'desk-scroll w-full pb-10' : 'pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]'}`}
     >
       {/* ============ hero banner ============ */}
       <div

@@ -41,6 +41,7 @@ class SocketClient {
       'call:signal',
       'call:end',
       'call:unavailable',
+      'call:blocked',
       'msg:incoming',
       'msg:read',
       'msg:delivered',
@@ -73,6 +74,14 @@ class SocketClient {
       'battle:score',
       'battle:timeup',
       'battle:ended',
+      // conferences (multi-party mesh calls)
+      'conf:state',
+      'conf:incoming',
+      'conf:signal',
+      'conf:ended',
+      'conf:full',
+      'conf:declined',
+      'conf:sync_state',
     ]) {
       s.on(ev, (payload: unknown) => this.dispatch(ev, payload))
     }

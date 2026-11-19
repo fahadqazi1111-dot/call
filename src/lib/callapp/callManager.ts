@@ -49,6 +49,10 @@ class CallManager {
   private remoteStream: MediaStream | null = null
   private me: { id: string; name: string } | null = null
   private pendingOffer: RTCSessionDescriptionInit | null = null
+  /** ICE candidates that arrived before a peer/remote-description existed — flushed after SRD */
+  private pendingIce: RTCIceCandidateInit[] = []
+  /** one ICE-restart recovery attempt per call (caller side) */
+  private restartAttempted = false
   private endReason: string | undefined
   private listeners = new Set<Listener>()
   private toastFn: ((msg: string) => void) | null = null
@@ -92,6 +96,7 @@ class CallManager {
       peerId: this.peerId ?? '',
       peerName: this.peerName,
       peerAvatarKey: this.peerAvatarKey,
+      isCaller: this.isCaller,
       muted: this.muted,
       cameraOn: this.cameraOn,
       remoteCameraOn: this.remoteCameraOn,
@@ -151,6 +156,8 @@ class CallManager {
     this.startedAt = null
     this.endReason = undefined
     this.pendingOffer = null
+    this.pendingIce = []
+    this.restartAttempted = false
     try {
       this.localStream = await this.getMedia(this.cameraOn)
     } catch {
@@ -196,6 +203,8 @@ class CallManager {
     this.startedAt = null
     this.endReason = undefined
     this.pendingOffer = null
+    this.pendingIce = []
+    this.restartAttempted = false
     this.phase = 'incoming'
     this.emit()
     soundKit.startRingtone()
@@ -284,13 +293,14 @@ class CallManager {
           this.emit()
         }
       } else if (st === 'failed') {
-        this.finish('no-answer', 'Connection failed')
+        this.handleConnectionFailed()
       } else if (st === 'disconnected') {
+        // extended grace: transient network blips usually self-heal
         window.setTimeout(() => {
-          if (pc.connectionState === 'disconnected') {
-            this.finish(this.phase === 'active' ? 'answered' : 'no-answer', 'Connection lost')
+          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            this.handleConnectionFailed('Connection lost')
           }
-        }, 4000)
+        }, 8000)
       }
     }
 
@@ -314,6 +324,7 @@ class CallManager {
   private async answerOffer(offer: RTCSessionDescriptionInit) {
     if (!this.pc || !this.peerId) return
     await this.pc.setRemoteDescription(new RTCSessionDescription(offer))
+    this.flushPendingIce()
     const ts = this.pc.getTransceivers()
     const audioTrack = this.localStream?.getAudioTracks()[0]
     const videoTrack = this.localStream?.getVideoTracks()[0]
@@ -364,20 +375,83 @@ class CallManager {
     if (p.callId !== this.callId) return
     const { kind, payload } = p.data
     if (kind === 'offer') {
-      if (this.pc && this.pc.signalingState !== 'closed') {
+      if (this.pc && this.pc.signalingState === 'stable') {
         await this.answerOffer(payload as RTCSessionDescriptionInit)
+      } else if (this.pc && this.pc.signalingState === 'have-local-offer') {
+        // glare guard (renegotiation collision): queue, process after our answer lands
+        this.pendingOffer = payload as RTCSessionDescriptionInit
       } else {
         this.pendingOffer = payload as RTCSessionDescriptionInit
       }
     } else if (kind === 'answer' && this.isCaller && this.pc) {
       if (this.pc.signalingState === 'have-local-offer') {
         await this.pc.setRemoteDescription(new RTCSessionDescription(payload as RTCSessionDescriptionInit))
+        this.flushPendingIce()
+        // a queued renegotiation offer (e.g. callee upgraded to video mid-answer) — answer it now
+        const queued = this.pendingOffer
+        if (queued) {
+          this.pendingOffer = null
+          if ((this.pc.signalingState as RTCSignalingState) === 'stable') {
+            await this.answerOffer(queued)
+          }
+        }
       }
-    } else if (kind === 'ice' && this.pc && payload) {
-      try {
-        await this.pc.addIceCandidate(new RTCIceCandidate(payload as RTCIceCandidateInit))
-      } catch {}
+    } else if (kind === 'ice' && payload) {
+      if (this.pc && this.pc.remoteDescription) {
+        try {
+          await this.pc.addIceCandidate(new RTCIceCandidate(payload as RTCIceCandidateInit))
+        } catch {}
+      } else {
+        // arrived before setupPeer / before the remote description — buffer (liveManager pattern)
+        this.pendingIce.push(payload as RTCIceCandidateInit)
+      }
     }
+  }
+
+  /** Flush ICE candidates buffered before the remote description was set. */
+  private flushPendingIce() {
+    if (!this.pc || !this.pendingIce.length) return
+    const queued = this.pendingIce
+    this.pendingIce = []
+    void (async () => {
+      for (const c of queued) {
+        try {
+          await this.pc?.addIceCandidate(new RTCIceCandidate(c))
+        } catch {}
+      }
+    })()
+  }
+
+  /**
+   * Recovery path for failed/disconnected peers: the CALLER attempts ONE
+   * ICE restart (fresh offer with iceRestart); the callee waits for that
+   * offer and answers it. If recovery does not land in time the call ends.
+   */
+  private handleConnectionFailed(reason = 'Connection failed') {
+    const attemptRestart = this.isCaller && !this.restartAttempted && !!this.pc
+    if (attemptRestart) {
+      this.restartAttempted = true
+      void this.iceRestart()
+    }
+    window.setTimeout(() => {
+      const st = this.pc?.connectionState
+      if (st === 'failed' || st === 'disconnected') {
+        this.finish(this.phase === 'active' ? 'answered' : 'no-answer', reason)
+      }
+    }, attemptRestart ? 9000 : 6000)
+  }
+
+  private async iceRestart() {
+    if (!this.pc || !this.peerId || !this.callId) return
+    try {
+      const offer = await this.pc.createOffer({ iceRestart: true })
+      await this.pc.setLocalDescription(offer)
+      socketClient.emit('call:signal', {
+        to: this.peerId,
+        callId: this.callId,
+        data: { kind: 'offer', payload: offer },
+      })
+    } catch {}
   }
 
   handleEnd(p: { callId: string; reason?: string }) {
@@ -451,6 +525,93 @@ class CallManager {
     if (sender) await sender.replaceTrack(videoTrack!)
     this.cameraOn = true
     this.emit()
+  }
+
+  /** Flip to the other camera (front/back) mid-call and hot-swap the track. */
+  async flipCamera() {
+    if (!this.pc || !this.cameraOn) return
+    const current = this.localStream?.getVideoTracks()[0]
+    const facing = current?.getSettings().facingMode === 'environment' ? 'user' : 'environment'
+    try {
+      const next = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      const track = next.getVideoTracks()[0]
+      this.localStream?.addTrack(track)
+      const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(track)
+      if (current) {
+        current.stop()
+        this.localStream?.removeTrack(current)
+      }
+      this.emit()
+    } catch {
+      this.toast('Could not switch camera')
+    }
+  }
+
+  /**
+   * Switch a voice call to video mid-call. The caller's pre-negotiated
+   * sendrecv video m-line just needs a track; a callee must renegotiate
+   * (the side ADDING video always initiates the renegotiation offer).
+   */
+  async enableVideo() {
+    if (!this.pc || this.cameraOn) return
+    let videoTrack: MediaStreamTrack | null = null
+    try {
+      const cam = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      videoTrack = cam.getVideoTracks()[0]
+      this.localStream?.addTrack(videoTrack)
+    } catch {
+      this.toast('Camera not available')
+      return
+    }
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video')
+    const vt = this.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video')
+    if (sender) await sender.replaceTrack(videoTrack)
+    else if (vt) await vt.sender.replaceTrack(videoTrack)
+    if (vt && !this.isCaller) {
+      // callee answered recvonly — bump direction and offer a renegotiation
+      vt.direction = 'sendrecv'
+      if (this.pc.signalingState === 'stable' && this.peerId && this.callId) {
+        try {
+          const offer = await this.pc.createOffer()
+          await this.pc.setLocalDescription(offer)
+          socketClient.emit('call:signal', {
+            to: this.peerId,
+            callId: this.callId,
+            data: { kind: 'offer', payload: offer },
+          })
+        } catch {}
+      }
+    }
+    this.type = 'video'
+    this.cameraOn = true
+    this.emit()
+  }
+
+  /** Live peer connection (CallOverlay polls getStats() from it). */
+  getActivePc(): RTCPeerConnection | null {
+    return this.pc
+  }
+
+  /**
+   * Hand my local stream to the conference manager during a 1:1 -> group
+   * upgrade. Clears ownership so the post-call reset() will NOT stop the
+   * tracks that now belong to the conference.
+   */
+  detachLocalStream(): MediaStream | null {
+    const s = this.localStream
+    this.localStream = null
+    return s
+  }
+
+  getLocalStream(): MediaStream | null {
+    return this.localStream
   }
 
   // ---------- lifecycle ----------
@@ -530,6 +691,8 @@ class CallManager {
     this.startedAt = null
     this.endReason = undefined
     this.pendingOffer = null
+    this.pendingIce = []
+    this.restartAttempted = false
     this.emit()
   }
 

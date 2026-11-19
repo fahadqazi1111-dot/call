@@ -19,7 +19,7 @@ export function TabBar() {
 
   return (
     <nav
-      className="absolute bottom-0 left-0 right-0 z-30 flex h-[84px] items-start justify-around border-t border-cline bg-white/95 pb-3 backdrop-blur-md"
+      className="absolute bottom-0 left-0 right-0 z-30 flex items-start justify-around border-t border-cline bg-white/95 pb-[max(env(safe-area-inset-bottom),12px)] backdrop-blur-md"
       aria-label="Main navigation"
     >
       {TABS.map(({ key, label, Icon }) => {
@@ -28,7 +28,7 @@ export function TabBar() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`relative flex w-1/6 flex-col items-center gap-1 pt-3 text-[10px] font-semibold transition-colors ${
+            className={`relative flex w-1/6 flex-col items-center gap-1 pt-2.5 pb-1 text-[10px] font-semibold transition-colors ${
               active ? 'text-cbrand' : 'text-[#7A8499]'
             }`}
             aria-current={active ? 'page' : undefined}

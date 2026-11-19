@@ -615,13 +615,13 @@ export function RoomScreen({
           </div>
           <div className="flex items-center gap-2 px-4 pb-6 pt-2">
             <input
-              className="h-11 flex-1 rounded-full bg-white/10 px-4 text-sm outline-none placeholder:text-white/40"
+              className="h-11 min-w-0 flex-1 rounded-full bg-white/10 px-4 text-sm outline-none placeholder:text-white/40"
               placeholder="Message the room…"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void sendChat()}
             />
-            <button className="flex h-11 w-11 items-center justify-center rounded-full bg-cbrand" onClick={() => void sendChat()}>
+            <button className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-cbrand" onClick={() => void sendChat()}>
               <Send size={18} />
             </button>
           </div>

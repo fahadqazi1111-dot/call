@@ -3,11 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   X, Camera, Type, Mic, Video, ImagePlus, Send, Sparkles, Sticker,
-  Loader2, CheckCircle2, Globe, Users as UsersIcon, Play, Square,
+  Loader2, CheckCircle2, Globe, Users as UsersIcon, Play, Square, SwitchCamera,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
-import { FACE_FILTERS, openCameraWithFilters, type FaceFilterHandle, type FilterId } from '@/lib/callapp/faceFilters'
 import { VOICE_FX, createFxStream, previewFxOnBlob, type VoiceEffect } from '@/lib/callapp/voiceFx'
 import { splitVideoForStory, type StoryClip } from '@/lib/callapp/videoSplit'
 import type { StoryOverlay } from '@/lib/callapp/types'
@@ -17,9 +16,9 @@ const BG_COLORS = ['#2F5BE0', '#7B3FE4', '#E1306C', '#0EA5A6', '#F59E0B', '#1118
 const STICKERS = ['😀', '😂', '😍', '🔥', '💜', '✨', '🎉', '🌟', '👍', '🤣', '🌹', '💯', '😎', '🌈', '⭐', '❤️']
 
 /**
- * Story composer: photo (camera w/ face filters or upload), video (auto-split
- * into sequential clips), text, voice (with voice FX). Overlays (text +
- * stickers), preview, privacy, then publish as one story group.
+ * Story composer: photo (camera or upload), video (auto-split into sequential
+ * clips), text, voice (with voice FX). Overlays (text + stickers), preview,
+ * privacy, then publish as one story group.
  */
 export function StoryComposer({ onClose }: { onClose: () => void }) {
   const me = useApp((s) => s.me)
@@ -30,13 +29,11 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
   const [splitProgress, setSplitProgress] = useState('')
 
-  /* photo */
-  const [filter, setFilter] = useState<FilterId>('none')
+  /* photo camera */
   const [camReady, setCamReady] = useState(false)
-  const [hasDetector, setHasDetector] = useState(false)
-  const camRef = useRef<HTMLVideoElement>(null)
-  const camCanvasRef = useRef<HTMLCanvasElement>(null)
-  const engineRef = useRef<FaceFilterHandle | null>(null)
+  const [facing, setFacing] = useState<'user' | 'environment'>('user')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const [captured, setCaptured] = useState<Blob | null>(null)
 
   /* video */
@@ -62,38 +59,101 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
   const [showOverlayPicker, setShowOverlayPicker] = useState(false)
   const [overlayText, setOverlayText] = useState('')
 
-  /* ---------- camera lifecycle ---------- */
+  /* ---------- photo camera lifecycle (plain getUserMedia on a visible <video>) ---------- */
   useEffect(() => {
     if (mode !== 'photo' || captured) return
     let cancelled = false
-    let handle: FaceFilterHandle | null = null
     const start = async () => {
       try {
-        handle = await openCameraWithFilters(filter, false, camCanvasRef.current)
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 } },
+          audio: false,
+        })
         if (cancelled) {
-          handle.stop()
+          stream.getTracks().forEach((t) => t.stop())
           return
         }
-        engineRef.current = handle
-        setHasDetector(handle.hasDetector())
-        setCamReady(true)
+        streamRef.current = stream
+        const v = videoRef.current
+        if (v) {
+          v.srcObject = stream
+          try {
+            await v.play()
+          } catch {}
+          if (!cancelled) setCamReady(true)
+        }
       } catch {
-        setError('Camera permission is needed for photo stories. You can still upload a picture.')
+        if (!cancelled) {
+          setError('Camera permission is needed for photo stories. You can still upload a picture.')
+        }
       }
     }
     void start()
     return () => {
       cancelled = true
-      handle?.stop()
-      engineRef.current = null
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
       setCamReady(false)
     }
-     
-  }, [mode, captured])
+  }, [mode, captured, facing])
 
-  useEffect(() => {
-    engineRef.current?.setFilter(filter)
-  }, [filter])
+  /* ---------- WYSIWYG capture: crop exactly what the object-cover preview shows ---------- */
+  const capturePhoto = () => {
+    const v = videoRef.current
+    if (!v || !v.videoWidth || !v.videoHeight) return
+    const rect = v.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
+    const vw = v.videoWidth
+    const vh = v.videoHeight
+    const containerAspect = rect.width / rect.height
+    const videoAspect = vw / vh
+    let sx: number
+    let sy: number
+    let sw: number
+    let sh: number
+    if (videoAspect > containerAspect) {
+      // source wider than the frame → trim left/right (object-cover behavior)
+      sh = vh
+      sw = vh * containerAspect
+      sx = (vw - sw) / 2
+      sy = 0
+    } else {
+      // source taller than the frame → trim top/bottom
+      sw = vw
+      sh = vw / containerAspect
+      sx = 0
+      sy = (vh - sh) / 2
+    }
+    // export at the visible crop size, capped at 1080px on the long edge
+    const scale = Math.min(1, 1080 / Math.max(sw, sh))
+    const w = Math.max(1, Math.round(sw * scale))
+    const h = Math.max(1, Math.round(sh * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    if (facing === 'user') {
+      // mirror exactly like the on-screen selfie preview → true WYSIWYG
+      ctx.translate(w, 0)
+      ctx.scale(-1, 1)
+    }
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, w, h)
+    canvas.toBlob((b) => {
+      if (b) setCaptured(b)
+    }, 'image/jpeg', 0.92)
+  }
+
+  /* ---------- photo upload fallback (camera permission denied / no camera) ---------- */
+  const onPickPhoto = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file')
+      return
+    }
+    setError('')
+    setCaptured(file)
+  }
 
   /* ---------- voice recording ---------- */
   useEffect(() => {
@@ -180,12 +240,8 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
       const clips: Array<{ kind: string; mediaId?: string; text?: string; overlayJson?: string; bgColor?: string; durationMs?: number }> = []
 
       if (mode === 'photo') {
-        let blob = captured
-        if (!blob) {
-          if (!engineRef.current) throw new Error('Camera not ready')
-          blob = await engineRef.current.snap(1080)
-        }
-        const up = await api.uploadStoryMedia(blob, 'jpg')
+        if (!captured) throw new Error('Capture or upload a photo first')
+        const up = await api.uploadStoryMedia(captured, captured.type.includes('png') ? 'png' : 'jpg')
         clips.push({ kind: 'photo', mediaId: up.id, overlayJson, durationMs: 6000 })
       } else if (mode === 'video') {
         for (const c of videoClips) {
@@ -230,7 +286,7 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
   }
 
   const canPublish =
-    (mode === 'photo' && (captured || camReady)) ||
+    (mode === 'photo' && !!captured) ||
     (mode === 'video' && videoClips.length > 0) ||
     (mode === 'text' && text.trim().length > 0) ||
     (mode === 'voice' && !!voiceBlob)
@@ -283,60 +339,57 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
 
       {/* body */}
       <div className="relative mx-4 flex flex-1 items-center justify-center overflow-hidden rounded-[22px] bg-black/40 md:mx-auto md:w-[420px]">
-        {mode === 'photo' && (
-          <>
-            {!captured ? (
-              <div className="relative h-full w-full">
-                <video ref={camRef} className="hidden" playsInline muted />
-                <canvas
-                  ref={camCanvasRef}
-                  className="h-full w-full object-cover"
-                  onDoubleClick={() => {
-                    // allow manual anchor nudge when no native detector exists
-                    engineRef.current?.setAnchor(0.5, 0.42, 0.4)
-                  }}
-                />
-                {!camReady && (
-                  <div className="absolute inset-0 flex items-center justify-center text-sm text-white/60">
-                    <Loader2 className="mr-2 animate-spin" size={18} /> Starting camera…
-                  </div>
-                )}
-                {!hasDetector && camReady && (
-                  <p className="absolute bottom-2 left-2 right-2 rounded-lg bg-black/60 px-3 py-1.5 text-[11px] text-white/70">
-                    Browser face-tracking unavailable — overlays stay centered. Drag the camera to frame your face.
-                  </p>
-                )}
-                <button
-                  className="absolute bottom-4 left-1/2 h-16 w-16 -translate-x-1/2 rounded-full border-4 border-white bg-white/20 transition active:scale-95"
-                  onClick={() => {
-                    engineRef.current
-                      ?.snap(1080)
-                      .then((b) => setCaptured(b))
-                      .catch(() => {})
-                  }}
-                  aria-label="Capture photo"
-                />
-              </div>
-            ) : (
-              <CapturedPreview blob={captured} onRetake={() => setCaptured(null)} />
-            )}
-            {/* filter row */}
-            <div className="absolute bottom-0 left-0 right-0 flex gap-2 overflow-x-auto px-3 pb-3 pt-6 stories-scroll">
-              {!captured &&
-                FACE_FILTERS.map((f) => (
-                  <button
-                    key={f.id}
-                    className={`flex flex-none items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                      filter === f.id ? 'bg-white text-black' : 'bg-black/50 text-white hover:bg-black/70'
-                    }`}
-                    onClick={() => setFilter(f.id)}
+        {mode === 'photo' &&
+          (!captured ? (
+            <div className="relative h-full w-full">
+              {/* live preview — mirrored like mainstream selfie cameras */}
+              <video
+                ref={videoRef}
+                className={`h-full w-full object-cover ${facing === 'user' ? '-scale-x-100' : ''}`}
+                autoPlay
+                playsInline
+                muted
+              />
+              {!camReady && (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-white/60">
+                  <Loader2 className="mr-2 animate-spin" size={18} /> Starting camera…
+                </div>
+              )}
+              {/* single control layer — upload / shutter / flip, nothing overlaps */}
+              <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/60 to-transparent pb-[max(env(safe-area-inset-bottom),20px)] pt-10">
+                <div className="flex items-center gap-6">
+                  <label
+                    className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
+                    title="Upload a photo instead"
                   >
-                    <span>{f.emoji}</span> {f.name}
+                    <ImagePlus size={20} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => e.target.files?.[0] && onPickPhoto(e.target.files[0])}
+                    />
+                  </label>
+                  <button
+                    className="h-16 w-16 rounded-full border-4 border-white bg-white/25 shadow-lg transition active:scale-95 disabled:opacity-40"
+                    onClick={capturePhoto}
+                    disabled={!camReady}
+                    aria-label="Capture photo"
+                  />
+                  <button
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
+                    onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
+                    title="Flip camera"
+                    aria-label="Flip camera"
+                  >
+                    <SwitchCamera size={20} />
                   </button>
-                ))}
+                </div>
+              </div>
             </div>
-          </>
-        )}
+          ) : (
+            <CapturedPreview blob={captured} onRetake={() => setCaptured(null)} />
+          ))}
 
         {mode === 'video' && (
           <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -443,13 +496,13 @@ export function StoryComposer({ onClose }: { onClose: () => void }) {
           <div className="absolute bottom-16 left-3 right-3 rounded-2xl bg-black/80 p-4 backdrop-blur">
             <div className="flex gap-2 pb-2">
               <input
-                className="h-9 flex-1 rounded-full bg-white/10 px-3 text-sm outline-none placeholder:text-white/50"
+                className="h-11 min-w-0 flex-1 rounded-full bg-white/10 px-3 text-sm outline-none placeholder:text-white/50"
                 placeholder="Add caption…"
                 value={overlayText}
                 onChange={(e) => setOverlayText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addOverlayText()}
               />
-              <button className="rounded-full bg-white px-4 text-xs font-bold text-black" onClick={addOverlayText}>
+              <button className="flex-none rounded-full bg-white px-4 text-xs font-bold text-black" onClick={addOverlayText}>
                 <Sparkles size={13} className="mr-1 inline" /> Add
               </button>
             </div>

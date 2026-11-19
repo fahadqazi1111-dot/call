@@ -388,12 +388,12 @@ export function WalletScreen({ onClose }: { onClose: () => void }) {
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       placeholder={String(minWithdrawal)}
-                      className="app-input mt-1 h-12"
+                      className="app-input mt-1 h-12 w-full"
                     />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold uppercase tracking-wide text-cmut" htmlFor="w-bank">Bank account</label>
-                    <select id="w-bank" value={bankId} onChange={(e) => setBankId(e.target.value)} className="app-input mt-1 h-12">
+                    <select id="w-bank" value={bankId} onChange={(e) => setBankId(e.target.value)} className="app-input mt-1 h-12 w-full">
                       {bankAccounts.length === 0 && <option value="">No bank account — add one first</option>}
                       {bankAccounts.map((b) => (
                         <option key={b.id} value={b.id}>
@@ -498,7 +498,7 @@ function Field({
   return (
     <div>
       <label className="text-[11px] font-bold uppercase tracking-wide text-cmut">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="app-input mt-1 h-11" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="app-input mt-1 h-12 w-full" />
     </div>
   )
 }

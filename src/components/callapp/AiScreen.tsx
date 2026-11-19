@@ -5,10 +5,45 @@ import {
   X, Send, Mic, MicOff, ImagePlus, Sparkles, Volume2, Trash2, Loader2,
   Plus, MessageSquare, ImageIcon, Bot,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { api, uploadFile } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { CallLogoMark } from './CallLogo'
 import type { AiConversationItem, AiMsg } from '@/lib/callapp/types'
+
+/** Split long text into ≤maxLen-char chunks at sentence boundaries so TTS
+ * requests stay natural-paced and respect the server size limit. */
+function splitSpeechChunks(text: string, maxLen = 600): string[] {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return []
+  if (clean.length <= maxLen) return [clean]
+  const chunks: string[] = []
+  let cur = ''
+  for (const sentence of clean.split(/(?<=[.!?])\s+/)) {
+    if (sentence.length > maxLen) {
+      if (cur) {
+        chunks.push(cur)
+        cur = ''
+      }
+      let rest = sentence
+      while (rest.length > maxLen) {
+        const cut = Math.max(rest.lastIndexOf(' ', maxLen), Math.floor(maxLen * 0.5))
+        chunks.push(rest.slice(0, cut).trim())
+        rest = rest.slice(cut).trim()
+      }
+      if (rest) cur = rest
+      continue
+    }
+    if (cur && `${cur} ${sentence}`.length > maxLen) {
+      chunks.push(cur)
+      cur = sentence
+    } else {
+      cur = cur ? `${cur} ${sentence}` : sentence
+    }
+  }
+  if (cur) chunks.push(cur)
+  return chunks
+}
 
 /** CALL AI assistant: text, voice (ASR + TTS), image analysis & generation, history. */
 export function AiScreen({ onClose }: { onClose: () => void }) {
@@ -26,6 +61,13 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
   const recRef = useRef<MediaRecorder | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  /* ---- TTS playback manager (refs: current values without re-renders) ---- */
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const seqRef = useRef(0)
+  const speakAbortRef = useRef<AbortController | null>(null)
+  const ttsOnRef = useRef(true)
+  const lastVoiceToastRef = useRef(0)
+
   useEffect(() => {
     void api.aiUsage().then((res) => setUsage({ text: res.usage.text, limits: res.limits })).catch(() => {})
     void loadConversations()
@@ -34,6 +76,31 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  /* Voice toggle: keep the ref mirror current so in-flight speak() calls see
+     the latest value. Turning voice OFF must be COMPLETELY silent immediately:
+     invalidate the playback chain, abort any in-flight TTS fetch and stop the
+     playing audio. */
+  useEffect(() => {
+    ttsOnRef.current = ttsOn
+    if (!ttsOn) {
+      seqRef.current++
+      speakAbortRef.current?.abort()
+      speakAbortRef.current = null
+      audioRef.current?.pause()
+      audioRef.current = null
+    }
+  }, [ttsOn])
+
+  /* Unmount cleanup: nothing keeps playing or fetching after the screen closes. */
+  useEffect(() => {
+    return () => {
+      seqRef.current++
+      speakAbortRef.current?.abort()
+      audioRef.current?.pause()
+      audioRef.current = null
+    }
+  }, [])
 
   const loadConversations = async () => {
     try {
@@ -55,15 +122,70 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
     setMessages([])
   }
 
-  const speak = async (text: string) => {
-    if (!ttsOn) return
-    try {
-      const res = await api.aiSpeak(text.slice(0, 600))
-      const { getMediaUrl } = await import('@/lib/callapp/media')
-      const url = (await getMediaUrl(res.mediaId)) ?? `/api/media/${res.mediaId}`
+  /** Toast once (throttled) when TTS fails — never spammy. */
+  const notifyVoiceUnavailable = () => {
+    const now = Date.now()
+    if (now - lastVoiceToastRef.current < 15000) return
+    lastVoiceToastRef.current = now
+    toast.error('Voice unavailable')
+  }
+
+  /** Play one chunk to completion. Resolves true on natural end, false on
+   * error. An intentional stop (voice off / newer reply) pauses the element,
+   * resolves and the caller's guard ends the chain. */
+  const playChunk = (url: string) =>
+    new Promise<boolean>((resolve) => {
       const audio = new Audio(url)
-      void audio.play().catch(() => {})
-    } catch {}
+      audioRef.current = audio
+      let settled = false
+      const finish = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        audio.removeEventListener('ended', onEnded)
+        audio.removeEventListener('pause', onPaused)
+        audio.removeEventListener('error', onError)
+        if (audioRef.current === audio) audioRef.current = null
+        resolve(ok)
+      }
+      const onEnded = () => finish(true)
+      // 'pause' also fires at natural end in some browsers — treated as OK.
+      const onPaused = () => finish(true)
+      const onError = () => finish(false)
+      audio.addEventListener('ended', onEnded)
+      audio.addEventListener('pause', onPaused)
+      audio.addEventListener('error', onError)
+      void audio.play().catch(() => finish(false))
+    })
+
+  /** Speak a reply out loud: sentence chunks ≤600 chars played sequentially
+   * (no overlap), instantly cancellable by voice OFF, a newer reply or unmount. */
+  const speak = async (text: string) => {
+    if (!ttsOnRef.current) return
+    const seq = ++seqRef.current
+    audioRef.current?.pause() // never overlap with a previous reply
+    audioRef.current = null
+    speakAbortRef.current?.abort() // cancel any in-flight TTS request
+    const ac = new AbortController()
+    speakAbortRef.current = ac
+    for (const chunk of splitSpeechChunks(text, 600)) {
+      if (!ttsOnRef.current || seq !== seqRef.current || ac.signal.aborted) return
+      try {
+        const res = await api.aiSpeak(chunk, { signal: ac.signal })
+        if (!ttsOnRef.current || seq !== seqRef.current || ac.signal.aborted) return
+        const { getMediaUrl } = await import('@/lib/callapp/media')
+        const url = (await getMediaUrl(res.mediaId)) ?? `/api/media/${res.mediaId}`
+        if (!ttsOnRef.current || seq !== seqRef.current || ac.signal.aborted) return
+        const played = await playChunk(url)
+        if (!played) {
+          notifyVoiceUnavailable()
+          return
+        }
+      } catch {
+        if (ac.signal.aborted || !ttsOnRef.current || seq !== seqRef.current) return // cancelled — stay silent
+        notifyVoiceUnavailable()
+        return
+      }
+    }
   }
 
   const send = async () => {

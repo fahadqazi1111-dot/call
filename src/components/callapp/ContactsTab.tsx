@@ -219,7 +219,7 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   return (
     <div className="flex h-full flex-col">
       <header
-        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-4 pb-3 pt-5' : 'px-6 pt-14'}`}
+        className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-4 pb-3 pt-5' : 'px-5 pt-[max(env(safe-area-inset-top),16px)]'}`}
       >
         <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[32px]'}`}>
           Contacts
@@ -240,16 +240,16 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           desk ? 'mx-4 mt-4' : 'mx-6 mt-4'
         }`}
       >
-        <Search size={19} />
+        <Search size={19} className="flex-none" />
         <input
-          className="w-full bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
+          className="min-w-0 flex-1 bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
           placeholder={`Search ${contacts.length} contacts`}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
-      <div className={`app-scroll mt-2 flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[96px]'}`}>
+      <div className={`app-scroll mt-2 flex-1 overflow-y-auto ${desk ? 'desk-scroll pb-4' : 'pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]'}`}>
         <div className="px-4 py-2">
           <button
             className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
@@ -514,9 +514,9 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
             <h2 className="text-xl font-extrabold text-cink">New contact</h2>
             <p className="mt-1 text-sm text-cmut">Save a number to call and chat for free.</p>
             <div className="mt-5 space-y-3">
-              <input className="app-input" placeholder="Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <input className="app-input w-full" placeholder="Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
               <input
-                className="app-input"
+                className="app-input w-full"
                 inputMode="tel"
                 placeholder="Phone number (with country code)"
                 value={newPhone}

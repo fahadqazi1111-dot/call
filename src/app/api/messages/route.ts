@@ -36,6 +36,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'The official account cannot send chat messages' }, { status: 403 })
     }
 
+    // SAFETY — blocks cut BOTH ways + banned users can never be messaged.
+    // (Restriction only silences calls/notifications — it never blocks messages.)
+    const [iBlockedThem, theyBlockedMe] = await Promise.all([
+      db.userBlock.findUnique({
+        where: { blockerId_blockedId: { blockerId: me.id, blockedId: to } },
+        select: { id: true },
+      }),
+      db.userBlock.findUnique({
+        where: { blockerId_blockedId: { blockerId: to, blockedId: me.id } },
+        select: { id: true },
+      }),
+    ])
+    if (iBlockedThem) {
+      return NextResponse.json({ error: 'You blocked this contact. Unblock to send messages.' }, { status: 403 })
+    }
+    if (theyBlockedMe || peer.blocked) {
+      // never reveal the real reason (block or ban) to the sender
+      return NextResponse.json({ error: 'Message not delivered' }, { status: 403 })
+    }
+
     // CONTACTS GATE — hard floor on the backend for NEW conversations only:
     // the INITIATOR must have the recipient saved as a contact (or the
     // recipient allows non-contacts, or the sender is staff).
