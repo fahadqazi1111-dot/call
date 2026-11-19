@@ -87,11 +87,11 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       if (seenGifts.has(dedupKey)) return
       seenGifts.add(dedupKey)
       // Animation is driven by the server-verified fulfillment event only,
-      // with the gift's own sound effect.
+      // with the gift's own sound effect (synced to the banner→animation beat).
       const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind)
+      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
       setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 400)
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
     }
     const onEnded = (p: unknown) => {
       const d = p as { liveId: string }
@@ -256,8 +256,12 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
         </div>
       )}
 
-      {/* bottom interaction bar */}
-      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-5 pt-16">
+      {/* bottom interaction bar — embedded mode lifts it above the fixed TabBar */}
+      <div
+        className={`absolute inset-x-0 z-30 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pt-16 ${
+          embedded ? 'bottom-[calc(65px+env(safe-area-inset-bottom))] pb-3' : 'bottom-0 pb-5'
+        }`}
+      >
         <div className="mb-3 max-h-[150px] space-y-1.5 overflow-y-auto app-scroll">
           {comments.slice(-30).map((c, i) => (
             <p key={c.id ?? i} className="text-[13px] text-white/95">

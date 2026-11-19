@@ -20,6 +20,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ peerId: string 
   const messages = await db.message.findMany({
     where: {
       conversationId: conv.id,
+      // "delete for me" tombstones stay invisible on my device
+      hides: { none: { userId: me.id } },
       ...(myState?.clearedBeforeAt ? { createdAt: { gt: myState.clearedBeforeAt } } : {}),
     },
     orderBy: { createdAt: 'asc' },
@@ -38,6 +40,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ peerId: string 
       createdAt: m.createdAt.toISOString(),
       deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
       readAt: m.readAt ? m.readAt.toISOString() : null,
+      deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null,
+      forwarded: m.forwarded,
       mine: m.senderId === me.id,
     })),
   })

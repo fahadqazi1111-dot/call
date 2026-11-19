@@ -45,6 +45,7 @@ model User {
   adCampaigns      Ad[]           @relation("AdOwner")
   broadcastsSent   Broadcast[]    @relation("BroadcastSender")
   convStates       ConversationState[] @relation("ConvStateOwner")
+  messageHides     MessageHide[]       @relation("MsgHideOwner")
   blocksIssued     UserBlock[]         @relation("BlocksIssued")
   blocksReceived   UserBlock[]         @relation("BlocksReceived")
   reportsFiled     UserReport[]        @relation("ReportsFiled")
@@ -110,8 +111,24 @@ model Message {
   createdAt      DateTime     @default(now())
   deliveredAt    DateTime? // reached the recipient's device
   readAt         DateTime?
+  deletedAt      DateTime? // "unsent for everyone" — content is wiped, tombstone remains
+  forwarded      Boolean      @default(false)
+  hides          MessageHide[]
 
   @@index([conversationId, createdAt])
+}
+
+/** Per-user "delete for me" tombstones — the message stays for the other side. */
+model MessageHide {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("MsgHideOwner", fields: [userId], references: [id], onDelete: Cascade)
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, messageId])
+  @@index([userId])
 }
 
 /**

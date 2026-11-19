@@ -45,7 +45,11 @@ class SocketClient {
       'msg:incoming',
       'msg:read',
       'msg:delivered',
+      'msg:deleted',
       'typing',
+      // WhatsApp-style voice -> video upgrade prompts
+      'call:video_request',
+      'call:video_response',
       'notify:incoming',
       // voice rooms
       'room:state',

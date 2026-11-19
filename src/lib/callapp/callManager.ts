@@ -39,6 +39,8 @@ class CallManager {
   private muted = false
   private cameraOn = false
   private remoteCameraOn = false
+  private videoRequest: 'none' | 'sent' | 'incoming' = 'none'
+  private videoRespTimer: number | null = null
   private isCaller = false
   private startedAt: number | null = null
   private durationSec = 0
@@ -102,6 +104,7 @@ class CallManager {
       remoteCameraOn: this.remoteCameraOn,
       durationSec: this.durationSec,
       endReason: this.endReason,
+      videoRequest: this.videoRequest,
       localStream: this.localStream ?? undefined,
       remoteStream: this.remoteStream ?? undefined,
     }
@@ -594,6 +597,61 @@ class CallManager {
     this.emit()
   }
 
+  /**
+   * WhatsApp-style voice→video upgrade — step 1 (caller side):
+   * ASK the peer first. Video only starts after they accept.
+   */
+  requestVideo() {
+    if (!this.pc || this.phase !== 'active' || this.cameraOn || this.videoRequest !== 'none') return
+    if (!this.peerId || !this.callId) return
+    socketClient.emit('call:video_request', { to: this.peerId, callId: this.callId })
+    this.videoRequest = 'sent'
+    this.emit()
+    if (this.videoRespTimer) window.clearTimeout(this.videoRespTimer)
+    this.videoRespTimer = window.setTimeout(() => {
+      if (this.videoRequest === 'sent') {
+        this.videoRequest = 'none'
+        this.toast('No response to the video request')
+        this.emit()
+      }
+    }, 15000)
+  }
+
+  /** step 2 (callee side): accept or decline the incoming video request */
+  respondVideoRequest(accept: boolean) {
+    if (this.videoRequest !== 'incoming' || !this.peerId || !this.callId) return
+    socketClient.emit('call:video_response', { to: this.peerId, callId: this.callId, accept })
+    this.videoRequest = 'none'
+    this.emit()
+    if (accept) {
+      // both cameras come on: mine now, the requester's on their side
+      void this.enableVideo()
+    }
+  }
+
+  private handleVideoRequest(callId: string) {
+    if (callId !== this.callId || this.phase !== 'active' || this.cameraOn) return
+    this.videoRequest = 'incoming'
+    soundKit.pop(false)
+    this.emit()
+  }
+
+  private handleVideoResponse(callId: string, accept: boolean) {
+    if (callId !== this.callId) return
+    if (this.videoRespTimer) {
+      window.clearTimeout(this.videoRespTimer)
+      this.videoRespTimer = null
+    }
+    if (this.videoRequest !== 'sent') return
+    this.videoRequest = 'none'
+    if (accept) {
+      void this.enableVideo()
+    } else {
+      this.toast(`${this.peerName} declined your video request`)
+    }
+    this.emit()
+  }
+
   /** Live peer connection (CallOverlay polls getStats() from it). */
   getActivePc(): RTCPeerConnection | null {
     return this.pc
@@ -693,6 +751,11 @@ class CallManager {
     this.pendingOffer = null
     this.pendingIce = []
     this.restartAttempted = false
+    if (this.videoRespTimer) {
+      window.clearTimeout(this.videoRespTimer)
+      this.videoRespTimer = null
+    }
+    this.videoRequest = 'none'
     this.emit()
   }
 
@@ -702,6 +765,11 @@ class CallManager {
     socketClient.on('call:signal', (p) => void this.handleSignal(p as { callId: string; data: { kind: 'offer' | 'answer' | 'ice'; payload: unknown } }))
     socketClient.on('call:end', (p) => this.handleEnd(p as { callId: string; reason?: string }))
     socketClient.on('call:unavailable', (p) => this.handleUnavailable(p as { callId: string | null }))
+    socketClient.on('call:video_request', (p) => this.handleVideoRequest((p as { callId: string }).callId))
+    socketClient.on('call:video_response', (p) => {
+      const d = p as { callId: string; accept: boolean }
+      this.handleVideoResponse(d.callId, !!d.accept)
+    })
   }
 }
 

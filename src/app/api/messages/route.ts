@@ -77,6 +77,7 @@ export async function POST(req: Request) {
 
     if (type === 'text' && content.length > 4000) content = content.slice(0, 4000)
     const duration = typeof body.duration === 'number' ? Math.max(0, Math.round(body.duration)) : null
+    const forwarded = body.forwarded === true
 
     const conv = existing ? { id: existing.id } : await getOrCreateConversation(me.id, to)
     const msg = await db.message.create({
@@ -86,6 +87,7 @@ export async function POST(req: Request) {
         type,
         content,
         duration,
+        forwarded,
       },
     })
     await db.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: msg.createdAt } })
@@ -100,6 +102,7 @@ export async function POST(req: Request) {
         createdAt: msg.createdAt.toISOString(),
         deliveredAt: null,
         readAt: null,
+        forwarded: msg.forwarded,
         mine: true,
       },
     })

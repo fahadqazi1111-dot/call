@@ -233,23 +233,27 @@ function LiveReels({
   /* derived, always-valid active id — no effect needed to repair it */
   const activeId = snappedId && sessions.some((s) => s.id === snappedId) ? snappedId : (sessions[0]?.id ?? null)
 
-  /* which section is snapped into view */
+  /* which section is snapped into view — scroll-position based (sections are
+   * exactly viewport-height, so round(scrollTop/height) is the active index) */
+  const onScroll = () => {
+    const root = scrollRef.current
+    if (!root) return
+    const h = root.clientHeight || 1
+    const idx = Math.min(sessions.length - 1, Math.max(0, Math.round(root.scrollTop / h)))
+    const id = root.querySelectorAll('[data-live-id]')[idx]?.getAttribute('data-live-id') ?? null
+    if (id) setSnappedId(id)
+  }
   useEffect(() => {
     const root = scrollRef.current
     if (!root) return
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting && e.intersectionRatio >= 0.55) {
-            const id = (e.target as HTMLElement).dataset.liveId ?? null
-            if (id) setSnappedId(id)
-          }
-        }
-      },
-      { root, threshold: [0.55] }
-    )
-    root.querySelectorAll('[data-live-id]').forEach((el) => obs.observe(el))
-    return () => obs.disconnect()
+    // re-sync once sessions change (feed re-orders / new lives appear) —
+    // deferred so we never setState synchronously inside the effect
+    const t = window.setTimeout(onScroll, 0)
+    root.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.clearTimeout(t)
+      root.removeEventListener('scroll', onScroll)
+    }
   }, [sessions])
 
   return (

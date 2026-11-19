@@ -341,6 +341,28 @@ export function CallOverlay({ state }: { state: CallState }) {
 
       {/* ---------- controls: mt-auto flow keeps them pinned to the bottom in every mode ---------- */}
       <div className="relative z-20 mt-auto pb-[max(env(safe-area-inset-bottom),24px)] pt-4">
+        {/* WhatsApp-style video upgrade prompt — peer asked to turn on video */}
+        {state.phase === 'active' && state.videoRequest === 'incoming' && (
+          <div className="mx-5 mb-5 flex items-center gap-3 rounded-[26px] border border-white/15 bg-black/60 p-3.5 backdrop-blur-xl">
+            <Avatar name={peerInfo.name} avatarKey={peerInfo.avatarKey} size={42} src={peerInfo.avatarUrl} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13.5px] font-bold">{state.peerName} wants to turn on the video</p>
+              <p className="text-[11.5px] text-white/65">Accept to share video with each other</p>
+            </div>
+            <button
+              className="flex h-10 flex-none items-center gap-1.5 rounded-full bg-cred px-4 text-[12.5px] font-bold"
+              onClick={() => callManager.respondVideoRequest(false)}
+            >
+              Decline
+            </button>
+            <button
+              className="flex h-10 flex-none items-center gap-1.5 rounded-full bg-cgreen px-4 text-[12.5px] font-bold"
+              onClick={() => callManager.respondVideoRequest(true)}
+            >
+              <Video size={15} /> Accept
+            </button>
+          </div>
+        )}
         {state.phase === 'incoming' ? (
           <div className="flex items-end justify-around px-8">
             <CallBtn Icon={PhoneOff} label="Decline" red onClick={() => callManager.declineCall()} />
@@ -381,7 +403,13 @@ export function CallOverlay({ state }: { state: CallState }) {
                   <CallBtn Icon={SwitchCamera} label="Flip" small onClick={() => void callManager.flipCamera()} />
                 )}
                 {!isVideo && state.phase === 'active' && (
-                  <CallBtn Icon={Video} label="Video" small onClick={() => void callManager.enableVideo()} />
+                  <CallBtn
+                    Icon={Video}
+                    label={state.videoRequest === 'sent' ? 'Waiting…' : 'Video'}
+                    small
+                    disabled={state.videoRequest === 'sent'}
+                    onClick={() => callManager.requestVideo()}
+                  />
                 )}
                 {state.phase === 'active' && state.isCaller && (
                   <CallBtn
@@ -551,6 +579,7 @@ function CallBtn({
   green,
   activeOff,
   small = false,
+  disabled = false,
 }: {
   Icon: typeof Mic
   label: string
@@ -559,6 +588,7 @@ function CallBtn({
   green?: boolean
   activeOff?: boolean
   small?: boolean
+  disabled?: boolean
 }) {
   const bg = red ? 'bg-cred' : green ? 'bg-cgreen shadow-[0_10px_28px_rgba(18,183,106,0.4)]' : activeOff ? 'bg-cred/80' : 'bg-white/14'
   return (
@@ -566,9 +596,10 @@ function CallBtn({
       <button
         className={`flex items-center justify-center rounded-full text-white transition-transform active:scale-95 ${bg} ${
           small ? 'h-[52px] w-[52px]' : 'h-[68px] w-[68px]'
-        }`}
+        } ${disabled ? 'opacity-45' : ''}`}
         onClick={onClick}
         aria-label={label}
+        disabled={disabled}
       >
         <Icon size={small ? 20 : 26} />
       </button>

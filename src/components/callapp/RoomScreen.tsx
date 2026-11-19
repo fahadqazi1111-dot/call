@@ -128,12 +128,12 @@ export function RoomScreen({
       // Animation + gift-specific sound are driven SOLELY by the
       // server-verified fulfillment event — nothing shows pre-payment.
       const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind)
+      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
       setAnims((a) => [...a, anim])
       window.setTimeout(() => {
         setAnims((a) => a.filter((x) => x.key !== anim.key))
         seenGifts.current.delete(dedupKey)
-      }, d.payload.gift.durationMs + 400)
+      }, anim.durationMs + 400)
       void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
     }
     const onRemoved = (p: unknown) => {

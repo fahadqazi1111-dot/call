@@ -9,7 +9,7 @@ import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
 import { StaffTick } from './StaffTick'
 import { SponsoredAdCard, type ServedAd } from './GiftsUI'
-import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan } from 'lucide-react'
+import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan, Copy, Forward, Undo2, CheckSquare, X, Search, ClipboardCheck } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { toast } from 'sonner'
 import { PeerProfileSheet } from './PeerProfileSheet'
@@ -41,6 +41,8 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const sendVoice = useApp((s) => s.sendVoice)
   const startCall = useApp((s) => s.startCall)
   const loadMessages = useApp((s) => s.loadMessages)
+  const deleteMessages = useApp((s) => s.deleteMessages)
+  const forwardMessages = useApp((s) => s.forwardMessages)
   const blockedMap = useApp((s) => s.blockedIds)
 
   /** Resolve the peer from existing chats, falling back to contacts (fresh conversation). */
@@ -86,6 +88,52 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const [menuOpen, setMenuOpen] = useState(false)
   const [pending, setPending] = useState<PendingAction>(null)
   const menuWrapRef = useRef<HTMLDivElement>(null)
+
+  /* ---------- message actions: select / forward / unsend / delete-for-me ---------- */
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [actionMsg, setActionMsg] = useState<Message | null>(null)
+  const [forwardOpen, setForwardOpen] = useState(false)
+  const [forwardBusy, setForwardBusy] = useState(false)
+  const selectedMsgs = useMemo(() => messages.filter((m) => selectedIds.includes(m.id)), [messages, selectedIds])
+  const allSelectedMine = selectedMsgs.length > 0 && selectedMsgs.every((m) => m.mine && !m.deletedAt)
+  const forwardableSelected = useMemo(() => selectedMsgs.filter((m) => m.type !== 'call' && !m.deletedAt), [selectedMsgs])
+
+  const enterSelectMode = (msg: Message) => {
+    setSelectMode(true)
+    setSelectedIds([msg.id])
+    setActionMsg(null)
+  }
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelectedIds([])
+  }
+  const toggleSelect = (id: string) => {
+    setSelectedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
+  }
+  const onDeleteSelected = () => {
+    const scope: 'everyone' | 'me' = allSelectedMine ? 'everyone' : 'me'
+    void deleteMessages(peerId, selectedIds, scope).then(() => {
+      toast.success(scope === 'everyone' ? 'Message unsent for everyone' : 'Deleted for you')
+      exitSelectMode()
+    })
+  }
+  const onCopySelected = () => {
+    const m = selectedMsgs.find((x) => x.type === 'text')
+    if (m) void navigator.clipboard?.writeText(m.content).then(() => toast.success('Message copied'))
+  }
+  const onForwardSend = async (targets: string[]) => {
+    if (!targets.length || !forwardableSelected.length) return
+    setForwardBusy(true)
+    try {
+      await forwardMessages(targets, forwardableSelected)
+      toast.success(`Forwarded to ${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}`)
+      setForwardOpen(false)
+      exitSelectMode()
+    } finally {
+      setForwardBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (peer) {
@@ -220,7 +268,31 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         desk ? 'relative h-full min-w-0 flex-1 bg-cbg' : 'absolute inset-0 z-40 bg-cbg'
       }`}
     >
-      {/* header */}
+      {/* header — selection mode replaces it entirely */}
+      {selectMode ? (
+        <header
+          className={`relative z-10 flex items-center gap-2 border-b border-cline bg-white/95 backdrop-blur-md ${
+            desk ? 'px-4 py-2.5' : 'px-2 pb-2.5 pt-[max(env(safe-area-inset-top),10px)]'
+          }`}
+        >
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-full text-cink transition hover:bg-cbg"
+            onClick={exitSelectMode}
+            aria-label="Exit selection mode"
+          >
+            <X size={22} />
+          </button>
+          <span className="flex-1 text-[16px] font-bold text-cink">
+            {selectedIds.length} selected
+          </span>
+          <button
+            className="flex h-10 items-center rounded-full px-3 text-[13px] font-bold text-cbrand transition hover:bg-csoft"
+            onClick={() => setSelectedIds(messages.filter((m) => !m.deletedAt).map((m) => m.id))}
+          >
+            Select all
+          </button>
+        </header>
+      ) : (
       <header
         className={`relative z-10 flex items-center gap-2 border-b border-cline bg-white/95 backdrop-blur-md ${
           desk ? 'px-4 py-2.5' : 'px-2 pb-2.5 pt-[max(env(safe-area-inset-top),10px)]'
@@ -352,6 +424,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           </MenuShell>
         </div>
       </header>
+      )}
 
       {/* blocked / blocked-by-peer banners — pinned above the message canvas */}
       {blockedByMe && (
@@ -429,7 +502,14 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
                 const slot = groups.slots[gi]?.[mi]
                 return (
                   <Fragment key={m.id}>
-                    <MessageRow msg={m} peerName={peer.name} />
+                    <MessageRow
+                      msg={m}
+                      peerName={peer.name}
+                      selectMode={selectMode}
+                      selected={selectedIds.includes(m.id)}
+                      onToggleSelect={() => toggleSelect(m.id)}
+                      onOpenActions={setActionMsg}
+                    />
                     {slot !== undefined && chatAds[slot] && <SponsoredAdCard ad={chatAds[slot]} />}
                   </Fragment>
                 )
@@ -455,8 +535,8 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
         )}
       </div>
 
-      {/* composer / recorder */}
-      {official ? (
+      {/* composer / recorder — hidden while selecting messages */}
+      {!selectMode && (official ? (
         <div className={`border-t border-cline bg-white px-4 ${desk ? 'pb-3.5 pt-3' : 'pb-[max(env(safe-area-inset-bottom),16px)] pt-3'}`}>
           <div className="flex items-center justify-center gap-2 rounded-[16px] bg-cbg px-4 py-3 text-center">
             <ShieldCheck size={16} className="flex-none text-cbrand" />
@@ -555,15 +635,171 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
             )}
           </div>
         </div>
+      ))}
+
+      {/* selection action toolbar — replaces the composer in select mode */}
+      {selectMode && (
+        <div
+          className={`flex items-center gap-1.5 border-t border-cline bg-white px-3 ${
+            desk ? 'py-3' : 'pt-3 pb-[max(env(safe-area-inset-bottom),14px)]'
+          }`}
+        >
+          <button
+            className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-brand-grad text-[13.5px] font-bold text-white shadow-[0_6px_16px_rgba(47,91,234,0.35)] disabled:opacity-40"
+            disabled={!forwardableSelected.length}
+            onClick={() => setForwardOpen(true)}
+          >
+            <Forward size={17} /> Forward
+          </button>
+          {selectedMsgs.length === 1 && selectedMsgs[0]?.type === 'text' && (
+            <button
+              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-csoft text-[13.5px] font-bold text-cink transition hover:bg-cline disabled:opacity-40"
+              onClick={onCopySelected}
+            >
+              <Copy size={16} /> Copy
+            </button>
+          )}
+          <button
+            className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[13.5px] font-bold disabled:opacity-40 ${
+              allSelectedMine ? 'bg-[#FEF0EF] text-cred' : 'bg-csoft text-cink'
+            }`}
+            disabled={!selectedIds.length}
+            onClick={onDeleteSelected}
+          >
+            <Trash2 size={16} /> {allSelectedMine ? 'Unsend' : 'Delete'}
+          </button>
+        </div>
       )}
       {profileOpen && <PeerProfileSheet peer={peer} desk={desk} onClose={() => setProfileOpen(false)} />}
       <ChatActionDialogs peer={peer} pending={pending} onClose={() => setPending(null)} />
+      {actionMsg && (
+        <MessageActionSheet
+          msg={actionMsg}
+          peerName={peer.name}
+          onClose={() => setActionMsg(null)}
+          onCopy={() => {
+            void navigator.clipboard?.writeText(actionMsg.content).then(() => toast.success('Message copied'))
+            setActionMsg(null)
+          }}
+          onForward={() => {
+            setActionMsg(null)
+            setSelectMode(true)
+            setSelectedIds([actionMsg.id])
+            setForwardOpen(true)
+          }}
+          onUnsend={() => {
+            const id = actionMsg.id
+            setActionMsg(null)
+            void deleteMessages(peerId, [id], 'everyone').then(() => toast.success('Message unsent for everyone'))
+          }}
+          onDeleteForMe={() => {
+            const id = actionMsg.id
+            setActionMsg(null)
+            void deleteMessages(peerId, [id], 'me').then(() => toast.success('Deleted for you'))
+          }}
+          onSelect={() => enterSelectMode(actionMsg)}
+        />
+      )}
+      {forwardOpen && (
+        <ForwardSheet
+          busy={forwardBusy}
+          count={forwardableSelected.length}
+          onClose={() => setForwardOpen(false)}
+          onSend={onForwardSend}
+        />
+      )}
     </div>
   )
 }
 
-function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
+function MessageRow({
+  msg,
+  peerName,
+  selectMode,
+  selected,
+  onToggleSelect,
+  onOpenActions,
+}: {
+  msg: Message
+  peerName: string
+  selectMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
+  onOpenActions?: (m: Message) => void
+}) {
   const mine = msg.mine
+  const deleted = !!msg.deletedAt
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressClick = useRef(false)
+
+  /* long-press (touch) opens the per-message action sheet; desktop uses right-click */
+  const armLongPress = () => {
+    if (selectMode || deleted || !onOpenActions) return
+    pressTimer.current = setTimeout(() => {
+      suppressClick.current = true
+      try {
+        navigator.vibrate?.(12)
+      } catch {}
+      onOpenActions(msg)
+    }, 480)
+  }
+  const disarmLongPress = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current)
+      pressTimer.current = null
+    }
+  }
+  const bubbleProps = {
+    onTouchStart: armLongPress,
+    onTouchEnd: disarmLongPress,
+    onTouchMove: disarmLongPress,
+    onContextMenu: (e: React.MouseEvent) => {
+      if (selectMode || deleted || !onOpenActions) return
+      e.preventDefault()
+      onOpenActions(msg)
+    },
+    onClickCapture: (e: React.MouseEvent) => {
+      // swallow the tap that fires right after a long-press opens the sheet
+      if (suppressClick.current) {
+        e.stopPropagation()
+        e.preventDefault()
+        suppressClick.current = false
+      }
+    },
+  }
+  const selectOverlay = selectMode ? (
+    <button
+      type="button"
+      className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] focus:outline-none"
+      aria-label={selected ? 'Deselect message' : 'Select message'}
+      onClick={onToggleSelect}
+    />
+  ) : null
+  const ring = selected ? 'ring-2 ring-cbrand/70' : ''
+  const forwardedChip = msg.forwarded ? (
+    <div className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold italic opacity-70">
+      <Forward size={11} /> Forwarded
+    </div>
+  ) : null
+
+  /* tombstone — "unsent" message */
+  if (deleted) {
+    return (
+      <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+        <div
+          className={`rounded-[20px] px-3.5 py-2 shadow-sm max-w-[272px] sm:max-w-[520px] ${ring} ${
+            mine ? 'rounded-br-md bg-[#E8ECF6] text-cmut' : 'rounded-bl-md bg-white text-cmut'
+          }`}
+        >
+          <p className="text-[13.5px] italic leading-5">{mine ? 'You unsent a message' : `${peerName} unsent a message`}</p>
+          <div className="mt-1 flex items-center justify-end text-[11px] opacity-75">
+            <span>{fmtTime(msg.createdAt)}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (msg.type === 'call') {
     let meta: { callType?: string; status?: string; durationSec?: number } = {}
     try {
@@ -576,7 +812,8 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
     return (
       <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
         <div
-          className={`flex items-center gap-2.5 rounded-[20px] px-3.5 py-2.5 shadow-sm ${
+          {...bubbleProps}
+          className={`relative flex items-center gap-2.5 rounded-[20px] px-3.5 py-2.5 shadow-sm ${ring} ${
             mine ? 'rounded-br-md bg-brand-grad text-white' : 'rounded-bl-md bg-white text-cink'
           }`}
         >
@@ -592,6 +829,7 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
               {meta.status === 'answered' ? fmtDuration(meta.durationSec ?? 0) : 'Tap to call again'} · {fmtTime(msg.createdAt)}
             </div>
           </div>
+          {selectOverlay}
         </div>
       </div>
     )
@@ -601,15 +839,18 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
     return (
       <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
         <div
-          className={`rounded-[20px] px-3 py-2 shadow-sm ${
+          {...bubbleProps}
+          className={`relative rounded-[20px] px-3 py-2 shadow-sm ${ring} ${
             mine ? 'rounded-br-md bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.3)]' : 'rounded-bl-md bg-white text-cbrand'
           }`}
         >
+          {forwardedChip}
           <VoiceBubble msg={msg} mine={mine} />
           <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
             <span>{fmtTime(msg.createdAt)}</span>
             {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
           </div>
+          {selectOverlay}
         </div>
       </div>
     )
@@ -618,16 +859,179 @@ function MessageRow({ msg, peerName }: { msg: Message; peerName: string }) {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`rounded-[20px] px-3.5 py-2 shadow-sm sm:max-w-[520px] max-w-[272px] ${
+        {...bubbleProps}
+        className={`relative rounded-[20px] px-3.5 py-2 shadow-sm sm:max-w-[520px] max-w-[272px] ${ring} ${
           mine
             ? 'rounded-br-md bg-brand-grad text-white shadow-[0_6px_16px_rgba(47,91,234,0.3)]'
             : 'rounded-bl-md bg-white text-cink'
         }`}
       >
+        {forwardedChip}
         <p className="whitespace-pre-wrap break-words text-[15px] leading-[21px]">{msg.content}</p>
         <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
           <span>{fmtTime(msg.createdAt)}</span>
           {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
+        </div>
+        {selectOverlay}
+      </div>
+    </div>
+  )
+}
+
+/* ================= per-message action sheet (long-press / right-click) ================= */
+
+function MessageActionSheet({
+  msg,
+  peerName,
+  onClose,
+  onCopy,
+  onForward,
+  onUnsend,
+  onDeleteForMe,
+  onSelect,
+}: {
+  msg: Message
+  peerName: string
+  onClose: () => void
+  onCopy: () => void
+  onForward: () => void
+  onUnsend: () => void
+  onDeleteForMe: () => void
+  onSelect: () => void
+}) {
+  const deleted = !!msg.deletedAt
+  const isText = msg.type === 'text'
+  const forwardable = !deleted && msg.type !== 'call'
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center" role="dialog" aria-label="Message actions">
+      <button className="absolute inset-0 bg-black/45" aria-label="Close actions" onClick={onClose} />
+      <div
+        className="relative w-full sm:max-w-sm sm:rounded-[24px] rounded-t-[24px] bg-white p-2 sm:mb-0 pb-[max(env(safe-area-inset-bottom),10px)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mb-1 mt-1 h-1 w-10 rounded-full bg-cline sm:hidden" />
+        <div className="mb-1 px-3 py-1.5">
+          <p className="truncate text-[12.5px] font-semibold text-cmut">
+            {isText && !deleted ? msg.content.slice(0, 70) : deleted ? 'Unsent message' : msg.type === 'voice' ? 'Voice message' : 'Call log'}
+          </p>
+        </div>
+        {isText && !deleted && (
+          <SheetRow icon={<Copy size={18} />} label="Copy" onClick={onCopy} />
+        )}
+        {forwardable && <SheetRow icon={<Forward size={18} />} label="Forward" onClick={onForward} />}
+        {msg.mine && !deleted && <SheetRow icon={<Undo2 size={18} />} label="Unsend for everyone" danger onClick={onUnsend} />}
+        <SheetRow icon={<Trash2 size={18} />} label="Delete for me" danger onClick={onDeleteForMe} />
+        {!deleted && <SheetRow icon={<CheckSquare size={18} />} label="Select messages" onClick={onSelect} />}
+        <div className="my-1 h-px bg-cline" />
+        <SheetRow icon={<X size={18} />} label="Cancel" onClick={onClose} />
+      </div>
+    </div>
+  )
+}
+
+function SheetRow({ icon, label, danger, onClick }: { icon: React.ReactNode; label: string; danger?: boolean; onClick: () => void }) {
+  return (
+    <button
+      className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-[14.5px] font-semibold transition hover:bg-cbg ${
+        danger ? 'text-cred' : 'text-cink'
+      }`}
+      onClick={onClick}
+    >
+      <span className="flex-none">{icon}</span>
+      <span className="min-w-0 flex-1">{label}</span>
+    </button>
+  )
+}
+
+/* ================= forward picker (Messenger-style) ================= */
+
+function ForwardSheet({
+  count,
+  busy,
+  onClose,
+  onSend,
+}: {
+  count: number
+  busy: boolean
+  onClose: () => void
+  onSend: (targets: string[]) => void
+}) {
+  const chats = useApp((s) => s.chats)
+  const contacts = useApp((s) => s.contacts)
+  const [q, setQ] = useState('')
+  const [targets, setTargets] = useState<string[]>([])
+
+  const people = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; avatarKey: number; avatarUrl: string | null }>()
+    for (const c of chats) map.set(c.peer.id, { id: c.peer.id, name: c.peer.name, avatarKey: c.peer.avatarKey, avatarUrl: c.peer.avatarUrl })
+    for (const c of contacts) {
+      if (c.user && !map.has(c.user.id))
+        map.set(c.user.id, { id: c.user.id, name: c.user.name, avatarKey: c.user.avatarKey, avatarUrl: c.user.avatarUrl ?? null })
+    }
+    const list = Array.from(map.values())
+    const needle = q.trim().toLowerCase()
+    return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list
+  }, [chats, contacts, q])
+
+  const toggle = (id: string) => setTargets((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end justify-center sm:items-center" role="dialog" aria-label="Forward messages">
+      <button className="absolute inset-0 bg-black/45" aria-label="Close forward picker" onClick={onClose} />
+      <div
+        className="relative flex max-h-[80vh] w-full flex-col sm:max-w-md sm:rounded-[24px] rounded-t-[24px] bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 border-b border-cline px-4 pb-3 pt-4">
+          <span className="text-[16px] font-bold text-cink">Forward</span>
+          <span className="rounded-full bg-csoft px-2 py-0.5 text-[11px] font-bold text-cbrand">{count}</span>
+          <button className="ml-auto flex h-9 w-9 items-center justify-center rounded-full text-cink hover:bg-cbg" onClick={onClose} aria-label="Close">
+            <X size={19} />
+          </button>
+        </div>
+        <div className="px-4 pt-3">
+          <div className="flex h-10 items-center gap-2 rounded-full bg-[#F0F3FA] px-3.5">
+            <Search size={16} className="text-cmut" />
+            <input
+              className="w-full bg-transparent text-[14px] text-cink outline-none placeholder:text-[#7A8499]"
+              placeholder="Search people"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="app-scroll min-h-[120px] flex-1 overflow-y-auto px-2 py-2">
+          {people.length === 0 && <p className="px-3 py-6 text-center text-sm text-cmut">No people found</p>}
+          {people.map((p) => {
+            const on = targets.includes(p.id)
+            return (
+              <button
+                key={p.id}
+                className={`flex w-full items-center gap-3 rounded-2xl px-2.5 py-2 text-left transition ${on ? 'bg-csoft' : 'hover:bg-cbg'}`}
+                onClick={() => toggle(p.id)}
+              >
+                <Avatar name={p.name} avatarKey={p.avatarKey} size={42} src={p.avatarUrl} />
+                <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold text-cink">{p.name}</span>
+                <span
+                  className={`flex h-6 w-6 flex-none items-center justify-center rounded-full border-2 transition ${
+                    on ? 'border-cbrand bg-cbrand text-white' : 'border-cline bg-white'
+                  }`}
+                >
+                  {on && <Check size={14} />}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="border-t border-cline px-4 py-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+          <button
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-grad text-[15px] font-bold text-white shadow-[0_6px_16px_rgba(47,91,234,0.35)] disabled:opacity-40"
+            disabled={busy || !targets.length}
+            onClick={() => onSend(targets)}
+          >
+            <ClipboardCheck size={17} />
+            {busy ? 'Forwarding…' : targets.length ? `Send to ${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}` : 'Select chats'}
+          </button>
         </div>
       </div>
     </div>

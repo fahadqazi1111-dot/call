@@ -425,6 +425,23 @@ io.on('connection', (socket: Socket) => {
     for (const id of socketsOf(p.to)) io.to(id).emit('msg:delivered', { ids: p.ids, by: myUserId })
   })
 
+  // unsend: tell the peer which messages were removed for everyone
+  socket.on('msg:deleted', (p: { to: string; ids: string[] }) => {
+    if (!p?.to || !Array.isArray(p.ids)) return
+    for (const id of socketsOf(p.to)) io.to(id).emit('msg:deleted', { ids: p.ids, by: myUserId })
+  })
+
+  // WhatsApp-style voice -> video upgrade: the caller asks, the peer accepts
+  socket.on('call:video_request', (p: { to: string; callId: string }) => {
+    if (!p?.to || !p.callId) return
+    for (const id of socketsOf(p.to)) io.to(id).emit('call:video_request', { callId: p.callId, from: myUserId })
+  })
+
+  socket.on('call:video_response', (p: { to: string; callId: string; accept: boolean }) => {
+    if (!p?.to || !p.callId) return
+    for (const id of socketsOf(p.to)) io.to(id).emit('call:video_response', { callId: p.callId, accept: !!p.accept, from: myUserId })
+  })
+
   socket.on('typing', (p: { to: string; peerId: string; isTyping: boolean }) => {
     if (!p?.to) return
     for (const id of socketsOf(p.to)) io.to(id).emit('typing', { peerId: myUserId, isTyping: !!p.isTyping })

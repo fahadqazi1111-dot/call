@@ -115,6 +115,10 @@ interface AppState {
   sendVoice: (peerId: string, blob: Blob, durationSec: number, effect?: string) => Promise<void>
   markReadIfOpen: (peerId: string) => Promise<void>
   handleIncomingMessage: (fromId: string | null, message: Message) => Promise<void>
+  /** unsend (everyone) or delete-for-me; relays `msg:deleted` for everyone-scope */
+  deleteMessages: (peerId: string, ids: string[], scope: 'everyone' | 'me') => Promise<void>
+  /** forward selected messages to one or more peers (Messenger-style) */
+  forwardMessages: (toPeerIds: string[], msgs: Message[]) => Promise<void>
 
   loadContacts: () => Promise<void>
   addContact: (name: string, phone: string) => Promise<boolean>
@@ -379,6 +383,65 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {}
   },
 
+  deleteMessages: async (peerId, ids, scope) => {
+    if (!ids.length) return
+    const now = new Date().toISOString()
+    let deletedAt: string | null = null
+    try {
+      for (const id of ids) {
+        const res = await api.deleteMessage(id, scope)
+        if (res.deletedAt) deletedAt = res.deletedAt
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete message')
+      return
+    }
+    set((st) => {
+      if (scope === 'me') {
+        const msgs = { ...st.messages, [peerId]: (st.messages[peerId] ?? []).filter((m) => !ids.includes(m.id)) }
+        return { messages: msgs }
+      }
+      const stamp = deletedAt ?? now
+      const msgs = {
+        ...st.messages,
+        [peerId]: (st.messages[peerId] ?? []).map((m) => (ids.includes(m.id) ? { ...m, deletedAt: stamp, content: '' } : m)),
+      }
+      const chats = st.chats.map((c) =>
+        c.peer.id === peerId && c.lastMessage && ids.includes(c.lastMessage.id)
+          ? { ...c, lastMessage: { ...c.lastMessage, deletedAt: stamp, content: '' } }
+          : c,
+      )
+      return { messages: msgs, chats }
+    })
+    if (scope === 'everyone') {
+      socketClient.emit('msg:deleted', { to: peerId, ids })
+    }
+    void get().loadChats()
+  },
+
+  forwardMessages: async (toPeerIds, msgs) => {
+    for (const to of toPeerIds) {
+      for (const m of msgs) {
+        // call-log bubbles are not forwardable content
+        if (m.type === 'call' || m.deletedAt) continue
+        try {
+          const { message } = await api.sendMessage({
+            to,
+            type: m.type,
+            content: m.content,
+            duration: m.duration ?? undefined,
+            forwarded: true,
+          })
+          socketClient.emit('msg:new', { to, message })
+          useApp.setState((st) => ({ messages: { ...st.messages, [to]: [...(st.messages[to] ?? []), message] } }))
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : `Could not forward to one recipient`)
+        }
+      }
+    }
+    void get().loadChats()
+  },
+
   handleIncomingMessage: async (fromId, message) => {
     if (!fromId) return
     const incoming: Message = { ...message, mine: false }
@@ -599,6 +662,24 @@ export function bindGlobalSocketHandlers() {
       if (list.some((m) => ids.includes(m.id))) next[peer] = mark(list)
     }
     if (Object.keys(next).length) useApp.setState({ messages: { ...messages, ...next } })
+  })
+  // UNSEND: the sender removed these messages for everyone
+  socketClient.on('msg:deleted', (p) => {
+    const { ids } = p as { ids: string[] }
+    if (!Array.isArray(ids) || ids.length === 0) return
+    const stamp = new Date().toISOString()
+    useApp.setState((st) => {
+      const messages: Record<string, Message[]> = {}
+      for (const [peer, list] of Object.entries(st.messages)) {
+        if (list.some((m) => ids.includes(m.id))) {
+          messages[peer] = list.map((m) => (ids.includes(m.id) ? { ...m, deletedAt: stamp, content: '' } : m))
+        }
+      }
+      const chats = st.chats.map((c) =>
+        c.lastMessage && ids.includes(c.lastMessage.id) ? { ...c, lastMessage: { ...c.lastMessage, deletedAt: stamp, content: '' } } : c,
+      )
+      return { messages: { ...st.messages, ...messages }, chats }
+    })
   })
   socketClient.on('typing', (p) => {
     const { peerId, isTyping } = p as { peerId: string; isTyping: boolean }

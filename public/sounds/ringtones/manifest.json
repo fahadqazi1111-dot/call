@@ -1,0 +1,38 @@
+{
+  "vintage-telephone-ringtone": {
+    "file": "/sounds/ringtones/vintage-telephone-ringtone.mp3",
+    "title": "Vintage telephone ringtone",
+    "source": "mixkit.co ringtone",
+    "bytes": 240621
+  },
+  "marimba-ringtone": {
+    "file": "/sounds/ringtones/marimba-ringtone.mp3",
+    "title": "Marimba ringtone",
+    "source": "mixkit.co ringtone",
+    "bytes": 803218
+  },
+  "waiting-ringtone": {
+    "file": "/sounds/ringtones/waiting-ringtone.mp3",
+    "title": "Waiting ringtone",
+    "source": "mixkit.co ringtone",
+    "bytes": 373957
+  },
+  "on-hold-ringtone": {
+    "file": "/sounds/ringtones/on-hold-ringtone.mp3",
+    "title": "On hold ringtone",
+    "source": "mixkit.co ringtone",
+    "bytes": 373857
+  },
+  "marimba-waiting-ringtone": {
+    "file": "/sounds/ringtones/marimba-waiting-ringtone.mp3",
+    "title": "Marimba waiting ringtone",
+    "source": "mixkit.co ringtone",
+    "bytes": 787499
+  },
+  "office-telephone-ring": {
+    "file": "/sounds/ringtones/office-telephone-ring.mp3",
+    "title": "Office telephone ring",
+    "source": "mixkit.co phone",
+    "bytes": 32985
+  }
+}

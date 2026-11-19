@@ -51,7 +51,7 @@ export async function GET(req: Request) {
   const result: Array<{
     conversationId: string
     peer: ReturnType<typeof publicUser>
-    lastMessage: { id: string; type: string; content: string; duration: number | null; createdAt: string; mine: boolean; senderName: string } | null
+    lastMessage: { id: string; type: string; content: string; duration: number | null; createdAt: string; mine: boolean; senderName: string; deletedAt: string | null; forwarded: boolean } | null
     unread: number
     lastActivity: string
     archived: boolean
@@ -71,12 +71,12 @@ export async function GET(req: Request) {
     const recentOnly: { createdAt?: { gt: Date } } = st?.clearedBeforeAt ? { createdAt: { gt: st.clearedBeforeAt } } : {}
     const [lastMsg, unread] = await Promise.all([
       db.message.findFirst({
-        where: { conversationId: conv.id, ...recentOnly },
+        where: { conversationId: conv.id, ...recentOnly, hides: { none: { userId: me.id } } },
         orderBy: { createdAt: 'desc' },
         include: { sender: { select: { id: true, name: true } } },
       }),
       db.message.count({
-        where: { conversationId: conv.id, ...recentOnly, senderId: peer.id, readAt: null },
+        where: { conversationId: conv.id, ...recentOnly, senderId: peer.id, readAt: null, deletedAt: null, hides: { none: { userId: me.id } } },
       }),
     ])
     result.push({
@@ -91,6 +91,8 @@ export async function GET(req: Request) {
             createdAt: lastMsg.createdAt.toISOString(),
             mine: lastMsg.senderId === me.id,
             senderName: lastMsg.sender.name,
+            deletedAt: lastMsg.deletedAt ? lastMsg.deletedAt.toISOString() : null,
+            forwarded: lastMsg.forwarded,
           }
         : null,
       unread,

@@ -86,7 +86,9 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
   const previewOf = (c: ChatSummary) => {
     const lm = c.lastMessage
     if (!lm) return 'Say salam — start the conversation'
-    if (lm.type === 'text') return (lm.mine ? 'You: ' : '') + lm.content
+    if (lm.deletedAt) return lm.mine ? 'You unsent a message' : 'Message unsent'
+    const fwd = lm.forwarded ? 'Forwarded · ' : ''
+    if (lm.type === 'text') return (lm.mine ? 'You: ' : '') + fwd + lm.content
     if (lm.type === 'voice') return `${lm.mine ? 'You sent' : 'Voice message'} · ${fmtDuration(lm.duration ?? 0)}`
     try {
       const meta = JSON.parse(lm.content) as { callType?: string; status?: string; durationSec?: number }

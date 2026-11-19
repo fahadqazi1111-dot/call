@@ -25,6 +25,8 @@ export interface Message {
   createdAt: string
   deliveredAt?: string | null
   readAt?: string | null
+  deletedAt?: string | null
+  forwarded?: boolean
   mine: boolean
   mediaUrl?: string | null
 }
@@ -42,6 +44,8 @@ export interface ChatSummary {
     senderName: string
     deliveredAt?: string | null
     readAt?: string | null
+    deletedAt?: string | null
+    forwarded?: boolean
   } | null
   unread: number
   lastActivity: string
@@ -101,6 +105,9 @@ export interface CallRecord {
 
 export type CallPhase = 'idle' | 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended'
 
+/** WhatsApp-style voice→video upgrade request state for the CURRENT call */
+export type VideoRequestState = 'none' | 'sent' | 'incoming'
+
 export interface CallState {
   callId: string
   phase: CallPhase
@@ -117,6 +124,8 @@ export interface CallState {
   endReason?: string
   localStream?: MediaStream
   remoteStream?: MediaStream
+  /** 'incoming' → peer asked me to accept video · 'sent' → I asked, waiting */
+  videoRequest?: VideoRequestState
 }
 
 /* ================= wallet (REAL MONEY — no coins anywhere) ================= */

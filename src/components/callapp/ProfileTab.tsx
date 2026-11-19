@@ -37,7 +37,11 @@ import {
   LockKeyhole,
   Eye,
   EyeOff,
+  Music4,
+  Play,
+  Square,
 } from 'lucide-react'
+import { RINGTONE_OPTIONS, getSelectedRingtone, setRingtone } from '@/lib/callapp/ringtones'
 
 const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
 
@@ -135,6 +139,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const [showCur, setShowCur] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showConf, setShowConf] = useState(false)
+  const [ringtoneOpen, setRingtoneOpen] = useState(false)
   const markPasswordSet = useApp((s) => s.markPasswordSet)
 
   useEffect(() => {
@@ -460,6 +465,12 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
             onClick={openPassword}
           />
           <Row Icon={Bell} label="Push notifications" sub="New messages & calls" onClick={enableNotifications} />
+          <Row
+            Icon={Music4}
+            label="Call ringtone"
+            sub={getSelectedRingtone().name}
+            onClick={() => setRingtoneOpen(true)}
+          />
         </div>
       </section>
 
@@ -519,6 +530,9 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
           </div>
         </div>
       </div>
+
+      {/* ---------- call ringtone sheet ---------- */}
+      {ringtoneOpen && <RingtoneSheet desk={desk} onClose={() => setRingtoneOpen(false)} />}
 
       {/* ---------- edit profile sheet ---------- */}
       {showEdit && (
@@ -755,6 +769,151 @@ function Row({
       </span>
       <ChevronRight size={17} className="text-[#9AA8C7]" />
     </button>
+  )
+}
+
+/* ================= call ringtone picker ================= */
+
+function RingtoneSheet({ desk, onClose }: { desk?: boolean; onClose: () => void }) {
+  const [selected, setSelected] = useState(getSelectedRingtone().id)
+  const [previewing, setPreviewing] = useState<string | null>(null)
+  const previewAudio = useRef<HTMLAudioElement | null>(null)
+
+  const stopPreview = () => {
+    if (previewAudio.current) {
+      try {
+        previewAudio.current.pause()
+        previewAudio.current.currentTime = 0
+      } catch {}
+      previewAudio.current = null
+    }
+    setPreviewing(null)
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate?.(0)
+      } catch {}
+    }
+  }
+
+  const preview = (id: string, file: string | null) => {
+    stopPreview()
+    setSelected(id)
+    if (!file) {
+      // synthesized classic ring preview (one loop)
+      try {
+        const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        const ctx = new AC()
+        const blip = (freq: number, at: number) => {
+          const osc = ctx.createOscillator()
+          const g = ctx.createGain()
+          osc.type = 'sine'
+          osc.frequency.value = freq
+          g.gain.setValueAtTime(0.0001, ctx.currentTime + at)
+          g.gain.linearRampToValueAtTime(0.09, ctx.currentTime + at + 0.02)
+          g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + at + 0.38)
+          osc.connect(g).connect(ctx.destination)
+          osc.start(ctx.currentTime + at)
+          osc.stop(ctx.currentTime + at + 0.4)
+        }
+        blip(880, 0)
+        blip(700, 0.46)
+        setPreviewing(id)
+        window.setTimeout(() => {
+          void ctx.close()
+          setPreviewing(null)
+        }, 1000)
+      } catch {}
+      return
+    }
+    const audio = new Audio(file)
+    audio.loop = true
+    audio.volume = 0.95
+    previewAudio.current = audio
+    setPreviewing(id)
+    void audio.play().catch(() => {
+      stopPreview()
+    })
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate?.([400, 300, 400])
+      } catch {}
+    }
+  }
+
+  const choose = (id: string, file: string | null) => {
+    setRingtone(id)
+    setSelected(id)
+    stopPreview()
+    toast.success('Ringtone updated')
+    onClose()
+  }
+
+  return (
+    <div
+      className={`inset-0 z-50 flex bg-black/45 ${desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'}`}
+      onClick={() => {
+        stopPreview()
+        onClose()
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Call ringtone"
+    >
+      <div
+        className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-5 pb-[max(env(safe-area-inset-bottom),18px)] shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+        <h2 className="flex items-center gap-2 text-xl font-extrabold text-cink">
+          <Music4 size={20} className="text-cbrand" /> Call ringtone
+        </h2>
+        <p className="mt-1 text-[12.5px] text-cmut">Plays when someone calls you. Tap the speaker to preview.</p>
+        <div className="app-scroll mt-4 max-h-[46vh] overflow-y-auto">
+          {RINGTONE_OPTIONS.map((r) => {
+            const on = r.id === selected
+            const playing = r.id === previewing
+            return (
+              <div
+                key={r.id}
+                className={`flex items-center gap-3 border-b border-cline py-2.5 last:border-b-0 ${on ? 'bg-csoft/60' : ''} rounded-xl px-2`}
+              >
+                <button
+                  type="button"
+                  className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-csoft text-cbrand transition hover:bg-cline"
+                  aria-label={playing ? `Stop preview of ${r.name}` : `Preview ${r.name}`}
+                  onClick={() => (playing ? stopPreview() : preview(r.id, r.file))}
+                >
+                  {playing ? <Square size={16} /> : <Play size={16} />}
+                </button>
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => preview(r.id, r.file)}>
+                  <span className="block truncate text-[15px] font-semibold text-cink">{r.name}</span>
+                  <span className="block text-[11px] text-cmut">{r.file ? 'Free sound · mixkit' : 'Default synthesized ring'}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`flex h-8 flex-none items-center gap-1.5 rounded-full px-3 text-[12px] font-bold transition ${
+                    on ? 'bg-cbrand text-white' : 'bg-csoft text-cbrand hover:bg-cline'
+                  }`}
+                  onClick={() => choose(r.id, r.file)}
+                >
+                  {on ? <CheckCircle2 size={14} /> : null}
+                  {on ? 'Selected' : 'Use'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <button
+          className="btn-p mt-4"
+          onClick={() => {
+            stopPreview()
+            onClose()
+          }}
+        >
+          Done
+        </button>
+      </div>
+    </div>
   )
 }
 

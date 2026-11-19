@@ -150,11 +150,12 @@ export function LiveHostScreen({
       const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
       if (seenGifts.has(dedupKey)) return
       seenGifts.add(dedupKey)
-      // Server-verified fulfillment event drives the animation + gift-specific sound.
+      // Server-verified fulfillment event drives the animation + gift-specific sound
+      // (synced to the TikTok banner→animation beat).
       const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind)
+      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
       setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), d.payload.gift.durationMs + 400)
+      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
       void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
       // battle score updates also arrive via the relayed battle:score event
     }

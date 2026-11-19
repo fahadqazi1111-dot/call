@@ -163,8 +163,10 @@ export const api = {
   deleteChat: (peerId: string) => request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'DELETE' }),
   chatState: (peerId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute') =>
     request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
-  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image'; content: string; duration?: number }) =>
+  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image'; content: string; duration?: number; forwarded?: boolean }) =>
     request<{ message: Message }>('/api/messages', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteMessage: (id: string, scope: 'everyone' | 'me') =>
+    request<{ ok: boolean; scope: string; deletedAt?: string }>(`/api/messages/${id}?scope=${scope}`, { method: 'DELETE' }),
   markRead: (peerId: string) =>
     request<{ ok: boolean; updated: number }>('/api/messages/read', {
       method: 'POST',

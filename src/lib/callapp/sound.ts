@@ -1,10 +1,41 @@
 'use client'
 
+/** Real gift SFX files (scripts/download-sounds.mjs, mixkit.co free license). */
+const GIFT_SFX: Record<string, string> = {
+  lion: '/sounds/gifts/lion.mp3',
+  superlion: '/sounds/gifts/lion.mp3',
+  car: '/sounds/gifts/car.mp3',
+  dragon: '/sounds/gifts/dragon.mp3',
+  rocket: '/sounds/gifts/rocket.mp3',
+  fireworks: '/sounds/gifts/fireworks.mp3',
+  crown: '/sounds/gifts/crown.mp3',
+  castle: '/sounds/gifts/castle.mp3',
+  heart: '/sounds/gifts/heart.mp3',
+  rose: '/sounds/gifts/rose.mp3',
+  flower: '/sounds/gifts/rose.mp3',
+  generic: '/sounds/gifts/generic.mp3',
+}
+
+import { getSelectedRingtone } from './ringtones'
+
+/** Louder SFX for the heavy TikTok-style gifts. */
+const SFX_VOLUME: Record<string, number> = {
+  lion: 1,
+  superlion: 1,
+  dragon: 0.95,
+  car: 0.9,
+  fireworks: 0.9,
+}
+
 /** Tiny WebAudio ringtones/UX sounds - free, no assets needed. */
 class SoundKit {
   private ctx: AudioContext | null = null
   private timers: number[] = []
   private unlocked = false
+  private sfxTimers: number[] = []
+  private sfxFailed = new Set<string>()
+  private ringAudio: HTMLAudioElement | null = null
+  private ringAssetFailed = false
 
   private ac(): AudioContext | null {
     if (typeof window === 'undefined') return null
@@ -80,15 +111,46 @@ class SoundKit {
     this.timers.push(window.setInterval(loop, 3000))
   }
 
-  /** Incoming call ringtone (double chirp), loops until stopRing. */
+  /** Incoming call ringtone — user-selected asset, looping, until stopRing. */
   startRingtone() {
     this.stopRing()
+    const rt = getSelectedRingtone()
+    if (rt.file && !this.ringAssetFailed) {
+      try {
+        const audio = new Audio(rt.file)
+        audio.loop = true
+        audio.volume = 0.95
+        audio.preload = 'auto'
+        this.ringAudio = audio
+        audio.onerror = () => {
+          this.ringAssetFailed = true
+          this.ringAudio = null
+          this.startRingtoneSynth()
+        }
+        void audio.play().catch(() => {
+          this.startRingtoneSynth()
+        })
+        this.vibrateIncoming()
+        return
+      } catch {
+        this.ringAssetFailed = true
+      }
+    }
+    this.startRingtoneSynth()
+  }
+
+  /** original synthesized double-chirp ring — always-available fallback */
+  private startRingtoneSynth() {
     const loop = () => {
       this.beep(880, 380, 0.09)
       this.beep(700, 380, 0.09, 460)
     }
     loop()
     this.timers.push(window.setInterval(loop, 2200))
+    this.vibrateIncoming()
+  }
+
+  private vibrateIncoming() {
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate?.([400, 300, 400, 300, 800])
@@ -99,6 +161,13 @@ class SoundKit {
   stopRing() {
     this.timers.forEach((t) => window.clearInterval(t))
     this.timers = []
+    if (this.ringAudio) {
+      try {
+        this.ringAudio.pause()
+        this.ringAudio.currentTime = 0
+      } catch {}
+      this.ringAudio = null
+    }
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate?.(0)
@@ -182,11 +251,53 @@ class SoundKit {
 
   /**
    * Per-gift cinematic sound, matched to the gift's animKind.
-   * Rose/flower/heart → soft plucks, Crown → bells, Car → engine rev,
-   * Rocket → launch whoosh, Fireworks → crackle, Dragon → growl,
-   * Lion → powerful roar, Castle → epic chimes, Galaxy → cosmic roar.
+   * Prefers the real downloaded SFX file (roar/engine/chime...), falls back
+   * to the synthesized effect when the file is missing or fails to play.
+   * `delayMs` syncs the sound with the TikTok banner-then-animation beat.
    */
-  giftEffect(animKind = 'generic') {
+  giftEffect(animKind = 'generic', delayMs = 0) {
+    const src = GIFT_SFX[animKind]
+    if (src && !this.sfxFailed.has(animKind)) {
+      this.sfxTimers.push(
+        window.setTimeout(() => {
+          this.playSfx(animKind, src)
+        }, Math.max(0, delayMs)),
+      )
+      return
+    }
+    if (delayMs > 0) {
+      this.sfxTimers.push(window.setTimeout(() => this.giftEffectSynth(animKind), Math.max(0, delayMs)))
+      return
+    }
+    this.giftEffectSynth(animKind)
+  }
+
+  private playSfx(animKind: string, src: string) {
+    try {
+      const audio = new Audio(src)
+      audio.volume = SFX_VOLUME[animKind] ?? 0.85
+      audio.preload = 'auto'
+      audio.onerror = () => {
+        // asset missing — remember and use the synth fallback from now on
+        this.sfxFailed.add(animKind)
+        this.giftEffectSynth(animKind)
+      }
+      void audio.play().catch(() => {
+        this.giftEffectSynth(animKind)
+      })
+    } catch {
+      this.giftEffectSynth(animKind)
+    }
+  }
+
+  /** cancel any pending delayed gift sounds (e.g. when leaving a live) */
+  cancelGiftSfx() {
+    this.sfxTimers.forEach((t) => window.clearTimeout(t))
+    this.sfxTimers = []
+  }
+
+  /** legacy synthesized effects — fallback when real assets are unavailable */
+  giftEffectSynth(animKind = 'generic') {
     switch (animKind) {
       case 'rose':
       case 'flower':

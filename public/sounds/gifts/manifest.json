@@ -1,0 +1,62 @@
+{
+  "lion": {
+    "file": "/sounds/gifts/lion.mp3",
+    "source": "mixkit.co sfx 6",
+    "title": "Wild lion animal roar",
+    "bytes": 33601
+  },
+  "dragon": {
+    "file": "/sounds/gifts/dragon.mp3",
+    "source": "mixkit.co sfx 309",
+    "title": "Angry dragon growl",
+    "bytes": 142309
+  },
+  "car": {
+    "file": "/sounds/gifts/car.mp3",
+    "source": "mixkit.co sfx 1538",
+    "title": "Fast car drive by",
+    "bytes": 116613
+  },
+  "rocket": {
+    "file": "/sounds/gifts/rocket.mp3",
+    "source": "mixkit.co sfx 1714",
+    "title": "Fast rocket whoosh",
+    "bytes": 133622
+  },
+  "fireworks": {
+    "file": "/sounds/gifts/fireworks.mp3",
+    "source": "mixkit.co sfx 1689",
+    "title": "Multiple fireworks explosions",
+    "bytes": 104703
+  },
+  "crown": {
+    "file": "/sounds/gifts/crown.mp3",
+    "source": "mixkit.co sfx 3062",
+    "title": "Magic wand sparkle",
+    "bytes": 77103
+  },
+  "castle": {
+    "file": "/sounds/gifts/castle.mp3",
+    "source": "mixkit.co sfx 2583",
+    "title": "Magical light transition",
+    "bytes": 158830
+  },
+  "heart": {
+    "file": "/sounds/gifts/heart.mp3",
+    "source": "mixkit.co sfx 493",
+    "title": "Fast Heartbeat",
+    "bytes": 312040
+  },
+  "rose": {
+    "file": "/sounds/gifts/rose.mp3",
+    "source": "mixkit.co sfx 1496",
+    "title": "Magical swish",
+    "bytes": 150996
+  },
+  "generic": {
+    "file": "/sounds/gifts/generic.mp3",
+    "source": "mixkit.co sfx 871",
+    "title": "Fairy magic sparkle",
+    "bytes": 43742
+  }
+}
