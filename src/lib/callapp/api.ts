@@ -22,6 +22,8 @@ import type {
   GiftReceivedItem,
   GiftSendResult,
   GiftSessionStats,
+  GroupItem,
+  GroupMessageItem,
   LedgerEntryItem,
   LiveComment,
   LiveSessionItem,
@@ -383,6 +385,36 @@ export const api = {
     }),
   battleHistory: () => request<{ battles: BattleHistoryItem[] }>('/api/battles'),
   battleDetail: (battleId: string) => request<{ battle: BattleInfo }>('/api/battles', { method: 'POST', body: JSON.stringify({ battleId }) }),
+  battleTap: (battleId: string, side: number) =>
+    request<{ ok: boolean; side: number; total: number }>('/api/battles/tap', {
+      method: 'POST',
+      body: JSON.stringify({ battleId, side }),
+    }),
+  liveViewers: (id: string) =>
+    request<{ viewers: Array<{ userId: string; name: string; avatarKey: number; avatarUrl: string | null }> }>(
+      `/api/live/${id}/viewers`
+    ),
+  searchUsers: (q: string) =>
+    request<{ users: Array<{ id: string; name: string; username: string; avatarKey: number; avatarUrl: string | null; role?: string; isOfficial?: boolean }> }>(
+      `/api/users/search?q=${encodeURIComponent(q)}`
+    ),
+  appConfig: () => request<{ splashEnabled: boolean }>('/api/config'),
+
+  /* ---------- group chats ---------- */
+  groups: () => request<{ groups: GroupItem[] }>('/api/groups'),
+  createGroup: (name: string, memberIds: string[]) =>
+    request<{ group: GroupItem }>('/api/groups', { method: 'POST', body: JSON.stringify({ name, memberIds }) }),
+  groupDetail: (id: string) => request<{ group: GroupItem & { myRole: string }; messages: GroupMessageItem[] }>(`/api/groups/${id}`),
+  groupMessages: (id: string, before?: string) =>
+    request<{ messages: GroupMessageItem[] }>(
+      `/api/groups/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`
+    ),
+  groupSend: (id: string, content: string) =>
+    request<{ message: GroupMessageItem }>(`/api/groups/${id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }),
+  groupAddMembers: (id: string, memberIds: string[]) =>
+    request<{ ok: boolean; added: number }>(`/api/groups/${id}/members`, { method: 'POST', body: JSON.stringify({ memberIds }) }),
+  groupLeave: (id: string) =>
+    request<{ ok: boolean; dissolved: boolean }>(`/api/groups/${id}`, { method: 'DELETE' }),
 
   /* ---------- notifications ---------- */
   notifications: (unreadOnly?: boolean) =>

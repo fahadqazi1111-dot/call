@@ -417,6 +417,44 @@ export interface BattleHistoryItem {
   participants: Array<{ userId: string; name: string; avatarKey: number; avatarUrl: string | null; side: number; score: number }>
 }
 
+/* ================= group chats ================= */
+
+export interface GroupMemberItem {
+  id: string
+  name: string
+  username: string
+  avatarKey: number
+  avatarUrl: string | null
+  role: string // owner | admin | member
+}
+
+export interface GroupMessageItem {
+  id: string
+  type: string // text | system
+  content: string
+  mine: boolean
+  sender: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+  createdAt: string
+}
+
+export interface GroupItem {
+  id: string
+  name: string
+  avatarKey: number
+  ownerId: string
+  myRole?: string
+  members: GroupMemberItem[]
+  lastMessage: {
+    id: string
+    content: string
+    senderName: string
+    mine: boolean
+    createdAt: string
+  } | null
+  unread: number
+  updatedAt: string
+}
+
 /* ================= notifications ================= */
 
 export interface AppNotification {

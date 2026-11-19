@@ -14,9 +14,7 @@ export async function GET(req: Request) {
   })
   const battles = parts.map((p) => {
     const b = p.battle
-    const sideScores = [0, 1].map((side) =>
-      b.participants.filter((x) => x.side === side).reduce((n, x) => n + x.score, 0)
-    )
+    const sideScores = [Math.round(b.sideAPoints), Math.round(b.sideBPoints)]
     return {
       id: b.id,
       mode: b.mode,
@@ -51,9 +49,7 @@ export async function POST(req: Request) {
       include: { participants: true },
     })
     if (!battle) return NextResponse.json({ error: 'Battle not found' }, { status: 404 })
-    const sideScores = [0, 1].map((side) =>
-      battle.participants.filter((x) => x.side === side).reduce((n, x) => n + x.score, 0)
-    )
+    const sideScores = [Math.round(battle.sideAPoints), Math.round(battle.sideBPoints)]
     return NextResponse.json({
       battle: {
         id: battle.id,

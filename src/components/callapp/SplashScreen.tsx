@@ -1,26 +1,40 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { CallWordmark } from './CallLogo'
 import { useApp } from '@/lib/callapp/store'
+import { api } from '@/lib/callapp/api'
 
 export function SplashScreen() {
   const bootstrap = useApp((s) => s.bootstrap)
   const booted = useApp((s) => s.booted)
   const phase = useApp((s) => s.phase)
+  /** admin can disable the splash entirely — fetch once, skip immediately */
+  const [skip, setSkip] = useState<boolean | null>(null)
 
   useEffect(() => {
     void bootstrap()
+    void api
+      .appConfig()
+      .then((c) => setSkip(!c.splashEnabled))
+      .catch(() => setSkip(false))
   }, [bootstrap])
 
   useEffect(() => {
-    if (booted) {
+    if (skip) {
+      useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
+      return
+    }
+    if (skip === false && booted) {
       const t = window.setTimeout(() => {
         useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
       }, 900)
       return () => window.clearTimeout(t)
     }
-  }, [booted, phase])
+  }, [booted, phase, skip])
+
+  // admin disabled the splash → render nothing (instant jump to auth/app)
+  if (skip) return null
 
   return (
     <div className="bg-dark-grad absolute inset-0 z-50 flex flex-col items-center justify-center text-white">

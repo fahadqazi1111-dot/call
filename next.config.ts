@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // remove the Next.js dev "N" badge from the bottom-left corner permanently
+  devIndicators: false,
 };
 
 export default nextConfig;

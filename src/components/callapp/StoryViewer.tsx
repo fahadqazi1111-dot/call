@@ -320,9 +320,6 @@ export function StoryViewer({
           </div>
         )}
       </div>
-      <button className="absolute right-4 top-4 z-[95] rounded-full bg-white/10 p-2.5 text-white xl:hidden" onClick={onClose}>
-        <X size={22} />
-      </button>
     </div>
   )
 }

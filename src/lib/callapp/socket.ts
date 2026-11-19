@@ -63,6 +63,8 @@ class SocketClient {
       'room:mic_request',
       'room:mic_invite',
       'room:self_mute',
+      // group chats
+      'group:msg',
       // video live + battles
       'live:viewers',
       'live:viewer:join',
@@ -78,6 +80,9 @@ class SocketClient {
       'battle:score',
       'battle:timeup',
       'battle:ended',
+      // viewer → host battle requests (WhatsApp-style prompt)
+      'battle:request',
+      'battle:request:response',
       // conferences (multi-party mesh calls)
       'conf:state',
       'conf:incoming',

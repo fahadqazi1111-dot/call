@@ -563,6 +563,10 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
   const [checkout, setCheckout] = useState<{ payment: PendingPayment } | null>(null)
   const [busy, setBusy] = useState(false)
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
+  /** TikTok flow: tap a gift → choose HOW to pay: wallet balance or card */
+  const [payFor, setPayFor] = useState<GiftItem | null>(null)
+  /** confirm popup before spending wallet balance */
+  const [confirmFor, setConfirmFor] = useState<GiftItem | null>(null)
   const stage = recipients.length > 1 && !recipientId ? 'recipient' : 'gift'
 
   useEffect(() => {
@@ -614,7 +618,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
         clientKey: `giftw:${gift.id}:${rid}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
       })
       setWalletBalance(Math.floor(res.wallet?.available ?? 0))
-      toast.success(`${gift.name} sent to ${recipient?.name ?? 'host'} from wallet`)
+      toast.success(`${gift.name} sent to ${recipient?.name ?? 'host'} — recorded in your wallet transactions`)
       // the animation arrives via the server relay for the whole room/live
       onSent({
         ok: true,
@@ -624,6 +628,8 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
         to: { id: rid, name: recipient?.name ?? 'host', avatarKey: recipient?.avatarKey ?? 0, avatarUrl: recipient?.avatarUrl ?? null },
         battle: null,
       })
+      setPayFor(null)
+      setConfirmFor(null)
       onClose()
       return true
     } catch (e) {
@@ -631,8 +637,12 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
       if (!msg.toLowerCase().includes('balance')) {
         toast.error(msg || 'Could not send the gift')
         setBusy(false)
+        setConfirmFor(null)
         return true // surfaced — don't fall through to card flow
       }
+      toast.error('Balance is too low — buy with card instead')
+      setConfirmFor(null)
+      setPayFor(gift)
       return false // insufficient balance → card checkout
     } finally {
       setBusy(false)
@@ -643,11 +653,6 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
     if (!recipientId) {
       setSelected(gift)
       return
-    }
-    // WALLET FIRST — one tap when the balance covers it, TikTok-style instant send
-    if (walletBalance !== null && walletBalance >= gift.priceUsd) {
-      const sent = await sendByWallet(gift, recipientId)
-      if (sent) return
     }
     setBusy(true)
     try {
@@ -682,6 +687,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
           emoji: gift.emoji,
         },
       })
+      setPayFor(null)
     } catch (e) {
       toast.error((e as Error).message || 'Checkout failed')
     } finally {
@@ -779,7 +785,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                     className="flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition hover:bg-cbg"
                     onClick={() => {
                       setRecipientId(r.id)
-                      if (selected) void startCheckout(selected)
+                      if (selected) setPayFor(selected)
                     }}
                   >
                     <Avatar name={r.name} avatarKey={r.avatarKey} size={42} src={r.avatarUrl} />
@@ -787,7 +793,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                       <div className="truncate text-[14px] font-bold text-cink">{r.name}</div>
                       <div className="text-[11px] text-cmut">
                         {r.role === 'host' ? 'Host' : r.role === 'cohost' ? 'Co-host' : `Battle team ${r.side === 0 ? 'A' : 'B'}`}
-                        {r.role === 'battle' && r.score > 0 ? ` · $${r.score.toFixed(2)} scored` : ''}
+                        {r.role === 'battle' && r.score > 0 ? ` · ${Math.round(r.score)} pts scored` : ''}
                       </div>
                     </div>
                     <span className="rounded-full bg-csoft px-2.5 py-1 text-[11px] font-bold text-cbrand">Select</span>
@@ -796,7 +802,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
               ))}
             </ul>
           ) : (
-            /* ---- gift grid (money prices) ---- */
+            /* ---- gift grid (money prices) + payment chooser ---- */
             <div className="px-4 pb-2 pt-2">
               <div className="grid max-h-[300px] grid-cols-4 gap-2 overflow-y-auto app-scroll">
                 {gifts.map((g) => (
@@ -808,7 +814,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                     disabled={busy}
                     onClick={() => {
                       setSelected(g)
-                      void startCheckout(g)
+                      setPayFor(g)
                     }}
                   >
                     <span className={g.priceUsd >= 10 ? 'text-[30px]' : 'text-[26px]'}>{g.emoji}</span>
@@ -822,15 +828,90 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
               <div className="mt-2 flex items-center gap-1.5 text-[11px] text-cmut">
                 <Info size={12} className="flex-none" />
                 {walletBalance !== null && walletBalance > 0
-                  ? `Wallet balance is used first — short balance falls back to card. The host earns ≈${100 - commission}%.`
+                  ? `You can pay from your wallet balance or buy with card. The host earns ≈${100 - commission}%.`
                   : `The host earns ≈${100 - commission}% after commission and processing fees — credited the moment your payment is verified.`}
               </div>
+
+              {/* ---- payment chooser: balance or card ---- */}
+              {payFor && recipientId && (
+                <div className="mt-3 rounded-[18px] border border-cline bg-cbg p-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-[26px]">{payFor.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13.5px] font-extrabold text-cink">
+                        Send {payFor.name} to {recipient?.name ?? 'host'}
+                      </div>
+                      <div className="text-[11.5px] text-cmut">Choose how to pay ${payFor.priceUsd.toFixed(2)}</div>
+                    </div>
+                    <button
+                      className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-white text-cmut ring-1 ring-cline"
+                      onClick={() => setPayFor(null)}
+                      aria-label="Cancel payment"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    {walletBalance !== null && walletBalance >= payFor.priceUsd ? (
+                      <button
+                        className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-cbrand text-[14px] font-bold text-white disabled:opacity-50"
+                        disabled={busy}
+                        onClick={() => setConfirmFor(payFor)}
+                      >
+                        💰 Send from your balance · ${walletBalance.toFixed(2)} available
+                      </button>
+                    ) : (
+                      <div className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-csoft text-[13px] font-semibold text-cmut">
+                        💰 Wallet balance {walletBalance !== null ? `$${walletBalance.toFixed(2)}` : ''} · not enough for this gift
+                      </div>
+                    )}
+                    <button
+                      className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-gradient-to-r from-[#F59E0B] to-[#E1306C] text-[14px] font-bold text-white disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => void startCheckout(payFor)}
+                    >
+                      {busy ? <Loader2 size={17} className="animate-spin" /> : '💳'} Buy with card · ${payFor.priceUsd.toFixed(2)}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
       {checkout && <PaymentModal payment={checkout.payment} onPaid={() => void onPaid(checkout.payment)} onClose={() => setCheckout(null)} />}
+
+      {/* confirm popup — spending wallet balance */}
+      {confirmFor && recipientId && (
+        <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/55 px-6" role="dialog" aria-modal="true" aria-label="Confirm gift from balance">
+          <div className="w-full max-w-[360px] rounded-[24px] bg-white p-5 text-center shadow-2xl">
+            <span className="text-[40px]">{confirmFor.emoji}</span>
+            <h3 className="pt-2 text-[16.5px] font-extrabold text-cink">Confirm gift</h3>
+            <p className="pt-1.5 text-[13px] leading-[19px] text-cmut">
+              Send <b>{confirmFor.name}</b> to <b>{recipient?.name ?? 'host'}</b> for <b>${confirmFor.priceUsd.toFixed(2)}</b> from your wallet balance?
+              <br />
+              The amount is deducted instantly and saved in your transaction history.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                className="h-12 flex-1 rounded-[14px] bg-csoft text-[14px] font-bold text-cink"
+                disabled={busy}
+                onClick={() => setConfirmFor(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="h-12 flex-1 rounded-[14px] bg-cbrand text-[14px] font-bold text-white disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void sendByWallet(confirmFor, recipientId)}
+              >
+                {busy ? <Loader2 size={17} className="mx-auto animate-spin" /> : 'Confirm & send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -6,14 +6,14 @@ import {
   X, Users, Gift, Banknote, ShieldAlert, Bot, Megaphone, Image as ImageIcon,
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
-  Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall,
+  Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall, Sparkles,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { StaffTick } from './StaffTick'
 import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'broadcast' | 'smtp'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp'
 
 interface StaffMember {
   id: string
@@ -76,6 +76,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
       { id: 'moderation', label: 'Moderation', Icon: Radio, adminOnly: false },
       { id: 'ai', label: 'CALL AI', Icon: Bot, adminOnly: false },
       { id: 'calls', label: 'Calls & Conference', Icon: PhoneCall, adminOnly: true },
+      { id: 'app', label: 'App experience', Icon: Sparkles, adminOnly: true },
       { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
       { id: 'broadcast', label: 'Messages', Icon: Megaphone, adminOnly: true },
       { id: 'smtp', label: 'Email / SMTP', Icon: Mail, adminOnly: true },
@@ -144,6 +145,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'moderation' && <ModerationSection />}
           {section === 'ai' && <AiSection />}
           {section === 'calls' && isAdmin && <CallsSection />}
+          {section === 'app' && isAdmin && <AppSection />}
           {section === 'ads' && <AdsSection />}
           {section === 'broadcast' && isAdmin && <BroadcastSection />}
           {section === 'smtp' && isAdmin && <SmtpSection />}
@@ -912,6 +914,64 @@ function AiSection() {
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+/** App experience: splash screen toggle (client-side, instant effect) */
+function AppSection() {
+  const [splashEnabled, setSplashEnabled] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const load = async () => {
+    try {
+      const res = await api.adminSettings()
+      const app = (res.settings?.app ?? {}) as { splashEnabled?: boolean }
+      setSplashEnabled(app.splashEnabled !== false)
+    } catch {}
+    setLoading(false)
+  }
+  useEffect(() => {
+    queueMicrotask(() => void load())
+  }, [])
+  const save = async (next: boolean) => {
+    setSaving(true)
+    try {
+      await api.adminSaveSettings('app', { splashEnabled: next })
+      setSplashEnabled(next)
+      toast.success(next ? 'Splash screen enabled' : 'Splash screen disabled — the app opens straight to login')
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not save')
+    } finally {
+      setSaving(false)
+    }
+  }
+  if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+  return (
+    <div className="max-w-xl">
+      <h3 className="pb-1 text-[15px] font-extrabold text-cink">App experience</h3>
+      <p className="pb-4 text-[12px] text-cmut">
+        Control branding surfaces shown before the app loads. Changes apply instantly for every user
+        on the next app open.
+      </p>
+      <div className="flex items-center justify-between rounded-[16px] border border-cline px-4 py-3.5">
+        <div>
+          <p className="text-[13.5px] font-bold text-cink">Splash screen</p>
+          <p className="text-[11.5px] text-cmut">Animated CALL logo while the app boots</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={splashEnabled}
+          aria-label="Toggle splash screen"
+          className={`relative h-8 w-14 flex-none rounded-full transition ${splashEnabled ? 'bg-cbrand' : 'bg-[#C6CFE3]'}`}
+          disabled={saving}
+          onClick={() => void save(!splashEnabled)}
+        >
+          <span
+            className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${splashEnabled ? 'left-7' : 'left-1'}`}
+          />
+        </button>
+      </div>
     </div>
   )
 }

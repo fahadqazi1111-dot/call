@@ -228,7 +228,7 @@ export async function sendGiftFromWallet(
       { available: gross },
       `Refund — gift ${gift.name} could not be delivered — $${gross.toFixed(2)}`,
       'gift_send',
-      null,
+      undefined,
       `giftrefund:${clientKey}`
     )
   }
@@ -241,7 +241,7 @@ export async function sendGiftFromWallet(
  * Idempotent by idempotencyTag.
  */
 async function deliverGift(args: {
-  gift: { id: string; name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; currency: string }
+  gift: { id: string; name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; currency: string; imageUrl?: string | null }
   sender: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   recipient: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   context: 'room' | 'live' | 'battle'
@@ -290,18 +290,30 @@ async function deliverGift(args: {
     args.idempotencyTag
   )
 
-  // battle scoring — verified value only
+  // battle scoring — TikTok-style TEAM points: gifts are the heavy booster
+  // (price × 100 points), double-taps add 1 each (see /api/battles/tap).
+  // participant.score stays in $ for per-person gift stats.
   let battleTotal: number | null = null
+  let battleAdded = 0
   if (context === 'battle' && args.battleId && typeof args.battleSide === 'number') {
     const part = await db.battleParticipant.findFirst({
       where: { battleId: String(args.battleId), side: args.battleSide, userId: recipient.id },
     })
     if (part) {
-      const updated = await db.battleParticipant.update({
+      await db.battleParticipant.update({
         where: { id: part.id },
         data: { score: { increment: gross } },
       })
-      battleTotal = updated.score
+      const giftPoints = Math.max(1, Math.round(gross * 100))
+      battleAdded = giftPoints
+      const pointsField = args.battleSide === 0 ? 'sideAPoints' : 'sideBPoints'
+      const updatedBattle = await db.battle.update({
+        where: { id: String(args.battleId) },
+        data: { [pointsField]: { increment: giftPoints } },
+      })
+      battleTotal = Math.round(
+        (args.battleSide === 0 ? updatedBattle.sideAPoints : updatedBattle.sideBPoints)
+      )
     }
   }
 
@@ -334,7 +346,7 @@ async function deliverGift(args: {
     to: { id: recipient.id, name: recipient.name, avatarKey: recipient.avatarKey, avatarUrl: recipient.avatarUrl },
     battle:
       context === 'battle' && args.battleId
-        ? { battleId: args.battleId, side: args.battleSide, added: gross, total: battleTotal }
+        ? { battleId: args.battleId, side: args.battleSide, added: battleAdded, total: battleTotal }
         : null,
   }
   if (context === 'room' && args.roomId) {

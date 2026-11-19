@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { X, Send, Gift, Eye, Swords, Loader2, Check, Trophy } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { X, Send, Gift, Eye, Swords, Loader2, Check, Trophy, SmilePlus, Hand } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -12,6 +12,21 @@ import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { BattleVideoLayout } from './LiveHostScreen'
 import type { LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/callapp/types'
+
+const REACTION_EMOJIS = ['❤️', '😂', '😮', '🔥', '👏', '🎉', '💯', '😢']
+
+interface ReactionFloat {
+  key: number
+  emoji: string
+  x: number
+}
+
+interface HeartBurst {
+  key: number
+  x: number
+  y: number
+  emoji: string
+}
 
 /**
  * Live viewer: full-screen vertical video of the host (and battle
@@ -37,6 +52,27 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     remaining: number | null
   }>({ id: '', phase: 'none', participants: [], endsAt: null, sideScores: [0, 0], winnerSide: null, remaining: null })
   const animKey = useRef(0)
+  /* TikTok-style floating reactions + double-tap hearts */
+  const [reacts, setReacts] = useState<ReactionFloat[]>([])
+  const [hearts, setHearts] = useState<HeartBurst[]>([])
+  const [reactOpen, setReactOpen] = useState(false)
+  const [battleReqSent, setBattleReqSent] = useState(false)
+  const floatKey = useRef(0)
+  const lastTapRef = useRef<{ t: number; x: number }>({ t: 0, x: 0 })
+
+  const pushReaction = useCallback((emoji: string, mine: boolean) => {
+    const key = ++floatKey.current
+    const x = 6 + Math.random() * 78
+    setReacts((r) => [...r.slice(-24), { key, emoji, x }])
+    window.setTimeout(() => setReacts((r) => r.filter((x2) => x2.key !== key)), 2700)
+    if (mine) soundKit.pop()
+  }, [])
+
+  const pushHeart = useCallback((x: number, y: number, emoji = '❤️') => {
+    const key = ++floatKey.current
+    setHearts((h) => [...h.slice(-10), { key, x, y, emoji }])
+    window.setTimeout(() => setHearts((h) => h.filter((h2) => h2.key !== key)), 1400)
+  }, [])
 
   /* ---------- join as viewer ---------- */
   useEffect(() => {
@@ -126,9 +162,25 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       setBattle((b) => ({ ...b, phase: 'ended', winnerSide: d.winnerSide, sideScores: d.sideScores }))
       soundKit.fanfare()
     }
+    /* floating reactions from everyone in the room */
+    const onReact = (p: unknown) => {
+      const d = p as { liveId: string; emoji: string }
+      if (d.liveId === session.id && d.emoji) pushReaction(d.emoji, false)
+    }
+    const onBattleResp = (p: unknown) => {
+      const d = p as { liveId: string; accepted: boolean; host: { name: string } }
+      if (d.liveId !== session.id) return
+      if (d.accepted) toast.success(`${d.host.name} accepted your battle request — invite incoming!`)
+      else {
+        toast.info(`${d.host.name} declined the battle for now`)
+        setBattleReqSent(false)
+      }
+    }
     const offC = socketClient.on('live:chat', onComment)
     const offG = socketClient.on('live:gift', onGift)
     const offE = socketClient.on('live:ended', onEnded)
+    const offR = socketClient.on('live:react', onReact)
+    const offBR = socketClient.on('battle:request:response', onBattleResp)
     const offS = socketClient.on('battle:started', onStart)
     const offSc = socketClient.on('battle:score', onScore)
     const offT = socketClient.on('battle:timeup', onTimeup)
@@ -137,12 +189,14 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       offC()
       offG()
       offE()
+      offR()
+      offBR()
       offS()
       offSc()
       offT()
       offBE()
     }
-  }, [session.id, battle.id, onClose])
+  }, [session.id, battle.id, onClose, pushReaction])
 
   /* ---------- battle timer ---------- */
   useEffect(() => {
@@ -167,12 +221,76 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     } catch {}
   }
 
+  const sendReaction = (emoji: string) => {
+    setReactOpen(false)
+    socketClient.emit('live:react', { liveId: session.id, emoji, from: { id: me?.id, name: me?.name } })
+    pushReaction(emoji, true)
+  }
+
+  /** TikTok double-tap: hearts always; during a live battle each tap scores a team */
+  const handleVideoTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * 100
+    const y = ((e.clientY - rect.top) / rect.height) * 100
+    const now = Date.now()
+    const isDouble = now - lastTapRef.current.t < 320 && Math.abs(x - lastTapRef.current.x) < 12
+    lastTapRef.current = { t: now, x }
+    if (!isDouble) return
+    const side = x < 50 ? 0 : 1
+    pushHeart(Math.min(88, Math.max(12, x)), Math.min(80, Math.max(12, y)), battle.phase === 'live' ? (side === 0 ? '🔵' : '🔴') : '❤️')
+    if (battle.phase === 'live' && battle.id) {
+      void api
+        .battleTap(battle.id, side)
+        .then((res) => {
+          setBattle((b) => ({
+            ...b,
+            sideScores: b.sideScores.map((s, i) => (i === res.side ? res.total : s)),
+          }))
+        })
+        .catch(() => {})
+    }
+  }
+
+  const requestBattle = () => {
+    if (!me || battleReqSent) return
+    socketClient.emit('battle:request', {
+      liveId: session.id,
+      hostId: session.host.id,
+      from: { id: me.id, name: me.name, avatarKey: me.avatarKey, avatarUrl: me.avatarUrl ?? null },
+    })
+    setBattleReqSent(true)
+    toast.success('Battle request sent to the host')
+    window.setTimeout(() => setBattleReqSent(false), 30000)
+  }
+
   const battleLive = battle.phase === 'live' || battle.phase === 'ended'
   const lmStreams = liveManager.snapshot().publisherStreams
 
   return (
     <div className={`${embedded ? 'absolute inset-0' : 'fixed inset-0 z-[80]'} bg-black text-white`}>
       <GiftAnimationLayer gifts={anims} />
+
+      {/* floating reactions (TikTok-style rise from the bottom) */}
+      <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+        {reacts.map((r) => (
+          <span key={r.key} className="react-float absolute text-3xl drop-shadow-lg" style={{ left: `${r.x}%`, bottom: 90 }}>
+            {r.emoji}
+          </span>
+        ))}
+      </div>
+
+      {/* double-tap heart bursts */}
+      <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+        {hearts.map((h) => (
+          <span
+            key={h.key}
+            className="tap-heart absolute -translate-x-1/2 -translate-y-1/2 text-[44px] drop-shadow-xl"
+            style={{ left: `${h.x}%`, top: `${h.y}%` }}
+          >
+            {h.emoji}
+          </span>
+        ))}
+      </div>
 
       {/* video */}
       {battleLive ? (
@@ -195,6 +313,9 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
           <Loader2 className="animate-spin text-white/40" size={34} />
         </div>
       )}
+
+      {/* double-tap target — sits above the video, below the top bars */}
+      <div className="absolute inset-0 z-10" onClick={handleVideoTap} aria-label="Double-tap to react" />
 
       {/* top bar — pushed below the reels feed header when embedded */}
       <div
@@ -277,6 +398,42 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
             onChange={(e) => setCommentInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void sendComment()}
           />
+          {/* reactions — TikTok-style floating emoji */}
+          <div className="relative flex-none">
+            <button
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 backdrop-blur transition hover:bg-white/25"
+              onClick={() => setReactOpen((v) => !v)}
+              aria-label="Send a reaction"
+            >
+              <SmilePlus size={19} />
+            </button>
+            {reactOpen && (
+              <div className="absolute bottom-[52px] right-0 z-50 flex items-center gap-1 rounded-full bg-black/85 px-2 py-1.5 shadow-2xl ring-1 ring-white/20 backdrop-blur">
+                {REACTION_EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    className="rounded-full p-1 text-[20px] transition hover:scale-125"
+                    onClick={() => sendReaction(e)}
+                    aria-label={`React ${e}`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* audience → host battle request (WhatsApp-style accept flow on the host) */}
+          {!battleLive && session.mode === 'solo' && (
+            <button
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-[#7B3FE4]/90 backdrop-blur transition hover:bg-[#7B3FE4] disabled:opacity-50"
+              onClick={requestBattle}
+              disabled={battleReqSent}
+              title="Request to battle the host"
+              aria-label="Request to battle the host"
+            >
+              {battleReqSent ? <Hand size={18} /> : <Swords size={18} />}
+            </button>
+          )}
           <button
             className="flex h-11 flex-none items-center gap-1.5 rounded-full bg-gradient-to-r from-[#F59E0B] to-[#E1306C] px-4 text-[13px] font-bold"
             onClick={() => setGiftOpen(true)}

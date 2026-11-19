@@ -66,6 +66,8 @@ class LiveManager {
   private recvPCs = new Map<string, RTCPeerConnection>()
   private bound = false
   private pendingViewerSignals = new Map<string, SignalMsg[]>()
+  /** last viewer identity, so a reconnect can silently re-join the live room */
+  private _lastViewerUser: { id: string; name: string; avatarKey: number; avatarUrl: string | null } | null = null
 
   subscribe(fn: Listener) {
     this.listeners.add(fn)
@@ -110,7 +112,13 @@ class LiveManager {
       if (d.liveId === this.state.liveId) void this.leave(true)
     })
     socketClient.on('connect', () => {
-      if (this.state.liveId && this.state.role && this.state.role !== 'viewer') {
+      if (!this.state.liveId || !this.state.role) return
+      // re-join after ANY reconnect — server-side room membership is lost
+      // whenever the socket service restarts or the connection drops
+      if (this.state.role === 'viewer') {
+        const u = this._lastViewerUser
+        if (u) socketClient.emit('live:join', { liveId: this.state.liveId, user: u, asHost: false })
+      } else {
         socketClient.emit('live:join', { liveId: this.state.liveId, asHost: true })
       }
     })
@@ -291,6 +299,7 @@ class LiveManager {
   async joinAsViewer(liveId: string, me: { id: string; name: string; avatarKey: number; avatarUrl: string | null }) {
     this.bindSocket()
     this._myId = me.id
+    this._lastViewerUser = me
     this.state.liveId = liveId
     this.state.role = 'viewer'
     this.state.connected = true
@@ -360,6 +369,7 @@ class LiveManager {
       socketClient.emit('live:leave', { liveId })
     }
     this.pendingViewerSignals.clear()
+    this._lastViewerUser = null
     this.state = {
       liveId: null,
       role: null,

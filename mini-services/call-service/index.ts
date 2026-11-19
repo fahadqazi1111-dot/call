@@ -25,6 +25,21 @@ function readBody(req: IncomingMessage, cb: (raw: string) => void) {
 }
 
 const relayServer = createServer((req, res) => {
+  // ---- internal GET endpoint: current viewers of a live (for the host's
+  // "pick from audience" battle sheet). lives are memory state here.
+  if (req.url && req.url.startsWith('/internal/live-viewers')) {
+    if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+      res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
+      return
+    }
+    const u = new URL(req.url, 'http://internal')
+    const liveId = u.searchParams.get('liveId') || ''
+    const viewers = liveViewers.get(liveId)
+    res.writeHead(200, { 'content-type': 'application/json' }).end(
+      JSON.stringify({ ok: true, viewers: viewers ? Array.from(viewers.values()) : [] })
+    )
+    return
+  }
   if (!req.url || !req.url.startsWith('/internal/relay')) {
     res.writeHead(404).end()
     return
@@ -166,6 +181,7 @@ const io = new Server(httpServer, {
  *  live:heartbeat {liveId, viewerCount}
  *  live:end {liveId}                   battle:invite {liveId, battle, from, targets}
  *  battle:respond {liveId, battleId, userId, accepted}
+ *  battle:request {liveId, hostId, from}         battle:request:respond {to, liveId, accepted, host}
  *  battle:start {liveId, battleId, endsAt, mode}
  *  battle:score {liveId, battleId, side, added, total}
  *  battle:end {liveId, battleId, winnerSide, sideScores}
@@ -516,6 +532,30 @@ io.on('connection', (socket: Socket) => {
     io.to(`room:${p.roomId}`).emit('room:gift', { roomId: p.roomId, payload: p.payload })
   })
 
+  /* ================= GROUP CHATS =================
+   *  group:join {groupIds: string[]}     — subscribe my sockets to group rooms
+   *  group:leave {groupId}               — unsubscribe
+   *  group:msg  {groupId, message}       — fan the message out to the group
+   * Server -> group:msg {groupId, message}
+   * Membership is trusted from the REST layer (messages are persisted there);
+   * the socket path is only the realtime fan-out.
+   */
+  socket.on('group:join', (p: { groupIds?: string[] }) => {
+    const ids = Array.isArray(p?.groupIds) ? p.groupIds.slice(0, 200) : []
+    for (const gid of ids) {
+      if (!gid) continue
+      socket.join(`group:${gid}`)
+    }
+  })
+  socket.on('group:leave', (p: { groupId?: string }) => {
+    if (!p?.groupId) return
+    socket.leave(`group:${p.groupId}`)
+  })
+  socket.on('group:msg', (p: { groupId?: string; message?: unknown }) => {
+    if (!p?.groupId || !p.message) return
+    socket.to(`group:${p.groupId}`).emit('group:msg', { groupId: p.groupId, message: p.message })
+  })
+
   socket.on('room:signal', (p: { roomId: string; to: string; data: unknown }) => {
     if (!p?.to || !myUserId) return
     // WebRTC signals may only flow between members of the same room
@@ -660,6 +700,34 @@ io.on('connection', (socket: Socket) => {
     if (!Array.isArray(p?.targets)) return
     for (const t of p.targets) {
       for (const id of socketsOf(t)) io.to(id).emit('battle:invite', p.payload)
+    }
+  })
+
+  // viewer → host: "I want to battle you" (WhatsApp-style prompt on the host)
+  socket.on('battle:request', (p: { liveId: string; hostId: string; from: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null } }) => {
+    if (!p?.liveId || !p?.hostId || !p?.from?.id) return
+    for (const id of socketsOf(p.hostId)) {
+      io.to(id).emit('battle:request', {
+        liveId: p.liveId,
+        from: {
+          id: p.from.id,
+          name: p.from.name ?? 'Viewer',
+          avatarKey: p.from.avatarKey ?? 0,
+          avatarUrl: p.from.avatarUrl ?? null,
+        },
+      })
+    }
+  })
+
+  // host → viewer: response to a battle request (accepted → host opens invite)
+  socket.on('battle:request:respond', (p: { to: string; liveId: string; accepted: boolean; host: { id: string; name: string } }) => {
+    if (!p?.to || !p?.liveId) return
+    for (const id of socketsOf(p.to)) {
+      io.to(id).emit('battle:request:response', {
+        liveId: p.liveId,
+        accepted: !!p.accepted,
+        host: { id: p.host?.id ?? '', name: p.host?.name ?? 'Host' },
+      })
     }
   })
 

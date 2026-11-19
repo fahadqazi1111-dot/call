@@ -13,6 +13,7 @@ import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
+import { InviteUsersSheet, type PickPerson } from './UserSearchSheet'
 import { VOICE_FX, createFxStream } from '@/lib/callapp/voiceFx'
 import type { GiftSessionStats, RoomChatMsg, RoomUserState } from '@/lib/callapp/types'
 
@@ -304,41 +305,22 @@ export function RoomScreen({
     setMicInvite(null)
   }
 
-  const inviteFriends = async () => {
-    if (!me) return
-    try {
-      const { contacts } = await api.contacts()
-      const registered = contacts.filter((c) => c.user)
-      if (!registered.length) {
-        setNotice('No registered contacts to invite yet')
-        window.setTimeout(() => setNotice(''), 2500)
-        return
-      }
-      const names = registered.map((c) => c.name).join(', ')
-      const pick = prompt(`Invite who? Registered contacts: ${names}`)
-      if (!pick) return
-      const c = registered.find((x) => x.name.toLowerCase() === pick.toLowerCase())
-      if (!c?.user) {
-        setNotice('Contact not found')
-        window.setTimeout(() => setNotice(''), 2500)
-        return
-      }
-      socketClient.emit('notify:new', {
-        to: c.user.id,
-        payload: {
-          id: `inv${Date.now()}`,
-          kind: 'room_invite',
-          title: `${me.name} invited you to "${title}"`,
-          body: 'Open Voice Rooms to join',
-          refType: 'room',
-          refId: roomId,
-          read: false,
-          createdAt: new Date().toISOString(),
-        },
-      })
-      setNotice(`Invite sent to ${c.name}`)
-      window.setTimeout(() => setNotice(''), 2200)
-    } catch {}
+  const inviteFriends = async (p: PickPerson): Promise<boolean> => {
+    if (!me) return false
+    socketClient.emit('notify:new', {
+      to: p.id,
+      payload: {
+        id: `inv${Date.now()}`,
+        kind: 'room_invite',
+        title: `${me.name} invited you to "${title}"`,
+        body: 'Open Voice Rooms to join',
+        refType: 'room',
+        refId: roomId,
+        read: false,
+        createdAt: new Date().toISOString(),
+      },
+    })
+    return true
   }
 
   const sendGiftDone = () => {
@@ -671,19 +653,14 @@ export function RoomScreen({
         />
       )}
 
-      {/* invite sheet */}
+      {/* invite popup — proper sheet with full user search */}
       {confirmInvite && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 px-8" onClick={() => setConfirmInvite(false)}>
-          <div className="w-full max-w-sm rounded-[22px] bg-[#181b26] p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm text-white/80">Invite friends from your contacts to this room. Registered contacts get a notification.</p>
-            <button className="mt-4 w-full rounded-full bg-cbrand py-3 text-sm font-bold" onClick={() => void inviteFriends()}>
-              Pick a contact to invite
-            </button>
-            <button className="mt-2 w-full rounded-full bg-white/10 py-3 text-sm font-semibold" onClick={() => setConfirmInvite(false)}>
-              Close
-            </button>
-          </div>
-        </div>
+        <InviteUsersSheet
+          title="Invite to this room"
+          hint="Search every CALL user or pick from your chats and contacts — they get an instant notification."
+          onInvite={inviteFriends}
+          onClose={() => setConfirmInvite(false)}
+        />
       )}
     </div>
   )

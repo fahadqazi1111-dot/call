@@ -19,7 +19,7 @@ export function TabBar() {
 
   return (
     <nav
-      className="absolute bottom-0 left-0 right-0 z-30 flex items-start justify-around border-t border-cline bg-white/95 pb-[max(env(safe-area-inset-bottom),12px)] backdrop-blur-md"
+      className="relative z-30 flex w-full flex-none items-start justify-around border-t border-cline bg-white/95 pb-[max(env(safe-area-inset-bottom),12px)] backdrop-blur-md"
       aria-label="Main navigation"
     >
       {TABS.map(({ key, label, Icon }) => {

@@ -24,9 +24,10 @@ export async function POST(req: Request) {
     if (!isParticipant && me.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    const sideScores = [0, 1].map((side) =>
-      Math.round(battle.participants.filter((p) => p.side === side).reduce((n, p) => n + p.score, 0) * 100) / 100
-    )
+    const sideScores = [
+      Math.round(battle.sideAPoints),
+      Math.round(battle.sideBPoints),
+    ]
     const winnerSide = sideScores[0] === sideScores[1] ? null : sideScores[0] > sideScores[1] ? 0 : 1
     await db.battle.update({
       where: { id: battle.id },
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
           userId: p.userId,
           kind: 'battle_result',
           title: tie ? 'Battle ended in a draw' : won ? 'You WON the battle! 🏆' : 'Battle lost — better luck next time',
-          body: `Final gift value: $${sideScores[0].toFixed(2)} — $${sideScores[1].toFixed(2)}`,
+          body: `Final points: ${sideScores[0]} — ${sideScores[1]}`,
           refType: 'battle',
           refId: battle.id,
         },

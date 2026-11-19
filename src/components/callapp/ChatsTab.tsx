@@ -13,6 +13,7 @@ import { fmtChatListTime, fmtDuration } from '@/lib/callapp/utils'
 import { AdBanner } from './GiftsUI'
 import { api } from '@/lib/callapp/api'
 import { PeerProfileSheet } from './PeerProfileSheet'
+import { GroupsSection } from './GroupChat'
 import {
   ChatActionDialogs,
   ChatMenuItem,
@@ -322,6 +323,7 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
         <StoriesTray variant={variant} />
         <div className="app-scroll desk-scroll flex-1 overflow-y-auto pb-4">
           <AdBanner placement="chats" />
+          <GroupsSection variant={variant} />
           {listNode}
         </div>
       </div>
@@ -336,6 +338,7 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
       {chipsNode}
       <StoriesTray variant={variant} />
       <AdBanner placement="chats" />
+      <GroupsSection variant={variant} />
       {listNode}
     </div>
   )

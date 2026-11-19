@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   X, Mic, MicOff, Video, VideoOff, Send, Gift, Swords, Loader2, Eye,
-  RefreshCw, Trophy, Crown, Timer, Users,
+  RefreshCw, Trophy, Crown, Timer, Users, SmilePlus,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -12,9 +12,17 @@ import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
+import { BattleInviteSheet, type Person } from './BattleInviteSheet'
 import type { GiftSessionStats, LiveComment, BattleParticipantInfo } from '@/lib/callapp/types'
 
 const COUNTDOWN_MS = 8000
+const REACTION_EMOJIS = ['❤️', '😂', '😮', '🔥', '👏', '🎉', '💯', '😢']
+
+interface ReactionFloat {
+  key: number
+  emoji: string
+  x: number
+}
 
 /**
  * Host screen: full vertical broadcast + live comments + gifts + battles.
@@ -42,10 +50,12 @@ export function LiveHostScreen({
   const [giftOpen, setGiftOpen] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [inviteMode, setInviteMode] = useState<'1v1' | '2v2'>('1v1')
-  const [inviting, setInviting] = useState(false)
+  const [preselected, setPreselected] = useState<Person | null>(null)
+  /** viewer → host battle request (WhatsApp-style prompt) */
+  const [battleRequest, setBattleRequest] = useState<Person | null>(null)
   const [battle, setBattle] = useState<{
     id: string
+    mode: '1v1' | '2v2'
     phase: 'inviting' | 'countdown' | 'live' | 'ended'
     participants: BattleParticipantInfo[]
     endsAt: number | null
@@ -56,6 +66,17 @@ export function LiveHostScreen({
   const [countdown, setCountdown] = useState<number | null>(null)
   const animKey = useRef(0)
   const finishedRef = useRef(false)
+  /* TikTok-style floating reactions (sent by the audience) */
+  const [reacts, setReacts] = useState<ReactionFloat[]>([])
+  const [reactOpen, setReactOpen] = useState(false)
+  const floatKey = useRef(0)
+
+  const pushReaction = useCallback((emoji: string) => {
+    const key = ++floatKey.current
+    const x = 6 + Math.random() * 78
+    setReacts((r) => [...r.slice(-24), { key, emoji, x }])
+    window.setTimeout(() => setReacts((r) => r.filter((x2) => x2.key !== key)), 2700)
+  }, [])
 
   /* ---------- start broadcasting ---------- */
   useEffect(() => {
@@ -180,103 +201,68 @@ export function LiveHostScreen({
     const offGift = socketClient.on('live:gift', onGift)
     const offScore = socketClient.on('battle:score', onBattleScore)
     const offEnded = socketClient.on('live:ended', onEnded)
+    const offReact = socketClient.on('live:react', (p: unknown) => {
+      const d = p as { liveId: string; emoji: string }
+      if (d.liveId === liveId && d.emoji) pushReaction(d.emoji)
+    })
     return () => {
       offComment()
       offGift()
       offScore()
       offEnded()
+      offReact()
     }
-  }, [liveId, battle, onClose])
+  }, [liveId, battle, onClose, pushReaction])
 
-  /* ---------- battle invite flow ---------- */
-  const startInvite = async () => {
-    if (!me) return
-    setInviting(true)
-    try {
-      const { contacts } = await api.contacts()
-      const registered = contacts.filter((c) => c.user && c.user.id !== me.id)
-      if (!registered.length) {
-        alert('No registered contacts to invite')
-        setInviting(false)
-        return
-      }
-      const need = inviteMode === '1v1' ? 1 : 3
-      const names = registered.map((c) => c.name).join(', ')
-      const pick = prompt(`${inviteMode} battle — invite ${need}: ${names}`)
-      if (!pick) {
-        setInviting(false)
-        return
-      }
-      const wanted = pick
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean)
-      const targets = registered.filter((c) => wanted.includes(c.name.toLowerCase())).slice(0, need)
-      if (targets.length !== need) {
-        alert(`Select exactly ${need} registered contact(s) by name`)
-        setInviting(false)
-        return
-      }
-      const res = await api.battleInvite(
-        liveId,
-        inviteMode,
-        targets.map((t) => t.user!.id),
-        120
-      )
-      const parts: BattleParticipantInfo[] = [
-        { userId: me.id, name: me.name, avatarKey: me.avatarKey, avatarUrl: me.avatarUrl, side: 0, slot: 0, accepted: true, score: 0 },
-        ...targets.map((t, i) => ({
-          userId: t.user!.id,
-          name: t.user!.name,
-          avatarKey: t.user!.avatarKey,
-          avatarUrl: t.user!.avatarUrl ?? null,
-          side: inviteMode === '1v1' ? 1 : i === 0 ? 0 : 1,
-          slot: inviteMode === '1v1' ? 0 : i === 0 ? 1 : i === 1 ? 0 : 1,
-          accepted: false,
-          score: 0,
-        })),
-      ]
-      battleManager.setInviting(res.battle.id, inviteMode, parts)
-      setBattle({
-        id: res.battle.id,
-        phase: 'inviting',
-        participants: parts,
-        endsAt: null,
-        sideScores: [0, 0],
-        winnerSide: null,
-        remaining: null,
-      })
-      // realtime invite to targets
-      socketClient.emit('battle:invite', {
-        targets: targets.map((t) => t.user!.id),
-        payload: { battleId: res.battle.id, liveId, mode: inviteMode, from: { id: me.id, name: me.name, avatarKey: me.avatarKey } },
-      })
-      setInviteOpen(false)
-    } catch (e) {
-      alert((e as Error).message)
-    } finally {
-      setInviting(false)
-    }
+  /* ---------- battle invite flow (proper popup with search + audience) ---------- */
+  const invited = (battleId: string, mode: '1v1' | '2v2', parts: BattleParticipantInfo[]) => {
+    battleManager.setInviting(battleId, mode, parts)
+    setBattle({
+      id: battleId,
+      mode,
+      phase: 'inviting',
+      participants: parts,
+      endsAt: null,
+      sideScores: [0, 0],
+      winnerSide: null,
+      remaining: null,
+    })
+    setInviteOpen(false)
+    setPreselected(null)
   }
 
-  /* ---------- battle acceptance + countdown (host drives) ---------- */
+  /* ---------- viewer battle requests (realtime prompt) ---------- */
   useEffect(() => {
-    if (battle?.phase !== 'inviting') return
-    const t = window.setInterval(async () => {
-      try {
-        const res = await api.battleDetail(battle.id)
-        const allAccepted = res.battle.participants.every((p) => p.accepted)
-        setBattle((b) => (b ? { ...b, participants: res.battle.participants } : b))
-        if (allAccepted && battle.phase === 'inviting') {
-          beginCountdown(res.battle.participants)
-        }
-      } catch {}
-    }, 2000)
-    return () => window.clearInterval(t)
-     
-  }, [battle?.id, battle?.phase])
+    const onRequest = (p: unknown) => {
+      const d = p as { liveId: string; from: Person }
+      if (d.liveId !== liveId) return
+      setBattleRequest(d.from)
+      soundKit.pop()
+    }
+    const off = socketClient.on('battle:request', onRequest)
+    return () => {
+      off()
+    }
+  }, [liveId])
 
-  const beginCountdown = (participants: BattleParticipantInfo[]) => {
+  const respondBattleRequest = (accepted: boolean) => {
+    if (!battleRequest || !me) return
+    socketClient.emit('battle:request:respond', {
+      to: battleRequest.id,
+      liveId,
+      accepted,
+      host: { id: me.id, name: me.name },
+    })
+    if (accepted) {
+      // open the invite sheet with that viewer preselected (1v1)
+      setPreselected(battleRequest)
+      setInviteOpen(true)
+    }
+    setBattleRequest(null)
+  }
+
+  /* ---------- battle countdown + finish (declared before the effects use them) ---------- */
+  const beginCountdown = (battleId: string, mode: '1v1' | '2v2', participants: BattleParticipantInfo[]) => {
     setBattle((b) => (b ? { ...b, phase: 'countdown' } : b))
     let left = Math.round(COUNTDOWN_MS / 1000)
     setCountdown(left)
@@ -288,33 +274,18 @@ export function LiveHostScreen({
         window.clearInterval(tick)
         setCountdown(null)
         const endsAt = Date.now() + 120_000
-        battleManager.startLive(battle!.id, endsAt, participants)
+        battleManager.startLive(battleId, endsAt, participants)
         socketClient.emit('battle:start', {
           liveId,
-          battleId: battle!.id,
+          battleId,
           endsAt,
-          mode: inviteMode,
+          mode,
           participants,
         })
         setBattle((b) => (b ? { ...b, phase: 'live', endsAt } : b))
       }
     }, 1000)
   }
-
-  /* ---------- battle timer + finish ---------- */
-  useEffect(() => {
-    if (battle?.phase !== 'live' || !battle.endsAt) return
-    const t = window.setInterval(() => {
-      const remaining = Math.max(0, Math.round((battle.endsAt! - Date.now()) / 1000))
-      setBattle((b) => (b ? { ...b, remaining } : b))
-      if (remaining <= 0 && !finishedRef.current) {
-        finishedRef.current = true
-        void finishBattle()
-      }
-    }, 1000)
-    return () => window.clearInterval(t)
-     
-  }, [battle?.phase, battle?.endsAt])
 
   const finishBattle = async () => {
     try {
@@ -330,6 +301,38 @@ export function LiveHostScreen({
       soundKit.fanfare()
     } catch {}
   }
+
+  /* ---------- battle acceptance + countdown (host drives) ---------- */
+  useEffect(() => {
+    if (battle?.phase !== 'inviting') return
+    const t = window.setInterval(async () => {
+      try {
+        const res = await api.battleDetail(battle.id)
+        const allAccepted = res.battle.participants.every((p) => p.accepted)
+        setBattle((b) => (b ? { ...b, participants: res.battle.participants } : b))
+        if (allAccepted && battle.phase === 'inviting') {
+          beginCountdown(battle.id, battle.mode, res.battle.participants)
+        }
+      } catch {}
+    }, 2000)
+    return () => window.clearInterval(t)
+     
+  }, [battle?.id, battle?.phase])
+
+  /* ---------- battle timer + finish ---------- */
+  useEffect(() => {
+    if (battle?.phase !== 'live' || !battle.endsAt) return
+    const t = window.setInterval(() => {
+      const remaining = Math.max(0, Math.round((battle.endsAt! - Date.now()) / 1000))
+      setBattle((b) => (b ? { ...b, remaining } : b))
+      if (remaining <= 0 && !finishedRef.current) {
+        finishedRef.current = true
+        void finishBattle()
+      }
+    }, 1000)
+    return () => window.clearInterval(t)
+     
+  }, [battle?.phase, battle?.endsAt])
 
   const endLive = async () => {
     if (battle && battle.phase === 'live' && !finishedRef.current) {
@@ -363,6 +366,15 @@ export function LiveHostScreen({
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-black text-white">
       <GiftAnimationLayer gifts={anims} />
+
+      {/* floating reactions from the audience */}
+      <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+        {reacts.map((r) => (
+          <span key={r.key} className="react-float absolute text-3xl drop-shadow-lg" style={{ left: `${r.x}%`, bottom: 90 }}>
+            {r.emoji}
+          </span>
+        ))}
+      </div>
 
       {/* ===== video layer ===== */}
       {battle && (battle.phase === 'live' || battle.phase === 'ended' || battle.phase === 'countdown') ? (
@@ -510,6 +522,35 @@ export function LiveHostScreen({
             onChange={(e) => setCommentInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void sendComment()}
           />
+          {/* host reactions too */}
+          <div className="relative flex-none">
+            <button
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 backdrop-blur"
+              onClick={() => setReactOpen((v) => !v)}
+              title="Send a reaction"
+              aria-label="Send a reaction"
+            >
+              <SmilePlus size={19} />
+            </button>
+            {reactOpen && (
+              <div className="absolute bottom-[52px] right-0 z-50 flex items-center gap-1 rounded-full bg-black/85 px-2 py-1.5 shadow-2xl ring-1 ring-white/20 backdrop-blur">
+                {REACTION_EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    className="rounded-full p-1 text-[20px] transition hover:scale-125"
+                    onClick={() => {
+                      setReactOpen(false)
+                      socketClient.emit('live:react', { liveId, emoji: e, from: { id: me?.id, name: me?.name } })
+                      pushReaction(e)
+                    }}
+                    aria-label={`React ${e}`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white/10 backdrop-blur"
             onClick={() => void liveManager.toggleMic()}
@@ -563,39 +604,43 @@ export function LiveHostScreen({
         />
       )}
 
-      {/* invite sheet */}
-      {inviteOpen && (
-        <div className="absolute inset-0 z-50 flex items-end bg-black/60" onClick={() => setInviteOpen(false)}>
-          <div className="w-full rounded-t-[24px] bg-[#181b26] p-5 pb-10" onClick={(e) => e.stopPropagation()}>
-            <h3 className="flex items-center gap-2 text-lg font-extrabold">
-              <Swords size={19} className="text-[#FFD166]" /> Start a battle
-            </h3>
-            <div className="mt-4 flex gap-2">
+      {/* viewer battle request prompt (WhatsApp-style) */}
+      {battleRequest && (
+        <div className="absolute inset-x-0 top-[120px] z-[60] flex justify-center px-4">
+          <div className="w-full max-w-sm rounded-[22px] bg-[#181b26] p-4 shadow-2xl ring-1 ring-white/15">
+            <div className="flex items-center gap-3">
+              <Avatar name={battleRequest.name} avatarKey={battleRequest.avatarKey} size={44} src={battleRequest.avatarUrl} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14.5px] font-extrabold">{battleRequest.name}</p>
+                <p className="text-[12px] text-white/60">wants to battle you in this live</p>
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
               <button
-                className={`flex-1 rounded-[14px] py-3.5 text-sm font-bold ${inviteMode === '1v1' ? 'bg-[#7B3FE4] text-white' : 'bg-white/10'}`}
-                onClick={() => setInviteMode('1v1')}
+                className="h-11 flex-1 rounded-[14px] bg-white/10 text-[13.5px] font-bold text-white/80"
+                onClick={() => respondBattleRequest(false)}
               >
-                ⚔️ 1 vs 1
+                Decline
               </button>
               <button
-                className={`flex-1 rounded-[14px] py-3.5 text-sm font-bold ${inviteMode === '2v2' ? 'bg-[#7B3FE4] text-white' : 'bg-white/10'}`}
-                onClick={() => setInviteMode('2v2')}
+                className="h-11 flex-1 rounded-[14px] bg-gradient-to-r from-[#7B3FE4] to-[#E1306C] text-[13.5px] font-bold"
+                onClick={() => respondBattleRequest(true)}
               >
-                🛡️ 2 vs 2
+                <span className="flex items-center justify-center gap-1.5">
+                  <Swords size={15} /> Accept
+                </span>
               </button>
             </div>
-            <p className="pt-2 text-[12px] text-white/60">
-              {inviteMode === '1v1' ? 'Invite 1 friend — side-by-side battle.' : 'Invite 3 friends — 2 on each team.'}
-            </p>
-            <button
-              className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-[16px] bg-gradient-to-r from-[#7B3FE4] to-[#E1306C] font-bold disabled:opacity-50"
-              disabled={inviting}
-              onClick={() => void startInvite()}
-            >
-              {inviting ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />} Pick contacts & invite
-            </button>
           </div>
         </div>
+      )}
+
+      {/* battle invite popup — search every user or pick from the live audience */}
+      {inviteOpen && (
+        <BattleInviteSheet liveId={liveId} preselected={preselected} onClose={() => {
+          setInviteOpen(false)
+          setPreselected(null)
+        }} onInvited={invited} />
       )}
     </div>
   )
