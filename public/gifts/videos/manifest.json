@@ -3,42 +3,48 @@
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/3a8fdb6e-e455-11f1-858c-f21fdb5d8223_0.mp4",
     "bytes": 1679932,
     "taskId": "20261120041013041fb9bf94964be6",
-    "generatedAt": "2026-11-19T20:17:37.601Z"
+    "generatedAt": "2026-11-19T21:31:52.742Z"
   },
   "superlion": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/c4629bb4-e456-11f1-858c-f21fdb5d8223_0.mp4",
     "bytes": 5140531,
     "taskId": "20261120042113fb5219550484464b",
-    "generatedAt": "2026-11-19T20:22:15.325Z"
+    "generatedAt": "2026-11-19T21:31:53.962Z"
   },
   "car": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/0591c00a-e458-11f1-8360-92d9c959708e_0.mp4",
     "bytes": 1985826,
     "taskId": "20261120043012d51d73f2271d4bc4",
-    "generatedAt": "2026-11-19T20:31:13.852Z"
+    "generatedAt": "2026-11-19T21:31:54.826Z"
   },
   "dragon": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/ac891858-e459-11f1-8360-92d9c959708e_0.mp4",
     "bytes": 4743438,
     "taskId": "202611200442028bafa0d0b9154c59",
-    "generatedAt": "2026-11-19T20:43:03.901Z"
+    "generatedAt": "2026-11-19T21:31:55.915Z"
   },
   "rocket": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/d2f29cfc-e45a-11f1-8360-92d9c959708e_0.mp4",
     "bytes": 1422231,
     "taskId": "20261120045016acee696f949246e0",
-    "generatedAt": "2026-11-19T20:51:17.340Z"
+    "generatedAt": "2026-11-19T21:31:56.820Z"
   },
   "fireworks": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/79dde64c-e45c-11f1-858c-f21fdb5d8223_0.mp4",
     "bytes": 4697485,
     "taskId": "2026112005020573fff753cb6b4ee6",
-    "generatedAt": "2026-11-19T21:03:07.294Z"
+    "generatedAt": "2026-11-19T21:31:58.094Z"
   },
   "crown": {
     "url": "https://aigc-files.bigmodel.cn/api/cogvideo/a036c11e-e45d-11f1-b92c-62f9d4451240_0.mp4",
     "bytes": 3227467,
     "taskId": "2026112005101936d889258f4446d8",
-    "generatedAt": "2026-11-19T21:11:36.171Z"
+    "generatedAt": "2026-11-19T21:31:59.152Z"
+  },
+  "castle": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/a6df5b72-e460-11f1-bf3e-d2d67b760da1_0.mp4",
+    "bytes": 4167211,
+    "taskId": "20261120053159addf898f2a18489f",
+    "generatedAt": "2026-11-19T21:33:00.863Z"
   }
 }
