@@ -58,3 +58,6 @@ db/uploads/
 db/*.db
 tool-results/
 agent-ctx/
+
+# pid files
+*.pid
