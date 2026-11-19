@@ -545,6 +545,12 @@ export const useApp = create<AppState>((set, get) => ({
 
 /** Global socket wiring: presence, incoming messages, read receipts, typing, call events. */
 export function bindGlobalSocketHandlers() {
+  /* Session death watch: any API 401 with a stored token means the session is
+   * gone (revoked / wiped DB / expired). Log out cleanly once — guarded on
+   * `me` so 401s from failed login attempts never wipe the auth form state. */
+  window.addEventListener('call:unauthorized', () => {
+    if (useApp.getState().me) useApp.getState().logout()
+  })
   callManager.bindSocket()
   roomManager.bindSocket()
   liveManager.bindSocket()

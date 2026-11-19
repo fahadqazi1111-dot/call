@@ -59,6 +59,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!(init?.body instanceof FormData)) headers['Content-Type'] = 'application/json'
   if (token) headers['x-auth-token'] = token
   const res = await fetch(path, { ...init, headers, cache: 'no-store' })
+  if (res.status === 401 && token) {
+    // Session is no longer valid (revoked, wiped DB, expired). Tell the app so
+    // it can log out cleanly instead of polling forever against a dead token.
+    window.dispatchEvent(new CustomEvent('call:unauthorized'))
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error((data as { error?: string })?.error || `Request failed (${res.status})`)
   return data as T

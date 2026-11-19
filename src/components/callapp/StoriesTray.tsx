@@ -46,7 +46,7 @@ export function StoriesTray({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
 
   return (
     <div
-      className={`stories-scroll no-scrollbar flex gap-[18px] overflow-x-auto px-4 pb-2 pt-2 ${
+      className={`stories-scroll no-scrollbar flex flex-none gap-[18px] overflow-x-auto px-4 pb-2 pt-2 ${
         compact ? 'pt-3' : ''
       }`}
     >

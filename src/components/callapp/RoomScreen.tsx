@@ -515,7 +515,7 @@ export function RoomScreen({
 
       {/* voice fx strip — SPEAKERS ONLY */}
       {iSpeak && (
-        <div className="flex gap-1.5 overflow-x-auto px-4 py-2 stories-scroll">
+        <div className="flex flex-none gap-1.5 overflow-x-auto px-4 py-2 stories-scroll">
           {VOICE_FX.slice(0, 8).map((f) => (
             <button
               key={f.id}
