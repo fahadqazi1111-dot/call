@@ -443,6 +443,49 @@ export function verifyPassword(password: string, stored: string | null): boolean
   }
 }
 
+/**
+ * Lazily guarantee the default admin exists (fahadqazi1111@gmail.com / 12345678).
+ * Runs at most once per server process. Never overwrites an existing account —
+ * only creates the admin when the email is completely missing, so a fresh
+ * database or a new deploy always has a working admin login without running
+ * the seed script by hand.
+ */
+const DEFAULT_ADMIN_EMAIL = 'fahadqazi1111@gmail.com'
+let defaultAdminPromise: Promise<void> | null = null
+export function ensureDefaultAdmin(): Promise<void> {
+  if (!defaultAdminPromise) {
+    defaultAdminPromise = (async () => {
+      try {
+        const existing = await db.user.findUnique({ where: { email: DEFAULT_ADMIN_EMAIL } })
+        if (existing) {
+          const patch: { role?: string; emailVerified?: boolean } = {}
+          if (existing.role !== 'admin') patch.role = 'admin'
+          if (!existing.emailVerified) patch.emailVerified = true
+          if (Object.keys(patch).length) {
+            await db.user.update({ where: { id: existing.id }, data: patch })
+          }
+          return
+        }
+        await db.user.create({
+          data: {
+            phone: '0000000002',
+            email: DEFAULT_ADMIN_EMAIL,
+            emailVerified: true,
+            passwordHash: hashPassword('12345678'),
+            role: 'admin',
+            name: 'Fahad Mazhar',
+            username: 'fahadqazi',
+          },
+        })
+      } catch {
+        // never break login because of the bootstrap attempt
+        defaultAdminPromise = null
+      }
+    })()
+  }
+  return defaultAdminPromise
+}
+
 /* ---------------- contact relationship helpers ---------------- */
 
 /**

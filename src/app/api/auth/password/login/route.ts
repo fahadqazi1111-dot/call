@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { signToken, verifyPassword, rateLimit, ensureWallet, publicUser } from '@/lib/callapp/server'
+import { signToken, verifyPassword, rateLimit, ensureWallet, publicUser, ensureDefaultAdmin } from '@/lib/callapp/server'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
@@ -14,6 +14,8 @@ export async function POST(req: Request) {
     if (!rateLimit(`pwlogin:${email}`, 8, 60_000)) {
       return NextResponse.json({ error: 'Too many attempts. Try again in a minute.' }, { status: 429 })
     }
+    // self-heal: make sure the default admin exists even on a fresh database
+    await ensureDefaultAdmin()
     const user = await db.user.findUnique({ where: { email } })
     if (!user || !verifyPassword(password, user.passwordHash)) {
       return NextResponse.json({ error: 'Email or password is incorrect' }, { status: 401 })
