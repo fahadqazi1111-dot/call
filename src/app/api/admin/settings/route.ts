@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAdmin, getSetting, setSetting } from '@/lib/callapp/server'
+import { maskAiConfig, mergeAiConfig } from '@/lib/callapp/aiProviders'
 
 /** GET: all admin settings. */
 export async function GET(req: Request) {
@@ -17,6 +18,10 @@ export async function GET(req: Request) {
   }
   // never expose the setup code itself
   if (settings.adminSetupCode) settings.adminSetupCode = true
+  // provider API keys never leave the backend unmasked
+  if (settings.ai && typeof settings.ai === 'object') {
+    settings.ai = maskAiConfig(settings.ai as Record<string, unknown>)
+  }
   return NextResponse.json({ settings })
 }
 
@@ -30,9 +35,11 @@ export async function PUT(req: Request) {
     const allowed = ['finance', 'rooms', 'live', 'calls', 'ai', 'ads', 'auth', 'smtp', 'messaging', 'app']
     if (!allowed.includes(key)) return NextResponse.json({ error: 'Unknown settings key' }, { status: 400 })
     const existing = await getSetting<Record<string, unknown>>(key, {})
-    const merged = { ...existing, ...body.value }
+    // the AI block needs credential-safe merging (masked keys keep stored values)
+    const merged =
+      key === 'ai' ? mergeAiConfig(body.value || {}, existing) : { ...existing, ...body.value }
     await setSetting(key, merged)
-    return NextResponse.json({ ok: true, settings: merged })
+    return NextResponse.json({ ok: true, settings: key === 'ai' ? maskAiConfig(merged) : merged })
   } catch {
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   }

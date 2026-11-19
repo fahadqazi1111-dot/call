@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useApp, bindGlobalSocketHandlers } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { callManager } from '@/lib/callapp/callManager'
@@ -71,6 +72,7 @@ export function AppRoot() {
   const call = useApp((s) => s.call)
   const me = useApp((s) => s.me)
   const staffView = useApp((s) => s.staffView)
+  const splashEnabled = useApp((s) => s.splashEnabled)
   const isDesktop = useIsDesktop()
 
   useEffect(() => {
@@ -115,11 +117,23 @@ export function AppRoot() {
     )
   }
 
-  /* ---------- splash: always full-bleed, every device ---------- */
-  if (phase === 'splash') {
+  /* ---------- splash / boot: full-bleed, every device ----------
+   * 'splash' shows the animated logo (when enabled); 'boot' is the neutral
+   * white state used while the session is validated with the splash disabled —
+   * never navy, never the get-started screens. */
+  if (phase === 'splash' || phase === 'boot') {
+    const visuals = phase === 'splash' && splashEnabled !== false
     return (
-      <div className="bg-dark-grad relative h-[100dvh] w-full overflow-hidden">
-        <SplashScreen />
+      <div
+        className={`splash-shell relative h-[100dvh] w-full overflow-hidden ${visuals ? 'bg-dark-grad' : 'bg-white'}`}
+      >
+        {visuals ? (
+          <SplashScreen />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center" role="status" aria-label="Loading CALL">
+            <Loader2 className="animate-spin text-cbrand" size={30} />
+          </div>
+        )}
         {call && <CallOverlay state={call} />}
         <Toaster position="top-center" richColors />
       </div>

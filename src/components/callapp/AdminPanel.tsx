@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
+import { AI_PROVIDERS, type AiProviderMeta } from '@/lib/callapp/aiProvidersShared'
 import { StaffTick } from './StaffTick'
 import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
@@ -826,10 +827,15 @@ function ModerationSection() {
   )
 }
 
+type AiProviderConfUi = { apiKey?: string; baseUrl?: string; model?: string }
+type AiTestResult = { ok: boolean; text: string }
+
 function AiSection() {
   const [cfg, setCfg] = useState<Record<string, unknown> | null>(null)
   const [usage, setUsage] = useState<{ totals: { text: number; image: number; voice: number }; conversations: number; messages: number } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, AiTestResult>>({})
   const load = async () => {
     try {
       const res = await api.adminAi()
@@ -845,9 +851,9 @@ function AiSection() {
     try {
       await api.adminAiSave(cfg ?? {})
       await load()
-      alert('AI settings saved')
+      toast.success('AI settings saved')
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message || 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -855,12 +861,64 @@ function AiSection() {
   if (!cfg) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
   const num = (k: string) => Number(cfg[k] ?? 0)
   const set = (k: string, v: unknown) => setCfg({ ...cfg, [k]: v })
+  const provs = (cfg.providers ?? {}) as Record<string, AiProviderConfUi>
+  const activeProvider = String(cfg.activeProvider ?? 'zai')
+  const setProv = (id: string, patch: AiProviderConfUi) =>
+    setCfg({
+      ...cfg,
+      providers: { ...provs, [id]: { ...(provs[id] ?? {}), ...patch } },
+    })
+  const test = async (id: string) => {
+    setTesting(id)
+    try {
+      const meta = AI_PROVIDERS.find((p) => p.id === id)
+      const conf = provs[id] ?? {}
+      const res = await api.adminAiTest({
+        provider: id,
+        model: conf.model || meta?.defaultModel,
+        apiKey: conf.apiKey,
+        baseUrl: conf.baseUrl,
+      })
+      setTestResult((r) => ({
+        ...r,
+        [id]: res.ok
+          ? { ok: true, text: `Working — ${res.latencyMs}ms${res.reply ? ` · "${res.reply}"` : ''}` }
+          : { ok: false, text: res.error || 'Test failed' },
+      }))
+    } catch (e) {
+      setTestResult((r) => ({ ...r, [id]: { ok: false, text: (e as Error).message || 'Test failed' } }))
+    } finally {
+      setTesting(null)
+    }
+  }
   return (
     <div className="max-w-xl">
       <h3 className="pb-1 text-[15px] font-extrabold text-cink">CALL AI configuration</h3>
       <p className="pb-4 text-[12px] text-cmut">
-        Provider: <b>{String(cfg.provider ?? 'zai')}</b> (credentials live server-side only) · Model: <b>{String(cfg.defaultModel ?? 'default')}</b>
+        Active provider: <b>{activeProvider}</b> · API keys are stored server-side and never exposed to users.
+        If the active provider fails, the built-in Z-AI provider answers automatically.
       </p>
+
+      {/* ---- providers ---- */}
+      <h4 className="pb-2 text-[14px] font-extrabold text-cink">AI providers</h4>
+      <div className="flex flex-col gap-3">
+        {AI_PROVIDERS.map((p) => (
+          <ProviderCard
+            key={p.id}
+            meta={p}
+            conf={provs[p.id] ?? {}}
+            active={activeProvider === p.id}
+            testing={testing === p.id}
+            result={testResult[p.id]}
+            onChange={(patch) => setProv(p.id, patch)}
+            onTest={() => void test(p.id)}
+            onActivate={() => set('activeProvider', p.id)}
+          />
+        ))}
+      </div>
+
+      {/* ---- limits ---- */}
+      <h4 className="pb-2 pt-6 text-[14px] font-extrabold text-cink">Limits &amp; features</h4>
       <div className="grid grid-cols-2 gap-3">
         {(
           [
@@ -912,6 +970,105 @@ function AiSection() {
           <p className="pt-2 text-[12px] text-cmut">
             {usage.conversations} conversations · {usage.messages} total messages
           </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One provider card: API key, base URL (Venom), model select, test + activate. */
+function ProviderCard({
+  meta,
+  conf,
+  active,
+  testing,
+  result,
+  onChange,
+  onTest,
+  onActivate,
+}: {
+  meta: AiProviderMeta
+  conf: AiProviderConfUi
+  active: boolean
+  testing: boolean
+  result?: AiTestResult
+  onChange: (patch: AiProviderConfUi) => void
+  onTest: () => void
+  onActivate: () => void
+}) {
+  const modelInList = !!conf.model && meta.models.includes(conf.model)
+  return (
+    <div className={`rounded-[14px] border p-3.5 ${active ? 'border-cbrand bg-csoft/60' : 'border-cline'}`}>
+      <div className="flex items-center gap-2">
+        <p className="text-[13.5px] font-bold text-cink">{meta.label}</p>
+        {active && <span className="rounded-full bg-cbrand px-2 py-0.5 text-[10px] font-bold text-white">Active</span>}
+        <div className="ml-auto flex flex-none items-center gap-2">
+          <button
+            className="rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-cbrand ring-1 ring-cline disabled:opacity-50"
+            disabled={testing}
+            onClick={onTest}
+          >
+            {testing ? <Loader2 className="animate-spin" size={12} /> : 'Test'}
+          </button>
+          {!active && (
+            <button className="rounded-full bg-cbrand px-3 py-1.5 text-[11px] font-bold text-white" onClick={onActivate}>
+              Set active
+            </button>
+          )}
+        </div>
+      </div>
+      {result && (
+        <p className={`pt-1.5 text-[11px] leading-4 ${result.ok ? 'text-emerald-600' : 'text-red-600'}`}>{result.text}</p>
+      )}
+      {meta.keyless ? (
+        <p className="pt-1.5 text-[11.5px] text-cmut">{meta.note}</p>
+      ) : (
+        <div className="pt-2.5">
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              autoComplete="off"
+              className="h-10 min-w-0 flex-1 rounded-[10px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
+              placeholder={conf.apiKey ? `Saved key ${conf.apiKey} — paste a new key to replace` : 'Paste API key'}
+              value={conf.apiKey ?? ''}
+              onChange={(e) => onChange({ apiKey: e.target.value })}
+            />
+            {meta.keyUrl && (
+              <a href={meta.keyUrl} target="_blank" rel="noreferrer" className="flex-none text-[11px] font-bold text-cbrand underline">
+                Get key
+              </a>
+            )}
+          </div>
+          {meta.editableBaseUrl && (
+            <input
+              className="mt-2 h-10 w-full rounded-[10px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
+              placeholder={`Base URL (default: ${meta.baseUrl})`}
+              value={conf.baseUrl ?? ''}
+              onChange={(e) => onChange({ baseUrl: e.target.value })}
+            />
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              aria-label={`${meta.label} model`}
+              className="h-10 min-w-0 flex-1 rounded-[10px] bg-[#F0F3FA] px-2 text-[13px] outline-none"
+              value={modelInList ? conf.model : ''}
+              onChange={(e) => e.target.value && onChange({ model: e.target.value })}
+            >
+              <option value="">{conf.model && !modelInList ? `Current: ${conf.model}` : 'Select a model…'}</option>
+              {meta.models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <input
+              className="h-10 w-full rounded-[10px] bg-[#F0F3FA] px-3 text-[12px] outline-none sm:w-44"
+              placeholder="Custom model id"
+              aria-label="Custom model id"
+              value={conf.model ?? ''}
+              onChange={(e) => onChange({ model: e.target.value })}
+            />
+          </div>
         </div>
       )}
     </div>

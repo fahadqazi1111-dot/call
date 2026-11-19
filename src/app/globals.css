@@ -141,6 +141,11 @@
 .bg-dark-grad {
   background: linear-gradient(170deg, #0b1b40, #0a1630 55%, #101f4a);
 }
+/* splash disabled by admin → the boot shell must paint white, never navy/blue.
+   `data-splash-off` is set pre-hydration by an inline script in layout.tsx. */
+html[data-splash-off='1'] .splash-shell {
+  background: #ffffff !important;
+}
 .bg-page-grad {
   background: linear-gradient(160deg, #dfe6f5, #e4e9f4 45%, #d8e0f2);
 }

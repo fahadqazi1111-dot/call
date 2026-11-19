@@ -1,19 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/callapp/api'
 import { CallWordmark } from './CallLogo'
 import { useApp } from '@/lib/callapp/store'
 
 /**
  * Splash screen — the admin can disable it from the panel ("App experience").
- * Hydration-safe: the first paint is a plain dark background (identical on
- * server and client); after mount we read the cached setting — when disabled
- * we jump straight to the app, otherwise the animated logo plays briefly.
+ *
+ * Routing rules:
+ *  - splash disabled + logged in      → straight to the app (NEVER get-started)
+ *  - splash disabled + not logged in  → get-started screens
+ *  - splash enabled                   → animated logo, then app / get-started
+ *
+ * The decision comes from the server config (with the localStorage cache as a
+ * fast-path fallback). When disabled we drop into the neutral 'boot' phase —
+ * a plain white screen with a spinner — and let bootstrap() resolve the real
+ * destination, so logged-in users never see a blue flash or the get-started
+ * screens. A pre-hydration script in layout.tsx neutralizes the shell color
+ * (html[data-splash-off]) so even the first paint is white, never navy.
  */
 export function SplashScreen() {
   const bootstrap = useApp((s) => s.bootstrap)
   const booted = useApp((s) => s.booted)
-  const phase = useApp((s) => s.phase)
   const splashEnabled = useApp((s) => s.splashEnabled)
   /** null = pre-hydration (render nothing), true = show visuals, false = skip */
   const [show, setShow] = useState<boolean | null>(null)
@@ -21,35 +30,48 @@ export function SplashScreen() {
   useEffect(() => {
     // deferred one tick so the first paint matches the server (hydration-safe)
     const t = window.setTimeout(() => {
-      // local cache decides the FIRST paint (fetch refresh happens in bootstrap)
-      let cached = true
-      try {
-        cached = window.localStorage.getItem('call.splash') !== '0'
-      } catch {}
-      setShow(cached)
-      useApp.setState({ splashEnabled: cached })
-      if (!cached) {
-        useApp.setState({ phase: useApp.getState().phase === 'main' ? 'main' : 'onboarding' })
-      }
-      void bootstrap()
+      void (async () => {
+        // 1) ask the server for the admin setting; fall back to the local cache
+        let enabled = true
+        try {
+          const cfg = await api.appConfig()
+          enabled = cfg.splashEnabled !== false
+        } catch {
+          try {
+            enabled = window.localStorage.getItem('call.splash') !== '0'
+          } catch {}
+        }
+        try {
+          window.localStorage.setItem('call.splash', enabled ? '1' : '0')
+        } catch {}
+        setShow(enabled)
+        useApp.setState({ splashEnabled: enabled })
+        if (!enabled) skipToBoot()
+        // 2) bootstrap validates the session and picks 'main' or 'onboarding'
+        void bootstrap()
+      })()
     }, 0)
     return () => window.clearTimeout(t)
   }, [bootstrap])
 
   useEffect(() => {
+    // server said disabled while the cached splash was showing → end it now
     if (show === false || splashEnabled === false) {
-      useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
+      skipToBoot()
       return
     }
+    // enabled splash: leave for the app once bootstrap has decided
     if (show && booted) {
       const t = window.setTimeout(() => {
-        useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
+        if (useApp.getState().phase === 'splash') {
+          useApp.setState({ phase: useApp.getState().me ? 'main' : 'onboarding' })
+        }
       }, 900)
       return () => window.clearTimeout(t)
     }
-  }, [booted, phase, show, splashEnabled])
+  }, [booted, show, splashEnabled])
 
-  // disabled (or pre-hydration frame) → plain dark background only
+  // disabled (or pre-hydration frame) → nothing; the shell shows a neutral boot screen
   if (!show) return null
 
   return (
@@ -76,6 +98,11 @@ export function SplashScreen() {
       <p className="absolute bottom-12 w-full text-center text-xs text-[#6F7FA6]">Peer-to-peer encrypted calls</p>
     </div>
   )
+}
+
+/** Leave the splash phase for the neutral boot screen; bootstrap() picks main/onboarding. */
+function skipToBoot() {
+  if (useApp.getState().phase === 'splash') useApp.setState({ phase: 'boot' })
 }
 
 function CallWordmarkFallback() {

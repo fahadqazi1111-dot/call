@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAdmin, requireStaff, setSetting, getSetting } from '@/lib/callapp/server'
+import { maskAiConfig, mergeAiConfig } from '@/lib/callapp/aiProviders'
 
-/** GET: AI config + usage statistics. Credentials NEVER leave the backend. */
+/** GET: AI config + usage statistics. Provider API keys are always masked. */
 export async function GET(req: Request) {
   const admin = await requireStaff(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -27,22 +28,23 @@ export async function GET(req: Request) {
     db.aiMessage.count(),
   ])
   return NextResponse.json({
-    config: cfg,
+    config: maskAiConfig(cfg),
     auth: { googleConfigured: !!auth.googleClientId },
     usage: { totals, conversations: convCount, messages: msgCount },
   })
 }
 
-/** PUT { config } — update AI settings (limits, toggles, model). */
+/** PUT { config } — update AI settings (limits, toggles, providers, model). */
 export async function PUT(req: Request) {
   const admin = await requireAdmin(req)
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const body = await req.json()
     const current = await getSetting<Record<string, unknown>>('ai', {})
-    const merged = { ...current, ...body.config }
+    // merge that keeps stored API keys when the form sends masked values
+    const merged = mergeAiConfig(body.config || {}, current)
     await setSetting('ai', merged)
-    return NextResponse.json({ ok: true, config: merged })
+    return NextResponse.json({ ok: true, config: maskAiConfig(merged) })
   } catch {
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   }

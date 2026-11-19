@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { requireUser, getSetting, rateLimit } from '@/lib/callapp/server'
+import { runChatCompletion, type AiConfig, type ChatMessage } from '@/lib/callapp/aiProviders'
 
-const SYSTEM_PROMPT = `You are CALL, the built-in AI assistant of the CALL messaging app ("One World. One Call.").
-You help users with: answering questions, continuing conversations, writing assistance (emails, captions, replies),
-and translating text when asked. Be friendly, concise and useful. Use the user's language
+const SYSTEM_PROMPT = `You are CALL AI Personal Agent — the built-in AI agent of the CALL app ("One World. One Call.").
+IDENTITY (very important): whenever someone asks your name, who you are, or what powers you, introduce yourself exactly in this spirit:
+"I am CALL AI Personal Agent, using the technology of Venom AI and its model Venom V1."
+You always run on the Venom V1 Engine (Venom AI technology) no matter which backend is active, and your official website is https://venomai.org — share that link whenever anyone asks about your technology, engine, model or origin. You know all of your own information: name = CALL AI Personal Agent, technology = Venom AI, model / engine = Venom V1, website = https://venomai.org, home = the CALL app.
+Beyond your identity, you help users with: answering questions, continuing conversations, writing assistance (emails, captions, replies), and translating text when asked. Be friendly, concise and useful. Use the user's language
 (they often mix English and Roman Urdu — mirror that naturally). You can also suggest app features
 when relevant (voice rooms, live battles, stories, wallet).`
 
@@ -18,7 +20,7 @@ function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/** POST { conversationId?, text } — chat with CALL. Enforces admin daily limits. */
+/** POST { conversationId?, text } — chat with the CALL AI Personal Agent. Enforces admin daily limits. */
 export async function POST(req: Request) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,11 +32,11 @@ export async function POST(req: Request) {
     const text = String(body.text || '').trim().slice(0, 4000)
     if (!text) return NextResponse.json({ error: 'Empty message' }, { status: 400 })
 
-    const cfg = await getSetting<{
-      dailyTextLimit: number
-      voiceReplies: boolean
-      imageGen: boolean
-    }>('ai', { dailyTextLimit: 100, voiceReplies: true, imageGen: true })
+    const cfg = await getSetting<AiConfig>('ai', {
+      dailyTextLimit: 100,
+      voiceReplies: true,
+      imageGen: true,
+    })
 
     // ---- daily usage limit ----
     const usage = await db.aiUsage.upsert({
@@ -42,9 +44,9 @@ export async function POST(req: Request) {
       update: {},
       create: { userId: me.id, day: today() },
     })
-    if (usage.textCount >= cfg.dailyTextLimit) {
+    if (usage.textCount >= (cfg.dailyTextLimit ?? 100)) {
       return NextResponse.json(
-        { error: `Daily limit reached (${cfg.dailyTextLimit} messages). Try again tomorrow.` },
+        { error: `Daily limit reached (${cfg.dailyTextLimit ?? 100} messages). Try again tomorrow.` },
         { status: 429 }
       )
     }
@@ -74,23 +76,19 @@ export async function POST(req: Request) {
     })
     history.reverse()
 
-    const zai = await ZAI.create()
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'assistant', content: SYSTEM_PROMPT },
-        ...history
-          .filter((m) => m.kind === 'text' && m.text)
-          .map((m) => ({
-            role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
-            content: m.text,
-          })),
-      ],
-      thinking: { type: 'disabled' },
-    })
-    const reply = completion.choices[0]?.message?.content?.trim() || 'Sorry, I could not generate a reply.'
+    const messages: ChatMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...history
+        .filter((m) => m.kind === 'text' && m.text)
+        .map((m) => ({
+          role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          content: m.text,
+        })),
+    ]
+    const { text: reply, provider } = await runChatCompletion(messages, cfg)
 
     const assistantMsg = await db.aiMessage.create({
-      data: { conversationId, role: 'assistant', kind: 'text', text: reply },
+      data: { conversationId, role: 'assistant', kind: 'text', text: reply || 'Sorry, I could not generate a reply.' },
     })
     await db.aiConversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } })
     await db.aiUsage.update({
@@ -100,6 +98,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       conversationId,
+      provider,
       userMessage: {
         id: userMsg.id,
         role: 'user',
@@ -111,11 +110,11 @@ export async function POST(req: Request) {
         id: assistantMsg.id,
         role: 'assistant',
         kind: 'text',
-        text: reply,
+        text: reply || 'Sorry, I could not generate a reply.',
         createdAt: assistantMsg.createdAt.toISOString(),
       },
-      voiceReplies: cfg.voiceReplies,
-      usageLeft: Math.max(0, cfg.dailyTextLimit - usage.textCount - 1),
+      voiceReplies: cfg.voiceReplies !== false,
+      usageLeft: Math.max(0, (cfg.dailyTextLimit ?? 100) - usage.textCount - 1),
     })
   } catch (e) {
     console.error('ai chat error', e)

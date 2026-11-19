@@ -32,9 +32,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
-        {children}
-      </body>
+      <head>
+        {/*
+          Pre-hydration splash neutralizer: when the admin disabled the splash
+          screen (cached locally), paint the shell WHITE from the very first
+          frame — no navy/blue flash before the app decides where to route.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('call.splash')==='0')document.documentElement.dataset.splashOff='1'}catch(e){}`,
+          }}
+        />
+      </head>
+      <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>{children}</body>
     </html>
   );
 }

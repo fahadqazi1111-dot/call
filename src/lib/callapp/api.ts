@@ -616,6 +616,11 @@ export const api = {
     }>('/api/admin/ai'),
   adminAiSave: (config: Record<string, unknown>) =>
     request<{ ok: boolean }>('/api/admin/ai', { method: 'PUT', body: JSON.stringify({ config }) }),
+  adminAiTest: (payload: { provider: string; model?: string; apiKey?: string; baseUrl?: string }) =>
+    request<{ ok: boolean; latencyMs: number; reply?: string; model?: string; error?: string }>('/api/admin/ai/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   adminAds: () =>
     request<{
       ads: Array<{

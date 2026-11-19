@@ -25,7 +25,7 @@ import type {
   WithdrawalItem,
 } from './types'
 
-export type AppPhase = 'splash' | 'onboarding' | 'auth' | 'main'
+export type AppPhase = 'splash' | 'boot' | 'onboarding' | 'auth' | 'main'
 export type AppTab = 'chats' | 'calls' | 'rooms' | 'live' | 'contacts' | 'profile'
 export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'ads' | 'story-composer' | null
 /** Staff members land in the console; they can switch to the normal user app. */

@@ -319,9 +319,9 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
           <CallLogoMark size={22} />
         </span>
         <div className="flex-1">
-          <h2 className="text-[16px] font-extrabold text-cink">CALL Assistant</h2>
+          <h2 className="text-[16px] font-extrabold text-cink">CALL AI Agent</h2>
           <p className="text-[11px] text-cmut">
-            {usage ? `${usage.text}/${usage.limits.text} messages today` : 'Your AI companion'}
+            {usage ? `${usage.text}/${usage.limits.text} messages today` : 'Powered by Venom V1 Engine'}
           </p>
         </div>
         <button
@@ -370,6 +370,12 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
                 <p className="mt-2 max-w-sm text-sm text-cmut">
                   Ask me anything, get writing help, translate text, analyze images, or generate images.
                   Tap the mic to talk to me — I reply out loud.
+                </p>
+                <p className="mt-2 text-[11px] font-semibold text-cmut">
+                  Powered by Venom V1 Engine ·{' '}
+                  <a href="https://venomai.org" target="_blank" rel="noreferrer" className="text-cbrand underline">
+                    venomai.org
+                  </a>
                 </p>
                 <div className="mt-5 grid w-full max-w-md grid-cols-2 gap-2">
                   {['Translate "Good morning" to Urdu', 'Write a birthday caption', 'Suggest a story idea', 'Summarize my day plan'].map((s) => (
@@ -474,6 +480,12 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
             </div>
             <p className="pt-1.5 text-center text-[10px] text-cmut">
               {imageMode === 'generate' ? '🎨 Image generation mode — press send to create' : 'CALL AI can make mistakes. Verify important info.'}
+            </p>
+            <p className="text-center text-[10px] font-bold text-cmut">
+              Powered by{' '}
+              <a href="https://venomai.org" target="_blank" rel="noreferrer" className="text-cbrand">
+                Venom V1 Engine
+              </a>
             </p>
           </div>
         </div>
