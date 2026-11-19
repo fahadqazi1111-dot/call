@@ -22,5 +22,17 @@
     "bytes": 4743438,
     "taskId": "202611200442028bafa0d0b9154c59",
     "generatedAt": "2026-11-19T20:43:03.901Z"
+  },
+  "rocket": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/d2f29cfc-e45a-11f1-8360-92d9c959708e_0.mp4",
+    "bytes": 1422231,
+    "taskId": "20261120045016acee696f949246e0",
+    "generatedAt": "2026-11-19T20:51:17.340Z"
+  },
+  "fireworks": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/79dde64c-e45c-11f1-858c-f21fdb5d8223_0.mp4",
+    "bytes": 4697485,
+    "taskId": "2026112005020573fff753cb6b4ee6",
+    "generatedAt": "2026-11-19T21:03:07.294Z"
   }
 }
