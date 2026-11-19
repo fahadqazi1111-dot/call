@@ -4,6 +4,7 @@
 class SoundKit {
   private ctx: AudioContext | null = null
   private timers: number[] = []
+  private unlocked = false
 
   private ac(): AudioContext | null {
     if (typeof window === 'undefined') return null
@@ -14,6 +15,42 @@ class SoundKit {
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume()
     return this.ctx
+  }
+
+  /**
+   * Autoplay-policy unlock. Browsers suspend every AudioContext until a user
+   * gesture happens — without this, gift/call sounds never play for viewers
+   * who haven't interacted yet. Called on the first pointer/key event.
+   */
+  unlock() {
+    if (this.unlocked) return
+    const ctx = this.ac()
+    if (!ctx) return
+    this.unlocked = true
+    void ctx.resume().catch(() => {})
+    // tiny silent blip — some engines only commit the resume after a sound
+    try {
+      const osc = ctx.createOscillator()
+      const g = ctx.createGain()
+      g.gain.value = 0.0001
+      osc.connect(g).connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.05)
+    } catch {}
+  }
+
+  /** Install one-time global gesture listeners (idempotent). */
+  installUnlock() {
+    if (typeof window === 'undefined' || this.unlocked) return
+    const once = () => {
+      this.unlock()
+      window.removeEventListener('pointerdown', once)
+      window.removeEventListener('touchstart', once)
+      window.removeEventListener('keydown', once)
+    }
+    window.addEventListener('pointerdown', once, { passive: true })
+    window.addEventListener('touchstart', once, { passive: true })
+    window.addEventListener('keydown', once)
   }
 
   private beep(freq: number, durMs: number, gain = 0.06, delayMs = 0) {
@@ -200,11 +237,14 @@ class SoundKit {
         this.noise(280, 0.05, 1200, 480, 'bandpass')
         break
       case 'lion':
-        // powerful roar: growling low sweep + breath noise
-        this.sweep(180, 70, 1100, 0.16, 0, 'sawtooth')
-        this.sweep(140, 60, 950, 0.12, 130, 'square')
-        this.noise(1000, 0.09, 700, 0)
-        this.noise(500, 0.06, 1800, 620, 'bandpass')
+        // HEAVY TikTok-style roar: sub-bass body + growling layers + breath
+        this.sweep(190, 55, 1400, 0.2, 0, 'sawtooth')
+        this.sweep(150, 48, 1250, 0.16, 90, 'square')
+        this.sweep(90, 34, 1500, 0.18, 60, 'sine')
+        this.noise(1300, 0.11, 620, 0)
+        this.noise(600, 0.08, 1600, 500, 'bandpass')
+        this.noise(350, 0.06, 2400, 980, 'bandpass')
+        this.beep(55, 500, 0.16, 120)
         break
       case 'castle':
         // epic chime sequence
@@ -216,12 +256,14 @@ class SoundKit {
         break
       case 'superlion':
       case 'galaxy':
-        // cosmic roar + shimmering sweep
-        this.sweep(160, 55, 1200, 0.15, 0, 'sawtooth')
-        this.sweep(400, 2400, 900, 0.04, 200, 'sine')
-        this.noise(1100, 0.08, 900, 0)
+        // cosmic roar + shimmering sweep — even heavier
+        this.sweep(170, 42, 1500, 0.2, 0, 'sawtooth')
+        this.sweep(95, 30, 1600, 0.2, 40, 'sine')
+        this.sweep(400, 2600, 950, 0.05, 200, 'sine')
+        this.noise(1300, 0.1, 900, 0)
         this.beep(1047, 300, 0.05, 700)
-        this.beep(1568, 420, 0.05, 900)
+        this.beep(1319, 300, 0.05, 830)
+        this.beep(1568, 420, 0.06, 960)
         break
       default:
         this.gift(1)

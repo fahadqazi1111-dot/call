@@ -58,25 +58,32 @@ async function main() {
 
   /* ---------- gift catalog (real money prices, admin-configurable) ---------- */
   const gifts = [
-    { name: 'Rose', emoji: '🌹', animKind: 'rose', category: 'both', priceUsd: 0.6, sortOrder: 1 },
-    { name: 'Flower', emoji: '🌺', animKind: 'flower', category: 'both', priceUsd: 1.0, sortOrder: 2 },
-    { name: 'Heart', emoji: '❤️', animKind: 'heart', category: 'both', priceUsd: 1.5, sortOrder: 3 },
-    { name: 'Bouquet', emoji: '💐', animKind: 'flower', category: 'both', priceUsd: 2.5, durationMs: 2600, sortOrder: 4 },
-    { name: 'Crown', emoji: '👑', animKind: 'crown', category: 'both', priceUsd: 5.0, durationMs: 2800, sortOrder: 5 },
-    { name: 'Race Car', emoji: '🏎️', animKind: 'car', category: 'both', priceUsd: 8.0, durationMs: 3200, sortOrder: 6 },
-    { name: 'Rocket', emoji: '🚀', animKind: 'rocket', category: 'both', priceUsd: 10.0, durationMs: 3500, sortOrder: 7 },
-    { name: 'Fireworks', emoji: '🎆', animKind: 'fireworks', category: 'both', priceUsd: 15.0, durationMs: 4000, sortOrder: 8 },
-    { name: 'Dragon', emoji: '🐉', animKind: 'dragon', category: 'both', priceUsd: 20.0, durationMs: 4000, sortOrder: 9 },
-    { name: 'Lion', emoji: '🦁', animKind: 'lion', category: 'both', priceUsd: 30.0, durationMs: 4200, sortOrder: 10 },
-    { name: 'Magic Castle', emoji: '🏰', animKind: 'castle', category: 'both', priceUsd: 50.0, durationMs: 5000, sortOrder: 11 },
-    { name: 'Galaxy', emoji: '🌌', animKind: 'superlion', category: 'both', priceUsd: 99.0, durationMs: 5200, sortOrder: 12 },
+    { name: 'Rose', emoji: '🌹', animKind: 'rose', category: 'both', priceUsd: 0.6, sortOrder: 1, image: '/gifts/rose.png' },
+    { name: 'Flower', emoji: '🌺', animKind: 'flower', category: 'both', priceUsd: 1.0, sortOrder: 2, image: '/gifts/rose.png' },
+    { name: 'Heart', emoji: '❤️', animKind: 'heart', category: 'both', priceUsd: 1.5, sortOrder: 3, image: '/gifts/heart.png' },
+    { name: 'Bouquet', emoji: '💐', animKind: 'flower', category: 'both', priceUsd: 2.5, durationMs: 2600, sortOrder: 4, image: '/gifts/rose.png' },
+    { name: 'Crown', emoji: '👑', animKind: 'crown', category: 'both', priceUsd: 5.0, durationMs: 2800, sortOrder: 5, image: '/gifts/crown.png' },
+    { name: 'Race Car', emoji: '🏎️', animKind: 'car', category: 'both', priceUsd: 8.0, durationMs: 3200, sortOrder: 6, image: '/gifts/car.png' },
+    { name: 'Rocket', emoji: '🚀', animKind: 'rocket', category: 'both', priceUsd: 10.0, durationMs: 3500, sortOrder: 7, image: '/gifts/rocket.png' },
+    { name: 'Fireworks', emoji: '🎆', animKind: 'fireworks', category: 'both', priceUsd: 15.0, durationMs: 4000, sortOrder: 8, image: '/gifts/fireworks.png' },
+    { name: 'Dragon', emoji: '🐉', animKind: 'dragon', category: 'both', priceUsd: 20.0, durationMs: 4000, sortOrder: 9, image: '/gifts/dragon.png' },
+    { name: 'Lion', emoji: '🦁', animKind: 'lion', category: 'both', priceUsd: 30.0, durationMs: 4200, sortOrder: 10, image: '/gifts/lion.png' },
+    { name: 'Magic Castle', emoji: '🏰', animKind: 'castle', category: 'both', priceUsd: 50.0, durationMs: 5000, sortOrder: 11, image: '/gifts/castle.png' },
+    { name: 'Galaxy', emoji: '🌌', animKind: 'superlion', category: 'both', priceUsd: 99.0, durationMs: 5200, sortOrder: 12, image: '/gifts/galaxy.png' },
   ]
   for (const g of gifts) {
     const existing = await prisma.gift.findFirst({ where: { name: g.name } })
     if (!existing) {
       await prisma.gift.create({
         data: {
-          ...g,
+          name: g.name,
+          emoji: g.emoji,
+          animKind: g.animKind,
+          category: g.category,
+          priceUsd: g.priceUsd,
+          sortOrder: g.sortOrder,
+          durationMs: g.durationMs,
+          imageUrl: g.image,
           sound: Number(g.priceUsd) >= 10 ? 'gift_big' : 'gift',
           description: `${g.name} gift — delivered with a real-time animation.`,
           platformMap: JSON.stringify({
@@ -85,6 +92,8 @@ async function main() {
           }),
         },
       })
+    } else if (!existing.imageUrl) {
+      await prisma.gift.update({ where: { id: existing.id }, data: { imageUrl: g.image } })
     }
   }
 

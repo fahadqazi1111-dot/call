@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useApp, bindGlobalSocketHandlers } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { callManager } from '@/lib/callapp/callManager'
+import { soundKit } from '@/lib/callapp/sound'
 import { Toaster, toast } from 'sonner'
 import { SplashScreen } from './SplashScreen'
 import { OnboardingScreen } from './OnboardingScreen'
@@ -76,6 +77,9 @@ export function AppRoot() {
     if (!handlersBound) {
       handlersBound = true
       bindGlobalSocketHandlers()
+      // browsers suspend WebAudio until the first user gesture — without
+      // this, gift animations would be silent for passive viewers
+      soundKit.installUnlock()
       callManager.setToast((msg) => toast.info(msg))
       callManager.setRefresh(() => {
         void useApp.getState().loadCalls()

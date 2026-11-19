@@ -141,7 +141,7 @@ export function LiveHostScreen({
     const onGift = (p: unknown) => {
       const d = p as { liveId: string; payload: {
         sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
@@ -636,9 +636,9 @@ export function BattleVideoLayout({
   return (
     <div className="absolute inset-0">
       {is2v2 ? (
-        <div className="grid h-full grid-rows-2 gap-1">
+        <div className="grid h-full grid-rows-2 gap-0">
           {[0, 1].map((side) => (
-            <div key={side} className="relative grid grid-cols-2 gap-1">
+            <div key={side} className="relative grid grid-cols-2 gap-0">
               {participants
                 .filter((p) => p.side === side)
                 .map((p) => (
@@ -651,9 +651,13 @@ export function BattleVideoLayout({
                 ))}
             </div>
           ))}
+          {/* TikTok battle divider: glowing line between the two rows */}
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2">
+            <div className="h-[3px] w-full bg-gradient-to-r from-transparent via-[#FFD166] to-transparent shadow-[0_0_14px_rgba(255,209,102,0.8)]" />
+          </div>
         </div>
       ) : (
-        <div className="grid h-full grid-cols-2 gap-1">
+        <div className="relative grid h-full grid-cols-2 gap-0">
           {[0, 1].map((side) => (
             <div key={side} className="relative">
               {participants
@@ -669,6 +673,10 @@ export function BattleVideoLayout({
                 ))}
             </div>
           ))}
+          {/* TikTok battle divider: glowing middle line between the two fighters */}
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 -translate-x-1/2">
+            <div className="h-full w-[3px] bg-gradient-to-b from-transparent via-[#FFD166] to-transparent shadow-[0_0_14px_rgba(255,209,102,0.8)]" />
+          </div>
         </div>
       )}
       {countdown !== null && countdown > 0 && (

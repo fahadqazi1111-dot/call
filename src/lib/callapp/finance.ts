@@ -83,13 +83,180 @@ async function fulfillGift(
   feeAmount: number,
   commissionPercent: number
 ): Promise<FulfillResult> {
-  const giftId = String(meta.giftId || '')
-  const toUserId = String(meta.toUserId || '')
-  const context = ['room', 'live', 'battle'].includes(String(meta.context)) ? String(meta.context) : 'live'
-  const gift = await db.gift.findUnique({ where: { id: giftId } })
-  const recipient = await db.user.findUnique({ where: { id: toUserId } })
+  const gift = await db.gift.findUnique({ where: { id: String(meta.giftId || '') } })
+  const recipient = await db.user.findUnique({ where: { id: String(meta.toUserId || '') } })
   const sender = await db.user.findUnique({ where: { id: payment.userId } })
   if (!gift || !recipient || !sender) return { ok: false, reason: 'gift_participants_missing' }
+
+  return deliverGift({
+    gift,
+    sender,
+    recipient,
+    context: ['room', 'live', 'battle'].includes(String(meta.context)) ? (String(meta.context) as 'room' | 'live' | 'battle') : 'live',
+    roomId: (meta.roomId as string) || null,
+    liveId: (meta.liveId as string) || null,
+    battleId: (meta.battleId as string) || null,
+    battleSide: typeof meta.battleSide === 'number' ? meta.battleSide : null,
+    gross,
+    feeAmount,
+    commissionPercent,
+    paymentId: payment.id,
+    isTest: payment.isTest,
+    idempotencyTag: `giftcredit:${payment.id}`,
+  })
+}
+
+/** Eligibility rule shared by checkout, wallet-send and this delivery path. */
+export async function giftRecipientEligible(
+  meId: string,
+  context: 'room' | 'live' | 'battle',
+  ids: { roomId?: string | null; liveId?: string | null; battleId?: string | null; battleSide?: number | null },
+  toUserId: string
+): Promise<boolean> {
+  if (toUserId === meId) return false
+  if (context === 'room' && ids.roomId) {
+    const p = await db.roomParticipant.findFirst({
+      where: { roomId: ids.roomId, userId: toUserId, role: { in: ['host', 'cohost', 'speaker'] }, leftAt: null },
+      select: { id: true },
+    })
+    return !!p
+  }
+  if (context === 'live' && ids.liveId) {
+    const live = await db.liveSession.findUnique({ where: { id: ids.liveId }, select: { hostId: true } })
+    return live?.hostId === toUserId
+  }
+  if (context === 'battle' && ids.battleId) {
+    const p = await db.battleParticipant.findFirst({
+      where: { battleId: ids.battleId, userId: toUserId },
+      select: { id: true },
+    })
+    return !!p
+  }
+  return false
+}
+
+export interface WalletGiftInput {
+  giftId: string
+  toUserId: string
+  context: 'room' | 'live' | 'battle'
+  roomId?: string | null
+  liveId?: string | null
+  battleId?: string | null
+  battleSide?: number | null
+  clientKey?: string | null
+}
+
+/**
+ * Send a gift by SPENDING WALLET BALANCE (no card payment involved).
+ *
+ *   1. validate gift + recipient against the same eligibility rules as card checkout
+ *   2. balance check, then an idempotent ledger debit on the sender's wallet
+ *   3. delivery through the exact same deliverGift() path as card gifts:
+ *      GiftSend row, commission split, recipient credit, notification and
+ *      the realtime relay that drives the animation for everyone.
+ *
+ * The clientKey makes retries safe: the debit happens once, and delivery
+ * dedupes on its own tag, so a flaky network can never double-charge or
+ * double-deliver.
+ */
+export async function sendGiftFromWallet(
+  senderId: string,
+  input: WalletGiftInput,
+  commissionPercent: number
+): Promise<FulfillResult & { giftName?: string }> {
+  const gift = await db.gift.findUnique({ where: { id: String(input.giftId || '') } })
+  if (!gift || !gift.active) return { ok: false, reason: 'gift_unavailable' }
+  const recipient = await db.user.findUnique({ where: { id: String(input.toUserId || '') } })
+  if (!recipient) return { ok: false, reason: 'recipient_missing' }
+  if (recipient.id === senderId) return { ok: false, reason: 'self_gift' }
+
+  const context = ['room', 'live', 'battle'].includes(input.context) ? input.context : 'live'
+  const eligible = await giftRecipientEligible(senderId, context, input, recipient.id)
+  if (!eligible) return { ok: false, reason: 'recipient_not_eligible' }
+
+  const gross = round2(gift.priceUsd)
+  const clientKey = String(input.clientKey || '').slice(0, 80) || `wallet:${Date.now()}`
+  const feeAmount = 0 // wallet spend has no card processing fee
+
+  // ---- sender record for notifications + realtime payload ----
+  const sender = await db.user.findUnique({
+    where: { id: senderId },
+    select: { id: true, name: true, avatarKey: true, avatarUrl: true },
+  })
+  if (!sender) return { ok: false, reason: 'sender_missing' }
+
+  // ---- balance check + idempotent debit ----
+  const wallet = await ensureWallet(senderId)
+  if (round2(wallet.available) < gross) {
+    return { ok: false, reason: 'insufficient_balance' }
+  }
+  const spend = await applyLedgerDelta(
+    senderId,
+    'gift_sent',
+    { available: -gross },
+    `Gift ${gift.name} sent to ${recipient.name} (${context}) — $${gross.toFixed(2)} from wallet balance`,
+    'gift_send',
+    clientKey,
+    `giftspend:${clientKey}`
+  )
+  if (!spend.applied) {
+    // retry of an already-charged send — delivery below still dedupes itself
+    return { ok: true, alreadyProcessed: true, sendId: undefined, wallet: spend.wallet }
+  }
+
+  const result = await deliverGift({
+    gift,
+    sender,
+    recipient,
+    context,
+    roomId: input.roomId || null,
+    liveId: input.liveId || null,
+    battleId: input.battleId || null,
+    battleSide: typeof input.battleSide === 'number' ? input.battleSide : null,
+    gross,
+    feeAmount,
+    commissionPercent,
+    paymentId: null,
+    isTest: false,
+    idempotencyTag: `giftcredit:wallet:${clientKey}`,
+  })
+  if (!result.ok) {
+    // refund the wallet so money never vanishes on a delivery failure
+    await applyLedgerDelta(
+      senderId,
+      'gift_refund',
+      { available: gross },
+      `Refund — gift ${gift.name} could not be delivered — $${gross.toFixed(2)}`,
+      'gift_send',
+      null,
+      `giftrefund:${clientKey}`
+    )
+  }
+  return { ...result, giftName: gift.name }
+}
+
+/**
+ * THE single delivery path for every gift (card or wallet):
+ * GiftSend row → recipient credit → battle scoring → notification → realtime relay.
+ * Idempotent by idempotencyTag.
+ */
+async function deliverGift(args: {
+  gift: { id: string; name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; currency: string }
+  sender: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+  recipient: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
+  context: 'room' | 'live' | 'battle'
+  roomId: string | null
+  liveId: string | null
+  battleId: string | null
+  battleSide: number | null
+  gross: number
+  feeAmount: number
+  commissionPercent: number
+  paymentId: string | null
+  isTest: boolean
+  idempotencyTag: string
+}): Promise<FulfillResult> {
+  const { gift, sender, recipient, context, gross, feeAmount, commissionPercent, paymentId, isTest } = args
 
   const { commission, net } = splitAmounts(gross, feeAmount, commissionPercent)
 
@@ -99,35 +266,35 @@ async function fulfillGift(
       senderId: sender.id,
       recipientId: recipient.id,
       context,
-      roomId: (meta.roomId as string) || null,
-      liveId: (meta.liveId as string) || null,
-      battleId: (meta.battleId as string) || null,
-      battleSide: typeof meta.battleSide === 'number' ? meta.battleSide : null,
+      roomId: args.roomId,
+      liveId: args.liveId,
+      battleId: args.battleId,
+      battleSide: args.battleSide,
       grossAmount: gross,
       commission,
       feeAmount,
       netAmount: net,
-      paymentId: payment.id,
-      isTest: payment.isTest,
+      paymentId,
+      isTest,
     },
   })
 
-  // creator credit — idempotent by payment id
+  // creator credit — idempotent by tag
   const credit = await applyLedgerDelta(
     recipient.id,
     'gift_received',
     { available: net, totals: { totalReceived: gross, totalEarned: net } },
-    `Gift ${gift.name} from ${sender.name}${payment.isTest ? ' (test)' : ''} — gross $${gross.toFixed(2)}, commission $${commission.toFixed(2)}, net $${net.toFixed(2)}`,
+    `Gift ${gift.name} from ${sender.name}${isTest ? ' (test)' : ''} — gross $${gross.toFixed(2)}, commission $${commission.toFixed(2)}, net $${net.toFixed(2)}`,
     'gift_send',
     send.id,
-    `giftcredit:${payment.id}`
+    args.idempotencyTag
   )
 
-  // battle scoring — verified money only
+  // battle scoring — verified value only
   let battleTotal: number | null = null
-  if (context === 'battle' && meta.battleId && typeof meta.battleSide === 'number') {
+  if (context === 'battle' && args.battleId && typeof args.battleSide === 'number') {
     const part = await db.battleParticipant.findFirst({
-      where: { battleId: String(meta.battleId), side: meta.battleSide, userId: recipient.id },
+      where: { battleId: String(args.battleId), side: args.battleSide, userId: recipient.id },
     })
     if (part) {
       const updated = await db.battleParticipant.update({
@@ -143,9 +310,9 @@ async function fulfillGift(
       userId: recipient.id,
       kind: 'gift',
       title: `${sender.name} sent you ${gift.name} ${gift.emoji}`,
-      body: `Gross $${gross.toFixed(2)} · commission $${commission.toFixed(2)} · you earned $${net.toFixed(2)}${payment.isTest ? ' (test payment)' : ''}`,
+      body: `Gross $${gross.toFixed(2)} · commission $${commission.toFixed(2)} · you earned $${net.toFixed(2)}${isTest ? ' (test payment)' : ''}`,
       refType: context === 'room' ? 'room' : 'live',
-      refId: (meta.roomId as string) || (meta.liveId as string) || null,
+      refId: args.roomId || args.liveId || null,
     },
   })
 
@@ -161,22 +328,23 @@ async function fulfillGift(
       sound: gift.sound,
       durationMs: gift.durationMs,
       priceUsd: gift.priceUsd,
+      imageUrl: gift.imageUrl,
     },
     from: { id: sender.id, name: sender.name, avatarKey: sender.avatarKey, avatarUrl: sender.avatarUrl },
     to: { id: recipient.id, name: recipient.name, avatarKey: recipient.avatarKey, avatarUrl: recipient.avatarUrl },
     battle:
-      context === 'battle' && meta.battleId
-        ? { battleId: meta.battleId, side: meta.battleSide, added: gross, total: battleTotal }
+      context === 'battle' && args.battleId
+        ? { battleId: args.battleId, side: args.battleSide, added: gross, total: battleTotal }
         : null,
   }
-  if (context === 'room' && meta.roomId) {
-    await relayToRoom(String(meta.roomId), 'room:gift', { roomId: meta.roomId, payload })
-  } else if (meta.liveId) {
-    await relayToLive(String(meta.liveId), 'live:gift', { liveId: meta.liveId, payload })
-    if (battleTotal !== null && meta.battleId && meta.liveId) {
-      await relayToLive(String(meta.liveId), 'battle:score', {
-        battleId: meta.battleId,
-        side: meta.battleSide,
+  if (context === 'room' && args.roomId) {
+    await relayToRoom(args.roomId, 'room:gift', { roomId: args.roomId, payload })
+  } else if (args.liveId) {
+    await relayToLive(args.liveId, 'live:gift', { liveId: args.liveId, payload })
+    if (battleTotal !== null && args.battleId && args.liveId) {
+      await relayToLive(args.liveId, 'battle:score', {
+        battleId: args.battleId,
+        side: args.battleSide,
         added: gross,
         total: battleTotal,
       })

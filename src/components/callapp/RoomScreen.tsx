@@ -116,7 +116,7 @@ export function RoomScreen({
     const onGift = (p: unknown) => {
       const d = p as { roomId: string; payload: {
         sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
@@ -579,15 +579,18 @@ export function RoomScreen({
         <button
           className="flex h-[58px] w-[58px] items-center justify-center rounded-full bg-gradient-to-r from-[#F59E0B] to-[#E1306C] text-white shadow-lg"
           onClick={() => {
-            const eligible = (st.participants ?? []).filter((p) => (p.role === 'host' || p.role === 'cohost') && p.userId !== me?.id)
+            // EVERYONE ON THE MIC can be gifted — host, co-host and speakers
+            const eligible = (st.participants ?? []).filter(
+              (p) => ['host', 'cohost', 'speaker'].includes(p.role) && p.userId !== me?.id
+            )
             if (eligible.length === 0) {
-              setNotice('No eligible gift recipient — only hosts and co-hosts can receive gifts')
+              setNotice('No eligible gift recipient — only people on the microphone can receive gifts')
               window.setTimeout(() => setNotice(''), 2600)
               return
             }
             setGiftOpen(true)
           }}
-          title="Send gift (direct payment)"
+          title="Send gift"
         >
           <Gift size={24} />
         </button>

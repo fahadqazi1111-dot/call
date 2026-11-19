@@ -278,6 +278,21 @@ export const api = {
     battleSide?: number
     clientKey?: string
   }) => request<CheckoutResult>('/api/gifts/checkout', { method: 'POST', body: JSON.stringify(payload) }),
+  /** send a gift by spending wallet balance — instant, no card checkout */
+  giftSendWallet: (payload: {
+    giftId: string
+    toUserId: string
+    context: 'room' | 'live' | 'battle'
+    roomId?: string
+    liveId?: string
+    battleId?: string
+    battleSide?: number
+    clientKey?: string
+  }) =>
+    request<{ ok: boolean; sendId: string | null; alreadyProcessed: boolean; wallet: { available: number } }>(
+      '/api/gifts/send-wallet',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
 
   /* ---------- stories ---------- */
   stories: () => request<{ groups: StoryGroup[] }>('/api/stories'),

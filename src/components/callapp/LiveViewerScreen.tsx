@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { X, Send, Gift, Eye, Swords, Loader2, Check, Trophy } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { liveManager, battleManager } from '@/lib/callapp/liveManager'
@@ -15,8 +16,10 @@ import type { LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/
 /**
  * Live viewer: full-screen vertical video of the host (and battle
  * teams), floating comments, gift animations, viewer count, battle scores.
+ * `embedded` renders it inside the reels feed container (absolute, no fixed
+ * positioning) instead of covering the whole viewport.
  */
-export function LiveViewerScreen({ session, onClose }: { session: LiveSessionItem; onClose: () => void }) {
+export function LiveViewerScreen({ session, onClose, embedded = false }: { session: LiveSessionItem; onClose: () => void; embedded?: boolean }) {
   const me = useApp((s) => s.me)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [comments, setComments] = useState<LiveComment[]>([])
@@ -74,7 +77,7 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
     const onGift = (p: unknown) => {
       const d = p as { liveId: string; payload: {
         sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number }
+        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
         from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
         to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
       } }
@@ -93,7 +96,7 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
     const onEnded = (p: unknown) => {
       const d = p as { liveId: string }
       if (d.liveId === session.id) {
-        alert('The live has ended')
+        toast.info('The live has ended')
         onClose()
       }
     }
@@ -168,7 +171,7 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
   const lmStreams = liveManager.snapshot().publisherStreams
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black text-white">
+    <div className={`${embedded ? 'absolute inset-0' : 'fixed inset-0 z-[80]'} bg-black text-white`}>
       <GiftAnimationLayer gifts={anims} />
 
       {/* video */}
@@ -193,8 +196,12 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
         </div>
       )}
 
-      {/* top bar */}
-      <div className="absolute inset-x-0 top-0 z-30 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pb-10 pt-4">
+      {/* top bar — pushed below the reels feed header when embedded */}
+      <div
+        className={`absolute inset-x-0 top-0 z-30 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pb-10 ${
+          embedded ? 'pt-[62px]' : 'pt-4'
+        }`}
+      >
         <Avatar name={session.host.name} avatarKey={session.host.avatarKey} size={40} src={session.host.avatarUrl} />
         <div className="flex-1">
           <p className="text-[14px] font-bold">{session.host.name}</p>
@@ -207,14 +214,16 @@ export function LiveViewerScreen({ session, onClose }: { session: LiveSessionIte
             <Swords size={13} /> Battle live
           </span>
         )}
-        <button className="rounded-full bg-black/50 p-2.5 backdrop-blur" onClick={onClose} aria-label="Close live">
-          <X size={20} />
-        </button>
+        {!embedded && (
+          <button className="rounded-full bg-black/50 p-2.5 backdrop-blur" onClick={onClose} aria-label="Close live">
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       {/* battle score strip */}
       {battleLive && (
-        <div className="absolute inset-x-0 top-[68px] z-30 flex items-center justify-center gap-4">
+        <div className={`absolute inset-x-0 z-30 flex items-center justify-center gap-4 ${embedded ? 'top-[118px]' : 'top-[68px]'}`}>
           <div className={`flex items-center gap-2 rounded-2xl px-4 py-2 ${battle.winnerSide === 0 ? 'bg-[#FFD166] text-black' : 'bg-black/55 backdrop-blur'}`}>
             <div className="flex -space-x-2">
               {battle.participants.filter((p) => p.side === 0).map((p) => (

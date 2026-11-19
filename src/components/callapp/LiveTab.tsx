@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Clapperboard, Plus, Eye, Users, Loader2, Radio } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Clapperboard, Plus, Eye, Users, Loader2, Radio, ChevronUp, Swords } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { Avatar } from './Avatar'
@@ -10,7 +11,7 @@ import { LiveHostScreen } from './LiveHostScreen'
 import { LiveViewerScreen } from './LiveViewerScreen'
 import type { LiveSessionItem } from '@/lib/callapp/types'
 
-/** Video Live tab: session list + go live + viewer. */
+/** Video Live tab: TikTok-style reels feed (mobile) + grid list (desktop). */
 export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
   const [sessions, setSessions] = useState<LiveSessionItem[]>([])
@@ -59,10 +60,71 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
     )
   }
 
+  /* ---------- mobile: TikTok-style reels feed ---------- */
+  if (!desk) {
+    return (
+      <div className="relative h-full bg-black">
+        {loading ? (
+          <div className="flex h-full justify-center pt-24">
+            <Loader2 className="animate-spin text-white/40" size={26} />
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center bg-white px-8 text-center">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-csoft text-[#E1306C]">
+              <Clapperboard size={34} />
+            </div>
+            <p className="mt-5 text-lg font-bold text-cink">No one is live</p>
+            <p className="mt-1 text-sm text-cmut">
+              Start a broadcast, invite friends to a 1v1 or 2v2 battle, and let viewers send gifts.
+            </p>
+            <button
+              className="mt-5 rounded-full bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] px-6 py-3 text-sm font-semibold text-white"
+              onClick={() => setShowCreate(true)}
+            >
+              Go live now
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* slim floating header over the feed */}
+            <div className="absolute inset-x-0 top-0 z-40 flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)]">
+              <span className="rounded-full bg-black/45 px-3 py-1.5 text-[11px] font-bold text-white backdrop-blur">
+                {sessions.length} live now
+              </span>
+              <button
+                className="flex h-9 items-center gap-1.5 rounded-full bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] px-3.5 text-[12px] font-bold text-white shadow-lg"
+                onClick={() => setShowCreate(true)}
+              >
+                <Plus size={14} /> Go live
+              </button>
+            </div>
+            <LiveReels
+              meId={me?.id ?? ''}
+              sessions={sessions}
+              onManageMine={(s) => setHosting({ id: s.id, title: s.title, mode: s.mode })}
+              onEnded={() => void load()}
+            />
+          </>
+        )}
+        {showCreate && me && (
+          <GoLiveSheet
+            onClose={() => setShowCreate(false)}
+            onStart={async (title, mode) => {
+              const res = await api.createLive(title, mode)
+              setShowCreate(false)
+              setHosting({ id: res.session.id, title, mode: res.session.mode })
+            }}
+          />
+        )}
+      </div>
+    )
+  }
+
+  /* ---------- desktop / tablet: classic list + full viewer ---------- */
   return (
     <div className="flex h-full flex-col">
-      <header className={`flex items-center gap-2.5 ${desk ? 'border-b border-cline px-5 pb-3 pt-5' : 'px-5 pt-[max(env(safe-area-inset-top),16px)]'}`}>
-        <h1 className={`flex-1 font-extrabold tracking-tight text-cink ${desk ? 'text-[26px]' : 'text-[30px]'}`}>Video Live</h1>
+      <header className="flex items-center gap-2.5 border-b border-cline px-5 pb-3 pt-5">
+        <h1 className="flex-1 font-extrabold tracking-tight text-cink text-[26px]">Video Live</h1>
         <button
           className="flex h-11 items-center gap-1.5 rounded-full bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] px-4 text-[13px] font-bold text-white"
           onClick={() => setShowCreate(true)}
@@ -71,7 +133,7 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
         </button>
       </header>
 
-      <div className={`app-scroll flex-1 overflow-y-auto ${desk ? 'desk-scroll' : 'pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]'}`}>
+      <div className="app-scroll desk-scroll flex-1 overflow-y-auto">
         <AdBanner placement="rooms" />
         {loading ? (
           <div className="flex justify-center pt-16">
@@ -94,7 +156,7 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
             </button>
           </div>
         ) : (
-          <div className={`grid gap-3 ${desk ? 'grid-cols-1 px-4 pt-3' : 'grid-cols-2 px-5 pt-2'}`}>
+          <div className="grid grid-cols-1 gap-3 px-4 pt-3">
             {sessions.map((s) => {
               const isMine = s.isMine || s.host.id === me?.id
               return (
@@ -148,6 +210,110 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
   )
 }
 
+/* ================= mobile reels feed ================= */
+
+/**
+ * TikTok-style vertical snap feed of every ongoing live. Only the section
+ * snapped into view mounts the real viewer (joins the WebRTC mesh) — swiping
+ * down/up moves you to the next live exactly like TikTok reels.
+ */
+function LiveReels({
+  sessions,
+  meId,
+  onManageMine,
+  onEnded,
+}: {
+  sessions: LiveSessionItem[]
+  meId: string
+  onManageMine: (s: LiveSessionItem) => void
+  onEnded: () => void
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [snappedId, setSnappedId] = useState<string | null>(sessions[0]?.id ?? null)
+  /* derived, always-valid active id — no effect needed to repair it */
+  const activeId = snappedId && sessions.some((s) => s.id === snappedId) ? snappedId : (sessions[0]?.id ?? null)
+
+  /* which section is snapped into view */
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting && e.intersectionRatio >= 0.55) {
+            const id = (e.target as HTMLElement).dataset.liveId ?? null
+            if (id) setSnappedId(id)
+          }
+        }
+      },
+      { root, threshold: [0.55] }
+    )
+    root.querySelectorAll('[data-live-id]').forEach((el) => obs.observe(el))
+    return () => obs.disconnect()
+  }, [sessions])
+
+  return (
+    <div
+      ref={scrollRef}
+      className="h-full snap-y snap-mandatory overflow-y-auto overscroll-contain bg-black no-scrollbar"
+      aria-label="Live feed — swipe between broadcasts"
+    >
+      {sessions.map((s) => {
+        const isMine = s.isMine || s.host.id === meId
+        const isActive = activeId === s.id && !isMine
+        return (
+          <section
+            key={s.id}
+            data-live-id={s.id}
+            className="relative h-full w-full flex-none snap-start overflow-hidden bg-gradient-to-br from-[#141624] to-[#0a0b12]"
+          >
+            {isMine ? (
+              /* my own broadcast — manage card (never view myself as a viewer) */
+              <button className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center" onClick={() => onManageMine(s)}>
+                <Avatar name={s.host.name} avatarKey={s.host.avatarKey} size={84} src={s.host.avatarUrl} />
+                <p className="mt-2 max-w-full truncate text-[17px] font-extrabold text-white">{s.title}</p>
+                <p className="text-[12px] text-white/60">Your broadcast · {s.viewerCount} watching</p>
+                <span className="mt-2 flex h-11 items-center gap-2 rounded-full bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] px-5 text-[13px] font-bold text-white">
+                  <Radio size={15} /> Manage broadcast
+                </span>
+              </button>
+            ) : isActive ? (
+              /* the snapped-in session: the real viewer joins the stream */
+              <LiveViewerScreen session={s} embedded onClose={onEnded} />
+            ) : (
+              /* off-screen sessions: poster until snapped into view */
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(123,63,228,0.18),transparent_65%)]" />
+                <div className="relative">
+                  <Avatar name={s.host.name} avatarKey={s.host.avatarKey} size={84} src={s.host.avatarUrl} />
+                  <span className="absolute -bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-red-500 px-2.5 py-1 text-[10px] font-bold text-white">
+                    ● LIVE
+                  </span>
+                </div>
+                <p className="mt-2 max-w-full truncate text-[16px] font-extrabold text-white">{s.title}</p>
+                <p className="max-w-[240px] truncate text-[12px] text-white/60">{s.host.name}</p>
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                    <Eye size={12} /> {s.viewerCount}
+                  </span>
+                  {s.mode === 'battle' && (
+                    <span className="flex items-center gap-1 rounded-full bg-[#7B3FE4]/40 px-2.5 py-1 text-[11px] font-bold text-white">
+                      <Swords size={12} /> Battle
+                    </span>
+                  )}
+                </div>
+                <span className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-white/45">
+                  <ChevronUp size={13} className="animate-bounce" /> swipe to watch
+                </span>
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
 function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (title: string, mode: string) => Promise<void> }) {
   const [title, setTitle] = useState('')
   const [mode, setMode] = useState<'solo' | 'battle'>('solo')
@@ -160,6 +326,7 @@ function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (titl
     try {
       await onStart(title.trim() || 'Live', mode)
     } catch (e) {
+      toast.error((e as Error).message || 'Could not start the live')
       setError((e as Error).message)
       setBusy(false)
     }

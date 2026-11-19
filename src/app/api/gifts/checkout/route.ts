@@ -127,8 +127,9 @@ async function eligibleRecipients(
 ): Promise<Array<{ id: string; name: string }>> {
   const out: Array<{ id: string; name: string }> = []
   if (context === 'room' && body.roomId) {
+    // EVERYONE ON THE MICROPHONE can receive gifts: host, co-host and speakers.
     const parts = await db.roomParticipant.findMany({
-      where: { roomId: String(body.roomId), role: { in: ['host', 'cohost'] } },
+      where: { roomId: String(body.roomId), role: { in: ['host', 'cohost', 'speaker'] }, leftAt: null },
       select: { userId: true },
     })
     const users = await db.user.findMany({ where: { id: { in: parts.map((p) => p.userId) } }, select: { id: true, name: true } })

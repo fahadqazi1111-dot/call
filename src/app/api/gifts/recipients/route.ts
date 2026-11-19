@@ -31,8 +31,9 @@ export async function GET(req: Request) {
 
   if (context === 'room') {
     const roomId = url.searchParams.get('roomId') || ''
+    // EVERYONE ON THE MICROPHONE can be gifted: host, co-host and speakers.
     const parts = await db.roomParticipant.findMany({
-      where: { roomId, role: { in: ['host', 'cohost'] } },
+      where: { roomId, role: { in: ['host', 'cohost', 'speaker'] }, leftAt: null },
       select: { userId: true, role: true },
     })
     const users = await db.user.findMany({

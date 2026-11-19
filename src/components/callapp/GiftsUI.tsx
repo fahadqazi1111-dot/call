@@ -18,6 +18,7 @@ export interface GiftAnim {
   to: string
   durationMs: number
   tier: number
+  image?: string | null
 }
 
 /* ---------------- animation layer (per-gift cinematic scenes) ---------------- */
@@ -54,16 +55,60 @@ function GiftScene({ g }: { g: GiftAnim }) {
   // small helpers for particle fields
   const parts = (n: number) => Array.from({ length: n }, (_, i) => i)
 
-  if (kind === 'lion') {
-    // powerful roar: big lion scaling in + double shockwave ring + screen shake
+  /** Generated artwork on a black background — screen blending melts the
+   *  black into the dark room/live video so only the glowing subject shows.
+   *  Falls back to the emoji when no artwork is linked. */
+  const art = (imgClass: string, emojiClass?: string, style?: React.CSSProperties) =>
+    g.image ? (
+       
+      <img
+        src={g.image}
+        alt=""
+        draggable={false}
+        className={`pointer-events-none select-none ${imgClass}`}
+        style={{ mixBlendMode: 'screen', ...style }}
+      />
+    ) : (
+      <span className={emojiClass ?? imgClass} style={style}>
+        {g.emoji}
+      </span>
+    )
+
+  if (kind === 'lion' || kind === 'superlion') {
+    // TikTok-style roar: the lion surges up from the bottom, occupies the
+    // lower third, roars with heavy screen shake + shockwave rings.
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <div className="lion-shake absolute inset-0 flex items-center justify-center">
-          <span className={`lion-roar ${emojiSize}`}>{g.emoji}</span>
-          <span className="lion-ring absolute h-24 w-24 rounded-full border-4 border-[#FFD166]" style={{ animationDelay: '120ms' }} />
-          <span className="lion-ring absolute h-24 w-24 rounded-full border-2 border-[#F59E0B]/70" style={{ animationDelay: '420ms' }} />
+      <div className="absolute inset-0 overflow-hidden">
+        {/* dark vignette for drama */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_75%,rgba(0,0,0,0.42),transparent_70%)]" />
+        {/* double shockwave rings behind the lion */}
+        <span className="lion-ring absolute left-1/2 top-[68%] h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-[#FFD166]" style={{ animationDelay: '80ms' }} />
+        <span className="lion-ring absolute left-1/2 top-[68%] h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#F59E0B]/70" style={{ animationDelay: '420ms' }} />
+        <span className="lion-ring absolute left-1/2 top-[68%] h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/60" style={{ animationDelay: '700ms' }} />
+        {/* THE LION — bottom section, realistic artwork, roaring */}
+        <div className="lion-img absolute bottom-0 left-1/2 -translate-x-1/2">
+          {art(
+            kind === 'superlion' ? 'w-[min(115vw,900px)] max-w-none' : 'w-[min(96vw,760px)] max-w-none',
+            `lion-roar ${emojiSize}`,
+            kind === 'superlion' ? { filter: 'hue-rotate(200deg) saturate(1.5)' } : undefined
+          )}
         </div>
-        <div className="absolute bottom-[34%]"><GiftLabel g={g} /></div>
+        {/* mane glow pulse behind the subject */}
+        <div className="absolute bottom-[-6%] left-1/2 h-[46vw] w-[46vw] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,190,60,0.34),transparent_65%)] lion-glow" />
+        {parts(10).map((i) => (
+          <span
+            key={i}
+            className="fw-burst absolute text-[20px]"
+            style={{
+              // @ts-expect-error css custom property
+              '--a': `${(i / 10) * 360}deg`,
+              '--d': `${90 + seeded(i + 3) * 110}px`,
+              animationDelay: `${seeded(i) * 220}ms`,
+            }}
+          >
+            {['✨', '🌟', '💥', '⚡'][i % 4]}
+          </span>
+        ))}
       </div>
     )
   }
@@ -73,7 +118,7 @@ function GiftScene({ g }: { g: GiftAnim }) {
     return (
       <div className="absolute inset-0">
         <div className="dragon-fly absolute left-0 top-[30%]">
-          <span className={emojiSize}>{g.emoji}</span>
+          {art(emojiSize)}
         </div>
         {parts(10).map((i) => (
           <span
@@ -98,7 +143,7 @@ function GiftScene({ g }: { g: GiftAnim }) {
     return (
       <div className="absolute inset-0">
         <div className="rocket-launch absolute bottom-[-80px] left-1/2 -translate-x-1/2">
-          <span className={emojiSize}>{g.emoji}</span>
+          {art(emojiSize)}
         </div>
         {parts(8).map((i) => (
           <span
@@ -132,7 +177,9 @@ function GiftScene({ g }: { g: GiftAnim }) {
             {['✨', '🌟', '💥', '🎆'][i % 4]}
           </span>
         ))}
-        <span className={`fw-core ${emojiSize}`}>{g.emoji}</span>
+        <span className="relative inline-flex">
+          {art('h-auto w-[62vw] max-w-[420px]', emojiSize)}
+        </span>
         <div className="absolute bottom-[30%]"><GiftLabel g={g} /></div>
       </div>
     )
@@ -143,7 +190,7 @@ function GiftScene({ g }: { g: GiftAnim }) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <div className="crown-rays absolute h-56 w-56 rounded-full" />
-        <span className={`crown-drop ${emojiSize}`}>{g.emoji}</span>
+        {art(`crown-drop ${emojiSize}`, `crown-drop ${emojiSize}`)}
         {parts(8).map((i) => (
           <span
             key={i}
@@ -163,7 +210,7 @@ function GiftScene({ g }: { g: GiftAnim }) {
     return (
       <div className="absolute inset-0">
         <div className="car-drive absolute bottom-[26%] left-0">
-          <span className={emojiSize}>{g.emoji}</span>
+          {art(emojiSize)}
         </div>
         {parts(6).map((i) => (
           <span
@@ -181,7 +228,9 @@ function GiftScene({ g }: { g: GiftAnim }) {
     // pulsing heart + rising mini hearts
     return (
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`heart-pulse ${emojiSize}`}>{g.emoji}</span>
+        <span className={`heart-pulse relative inline-flex ${emojiSize}`}>
+          {art('h-auto w-[52vw] max-w-[380px]')}
+        </span>
         {parts(9).map((i) => (
           <span
             key={i}
@@ -200,7 +249,9 @@ function GiftScene({ g }: { g: GiftAnim }) {
     // bloom in the center + falling petals
     return (
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`bloom-in ${emojiSize}`}>{g.emoji}</span>
+        <span className={`bloom-in relative inline-flex ${emojiSize}`}>
+          {art('h-auto w-[42vw] max-w-[300px]')}
+        </span>
         {parts(10).map((i) => (
           <span
             key={i}
@@ -223,7 +274,9 @@ function GiftScene({ g }: { g: GiftAnim }) {
     // epic entrance + sparkles
     return (
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`castle-in ${emojiSize}`}>{g.emoji}</span>
+        <span className={`castle-in relative inline-flex ${emojiSize}`}>
+          {art('h-auto w-[64vw] max-w-[440px]')}
+        </span>
         {parts(12).map((i) => (
           <span
             key={i}
@@ -238,30 +291,6 @@ function GiftScene({ g }: { g: GiftAnim }) {
     )
   }
 
-  if (kind === 'superlion') {
-    // cosmic version: starburst + colossal emoji
-    return (
-      <div className="absolute inset-0 flex items-center justify-center">
-        {parts(16).map((i) => (
-          <span
-            key={i}
-            className="fw-burst absolute text-[20px]"
-            style={{
-              // @ts-expect-error css custom property
-              '--a': `${(i / 16) * 360}deg`,
-              '--d': `${100 + seeded(i + 3) * 120}px`,
-              animationDelay: `${seeded(i) * 200}ms`,
-            }}
-          >
-            ⭐
-          </span>
-        ))}
-        <span className={`lion-roar ${emojiSize}`}>{g.emoji}</span>
-        <div className="absolute bottom-[30%]"><GiftLabel g={g} /></div>
-      </div>
-    )
-  }
-
   // generic fallback: elegant float-up
   return (
     <div className="absolute inset-0">
@@ -272,14 +301,119 @@ function GiftScene({ g }: { g: GiftAnim }) {
   )
 }
 
-export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
+/* ---------------- TikTok-style combo banner (right side) ---------------- */
+
+interface ComboEntry {
+  comboKey: string
+  from: string
+  to: string
+  name: string
+  emoji: string
+  image: string | null
+  tier: number
+  count: number
+  lastAt: number
+  bump: number
+}
+
+const COMBO_WINDOW_MS = 6000
+
+/**
+ * Right-side stacked banner exactly like TikTok: “sender · Gift Name ×N”.
+ * Same sender + same gift inside the window merges into one entry and the
+ * ×N counter punches up (x2 → x3 → …) instead of stacking panels.
+ */
+function GiftComboBanner({ gifts }: { gifts: GiftAnim[] }) {
+  const [combos, setCombos] = useState<ComboEntry[]>([])
+  const mapRef = useRef(new Map<string, ComboEntry>())
+  const seenRef = useRef(new Set<string>())
+
+  // fold incoming gift events into combos
+  useEffect(() => {
+    for (const g of gifts) {
+      if (seenRef.current.has(g.key)) continue
+      seenRef.current.add(g.key)
+      const comboKey = `${g.from}|${g.name}|${g.emoji}`
+      const cur = mapRef.current.get(comboKey)
+      if (cur && Date.now() - cur.lastAt < COMBO_WINDOW_MS) {
+        mapRef.current.set(comboKey, { ...cur, count: cur.count + 1, lastAt: Date.now(), bump: cur.bump + 1 })
+      } else {
+        mapRef.current.set(comboKey, {
+          comboKey,
+          from: g.from,
+          to: g.to,
+          name: g.name,
+          emoji: g.emoji,
+          image: g.image ?? null,
+          tier: g.tier,
+          count: 1,
+          lastAt: Date.now(),
+          bump: 0,
+        })
+      }
+    }
+    setCombos(Array.from(mapRef.current.values()))
+  }, [gifts])
+
+  // expire combos shortly after the last send
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const now = Date.now()
+      const before = mapRef.current.size
+      for (const [k, c] of mapRef.current) {
+        if (now - c.lastAt > COMBO_WINDOW_MS + 600) mapRef.current.delete(k)
+      }
+      if (mapRef.current.size !== before) setCombos(Array.from(mapRef.current.values()))
+    }, 700)
+    return () => window.clearInterval(t)
+  }, [])
+
+  if (combos.length === 0) return null
+  return (
+    <div className="absolute right-3 top-[84px] z-30 flex w-[168px] flex-col items-end gap-2 sm:top-[92px]">
+      {combos.slice(-3).map((c) => (
+        <div
+          key={c.comboKey}
+          className="combo-in w-full overflow-hidden rounded-2xl border border-white/15 bg-gradient-to-r from-[#2b1d5e]/90 via-[#5b2a86]/85 to-[#a43f7d]/85 p-2 shadow-2xl backdrop-blur"
+        >
+          <div className="flex items-center gap-2">
+            {c.image ? (
+               
+              <img
+                src={c.image}
+                alt=""
+                className="h-9 w-9 flex-none rounded-xl object-cover"
+                style={{ mixBlendMode: 'screen' }}
+                draggable={false}
+              />
+            ) : (
+              <span className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-white/15 text-[20px]">{c.emoji}</span>
+            )}
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-[11.5px] font-extrabold text-white">{c.from}</p>
+              <p className="truncate text-[10.5px] font-semibold text-white/80">{c.name}</p>
+            </div>
+            <span key={c.bump} className="combo-count flex-none text-[15px] font-black text-[#FFD166] drop-shadow">
+              ×{c.count}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function GiftAnimationLayer({ gifts, showCombo = true }: { gifts: GiftAnim[]; showCombo?: boolean }) {
+  // cap concurrent full-screen scenes so a gift burst never melts low-end phones
+  const scenes = gifts.slice(-3)
   return (
     <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
-      {gifts.map((g) => (
+      {scenes.map((g) => (
         <div key={g.key} className="absolute inset-0" style={{ animationDuration: `${g.durationMs}ms` }}>
           <GiftScene g={g} />
         </div>
       ))}
+      {showCombo && <GiftComboBanner gifts={gifts} />}
     </div>
   )
 }
@@ -287,7 +421,7 @@ export function GiftAnimationLayer({ gifts }: { gifts: GiftAnim[] }) {
 /** Play a delivered gift event (payload from REST fulfillment → socket relay). */
 export function animFromPayload(payload: {
   sendId?: string
-  gift: { name: string; emoji: string; animKind: string; durationMs: number; priceUsd?: number }
+  gift: { name: string; emoji: string; animKind: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
   from: { name: string }
   to: { name: string }
 }): GiftAnim {
@@ -302,6 +436,7 @@ export function animFromPayload(payload: {
     to: payload.to.name,
     durationMs: payload.gift.durationMs,
     tier: tierOf(price),
+    image: payload.gift.imageUrl ?? null,
   }
 }
 
@@ -330,12 +465,13 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
   const [recipientId, setRecipientId] = useState<string | null>(preselectedRecipientId ?? null)
   const [checkout, setCheckout] = useState<{ payment: PendingPayment } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [walletBalance, setWalletBalance] = useState<number | null>(null)
   const stage = recipients.length > 1 && !recipientId ? 'recipient' : 'gift'
 
   useEffect(() => {
     void (async () => {
       try {
-        const [g, r] = await Promise.all([
+        const [g, r, w] = await Promise.all([
           api.gifts(context === 'battle' ? 'live' : context),
           api.giftRecipients({
             context,
@@ -344,13 +480,15 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
             battleId: extra?.battleId,
             battleSide: extra?.battleSide,
           }),
+          api.wallet().catch(() => null),
         ])
         setGifts(g.gifts)
         setCommission(g.platformCommission ?? 30)
         setRecipients(r.recipients)
+        setWalletBalance(w ? Math.floor(w.wallet.available) : null)
         if (r.recipients.length === 1) setRecipientId(r.recipients[0].id)
         if (r.recipients.length === 0) {
-          toast.error('No eligible gift recipients right now — only hosts can receive gifts')
+          toast.error('No eligible gift recipients right now — only people on the mic / hosts can receive gifts')
           onClose()
         }
       } catch (e) {
@@ -364,10 +502,55 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
 
   const recipient = useMemo(() => recipients.find((r) => r.id === recipientId) ?? null, [recipients, recipientId])
 
+  /** wallet-first instant send — falls back to card checkout when balance is short */
+  const sendByWallet = async (gift: GiftItem, rid: string): Promise<boolean> => {
+    setBusy(true)
+    try {
+      const res = await api.giftSendWallet({
+        giftId: gift.id,
+        toUserId: rid,
+        context,
+        roomId: extra?.roomId,
+        liveId: extra?.liveId,
+        battleId: extra?.battleId,
+        battleSide: extra?.battleSide,
+        clientKey: `giftw:${gift.id}:${rid}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      })
+      setWalletBalance(Math.floor(res.wallet?.available ?? 0))
+      toast.success(`${gift.name} sent to ${recipient?.name ?? 'host'} from wallet`)
+      // the animation arrives via the server relay for the whole room/live
+      onSent({
+        ok: true,
+        sendId: res.sendId,
+        gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd },
+        from: { id: 'me', name: 'You', avatarKey: 0, avatarUrl: null },
+        to: { id: rid, name: recipient?.name ?? 'host', avatarKey: recipient?.avatarKey ?? 0, avatarUrl: recipient?.avatarUrl ?? null },
+        battle: null,
+      })
+      onClose()
+      return true
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      if (!msg.toLowerCase().includes('balance')) {
+        toast.error(msg || 'Could not send the gift')
+        setBusy(false)
+        return true // surfaced — don't fall through to card flow
+      }
+      return false // insufficient balance → card checkout
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const startCheckout = async (gift: GiftItem) => {
     if (!recipientId) {
       setSelected(gift)
       return
+    }
+    // WALLET FIRST — one tap when the balance covers it, TikTok-style instant send
+    if (walletBalance !== null && walletBalance >= gift.priceUsd) {
+      const sent = await sendByWallet(gift, recipientId)
+      if (sent) return
     }
     setBusy(true)
     try {
@@ -459,7 +642,11 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
               )}
               <div>
                 <div className="text-[14.5px] font-extrabold text-cink">{stage === 'recipient' ? 'Choose a recipient' : 'Send a gift'}</div>
-                <div className="text-[11px] text-cmut">Direct payment · no coins</div>
+                <div className="text-[11px] text-cmut">
+                  {walletBalance !== null
+                    ? `Wallet $${walletBalance.toFixed(2)} · tap a gift to send instantly`
+                    : 'Direct payment · no coins'}
+                </div>
               </div>
             </div>
             <button onClick={onClose} aria-label="Close" className="text-[12.5px] font-bold text-cmut hover:text-cink">
@@ -537,8 +724,9 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
               </div>
               <div className="mt-2 flex items-center gap-1.5 text-[11px] text-cmut">
                 <Info size={12} className="flex-none" />
-                The host earns ≈{100 - commission}% after commission and processing fees — credited the moment your
-                payment is verified.
+                {walletBalance !== null && walletBalance > 0
+                  ? `Wallet balance is used first — short balance falls back to card. The host earns ≈${100 - commission}%.`
+                  : `The host earns ≈${100 - commission}% after commission and processing fees — credited the moment your payment is verified.`}
               </div>
             </div>
           )}

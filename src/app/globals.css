@@ -454,6 +454,44 @@
 .lion-ring { animation: lionRing 1.15s ease-out forwards; opacity: 0; }
 .lion-shake { animation: lionShake 1.4s ease-in-out; }
 
+/* ---------- TikTok-style gift upgrades ---------- */
+/* realistic lion surges from the bottom, roars twice (held longer for a
+   heavyweight TikTok feel), then exits big */
+@keyframes lionImgIn {
+  0%   { transform: translate(-50%, 34%) scale(0.5); opacity: 0; }
+  14%  { opacity: 1; transform: translate(-50%, -3%) scale(1.07); }
+  24%  { transform: translate(-50%, 0) scale(1); }
+  36%  { transform: translate(-50%, -1.5%) scale(1.12); }
+  43%  { transform: translate(-50%, 0.5%) scale(1.04); }
+  52%  { transform: translate(-50%, -2.5%) scale(1.18); }
+  60%  { transform: translate(-50%, 0) scale(1.06); }
+  68%  { transform: translate(-50%, -2%) scale(1.15); }
+  78%  { transform: translate(-50%, 0) scale(1.05); opacity: 1; }
+  100% { transform: translate(-50%, -10%) scale(1.42); opacity: 0; }
+}
+.lion-img { animation: lionImgIn 3.6s cubic-bezier(0.3,1.2,0.5,1) forwards; will-change: transform, opacity; }
+
+@keyframes lionGlowPulse {
+  0%, 100% { opacity: 0.35; transform: translateX(-50%) scale(1); }
+  50%      { opacity: 0.75; transform: translateX(-50%) scale(1.2); }
+}
+.lion-glow { animation: lionGlowPulse 0.85s ease-in-out infinite; }
+
+/* combo banner slides in from the right, TikTok-style */
+@keyframes comboIn {
+  0%   { transform: translateX(115%) scale(0.85); opacity: 0; }
+  60%  { transform: translateX(-6%) scale(1.05); opacity: 1; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
+.combo-in { animation: comboIn 0.45s cubic-bezier(0.2,1.4,0.4,1) both; }
+
+/* ×N counter punch on every repeat send */
+@keyframes comboCountBump {
+  0%   { transform: scale(2); color: #fff; }
+  100% { transform: scale(1); color: #FFD166; }
+}
+.combo-count { display: inline-block; animation: comboCountBump 0.45s cubic-bezier(0.2,1.6,0.4,1); }
+
 /* DRAGON — fly across with wing sway; fire trail particles fade */
 @keyframes dragonFly {
   0%   { transform: translateX(-18vw) translateY(0) scale(0.75); opacity: 0; }
