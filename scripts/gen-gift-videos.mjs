@@ -105,7 +105,8 @@ async function main() {
   // persisted task registry so re-runs resume polling instead of duplicating
   const tasks = fs.existsSync(TASKS_FILE) ? JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8')) : []
 
-  // 1) Submit missing tasks (throttled: the API rate-limits bursts)
+  // 1) Resume state: submissions happen SERIALLY in the pipeline below
+  // (the API rejects concurrent requests with 429).
   for (const c of clips) {
     if (manifest[c.kind]?.url || fs.existsSync(`${OUT}/${c.kind}.mp4`)) {
       console.log(`skip ${c.kind} (already done)`)
@@ -113,59 +114,74 @@ async function main() {
     }
     if (tasks.find((t) => t.kind === c.kind)) {
       console.log(`resume poll ${c.kind} (task ${tasks.find((t) => t.kind === c.kind).id})`)
-      continue
+    } else {
+      console.log(`queued ${c.kind} (will submit serially)`)
     }
-    let done = false
-    for (const size of ['720x1280', undefined]) {
+  }
+
+  // 2) Serial pipeline: the API rejects concurrent submissions (429), so
+  // poll what's running; submit ONE new clip whenever nothing is processing.
+  const pending = new Map(tasks.map((t) => [t.id, t.kind]))
+  const done = new Set(Object.keys(manifest))
+  const isDone = (kind) => done.has(kind) || fs.existsSync(`${OUT}/${kind}.mp4`)
+  const unsubmitted = () => clips.filter((c) => !isDone(c.kind) && ![...pending.values()].includes(c.kind))
+  const deadline = Date.now() + 60 * 60 * 1000
+  let lastSubmit = 0
+
+  while (Date.now() < deadline) {
+    const processing = new Set(pending.values())
+    // submit the next clip only when nothing else is running (and cooldown passed)
+    if (processing.size === 0 && Date.now() - lastSubmit > 20000) {
+      const next = unsubmitted()[0]
+      if (!next) break
       try {
         const body = {
-          prompt: c.prompt,
+          prompt: next.prompt,
           quality: 'speed',
           with_audio: true,
           watermark_enabled: false,
           duration: 5,
+          size: '720x1280',
         }
-        if (size) body.size = size
-        const id = await submitWithRetry(zai, body, c.kind)
-        tasks.push({ kind: c.kind, id })
+        const id = await submitWithRetry(zai, body, next.kind, 3)
+        tasks.push({ kind: next.kind, id })
         fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2))
-        console.log(`submitted ${c.kind} -> task ${id}`)
-        done = true
-        break
+        pending.set(id, next.kind)
+        lastSubmit = Date.now()
+        console.log(`submitted ${next.kind} -> task ${id}`)
       } catch (e) {
-        console.log(`submit failed ${c.kind} (size=${size}):`, e.message)
+        console.log(`submit permanently failed ${next.kind}: ${e.message}`)
+        lastSubmit = Date.now() + 60000
+        await sleep(65000)
       }
     }
-    if (!done) console.log(`GIVE UP submit ${c.kind}`)
-    await sleep(8000)
-  }
-
-  // 2) Poll all tasks
-  const pending = new Map(tasks.map((t) => [t.id, t.kind]))
-  const deadline = Date.now() + 12 * 60 * 1000
-  while (pending.size > 0 && Date.now() < deadline) {
-    await sleep(15000)
-    for (const [id, kind] of [...pending.entries()]) {
-      try {
-        const r = await zai.async.result.query(id)
-        const status = r?.task_status
-        const url = r?.video_result?.[0]?.url || r?.video_url || r?.url || r?.video
-        if (status === 'SUCCESS' && url) {
-          const out = `${OUT}/${kind}.mp4`
-          const size = await download(url, out)
-          manifest[kind] = { url, bytes: size, taskId: id, generatedAt: new Date().toISOString() }
-          fs.writeFileSync(`${OUT}/manifest.json`, JSON.stringify(manifest, null, 2))
-          console.log(`DONE ${kind} (${size} bytes) -> ${out}`)
-          pending.delete(id)
-        } else if (status === 'FAIL') {
-          console.log(`FAIL ${kind} task ${id}`)
-          pending.delete(id)
-        } else {
-          console.log(`... ${kind} ${status || 'unknown'}`)
+    if (pending.size > 0) {
+      await sleep(15000)
+      for (const [id, kind] of [...pending.entries()]) {
+        try {
+          const r = await zai.async.result.query(id)
+          const status = r?.task_status
+          const url = r?.video_result?.[0]?.url || r?.video_url || r?.url || r?.video
+          if (status === 'SUCCESS' && url) {
+            const out = `${OUT}/${kind}.mp4`
+            const size = await download(url, out)
+            manifest[kind] = { url, bytes: size, taskId: id, generatedAt: new Date().toISOString() }
+            fs.writeFileSync(`${OUT}/manifest.json`, JSON.stringify(manifest, null, 2))
+            console.log(`DONE ${kind} (${size} bytes) -> ${out}`)
+            pending.delete(id)
+            done.add(kind)
+          } else if (status === 'FAIL') {
+            console.log(`FAIL ${kind} task ${id}`)
+            pending.delete(id)
+          } else {
+            console.log(`... ${kind} ${status || 'unknown'}`)
+          }
+        } catch (e) {
+          console.log(`poll error ${kind}: ${e.message}`)
         }
-      } catch (e) {
-        console.log(`poll error ${kind}: ${e.message}`)
       }
+    } else {
+      await sleep(8000)
     }
   }
   console.log('FINISHED. got:', Object.keys(manifest).join(', '))
