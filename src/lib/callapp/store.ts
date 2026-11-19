@@ -67,6 +67,8 @@ function notifyDesktop(title: string, body: string) {
 
 interface AppState {
   phase: AppPhase
+  /** admin-controlled splash toggle (cached locally, refreshed at boot) */
+  splashEnabled: boolean
   me: Me | null
   token: string | null
   tab: AppTab
@@ -113,6 +115,8 @@ interface AppState {
   loadMessages: (peerId: string) => Promise<void>
   sendText: (peerId: string, text: string) => Promise<void>
   sendVoice: (peerId: string, blob: Blob, durationSec: number, effect?: string) => Promise<void>
+  /** photo / video message — blob already cropped/trimmed by the MediaComposer */
+  sendMedia: (peerId: string, kind: 'image' | 'video', blob: Blob, durationSec?: number) => Promise<void>
   markReadIfOpen: (peerId: string) => Promise<void>
   handleIncomingMessage: (fromId: string | null, message: Message) => Promise<void>
   /** unsend (everyone) or delete-for-me; relays `msg:deleted` for everyone-scope */
@@ -157,6 +161,9 @@ interface AppState {
 
 export const useApp = create<AppState>((set, get) => ({
   phase: 'splash',
+  /** admin splash toggle — server renders `true`; the local cache is read
+   * POST-hydration by SplashScreen so the first client render always matches */
+  splashEnabled: true,
   me: null,
   token: null,
   tab: 'chats',
@@ -190,6 +197,14 @@ export const useApp = create<AppState>((set, get) => ({
   setStaffView: (v) => set({ staffView: v, openPeerId: null }),
 
   bootstrap: async () => {
+    // splash setting — cached locally, refreshed from the admin config
+    try {
+      const cfg = await api.appConfig()
+      try {
+        window.localStorage.setItem('call.splash', cfg.splashEnabled ? '1' : '0')
+      } catch {}
+      set({ splashEnabled: cfg.splashEnabled })
+    } catch {}
     const s = loadSession()
     if (!s) {
       set({ phase: 'onboarding', booted: true })
@@ -363,6 +378,24 @@ export const useApp = create<AppState>((set, get) => ({
       }
       set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
       socketClient.emit('msg:new', { to: peerId, message })
+      get().loadChats()
+    } catch (e) {
+      throw e
+    }
+  },
+
+  sendMedia: async (peerId, kind, blob, durationSec) => {
+    try {
+      const up = kind === 'image' ? await api.uploadImage(blob) : await api.uploadVideo(blob)
+      const { message } = await api.sendMessage({
+        to: peerId,
+        type: kind,
+        content: up.id,
+        duration: durationSec,
+      })
+      set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
+      socketClient.emit('msg:new', { to: peerId, message })
+      soundKit.pop(true)
       get().loadChats()
     } catch (e) {
       throw e

@@ -64,6 +64,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // public if used as an avatar
     const avatarUser = await db.user.findFirst({ where: { avatarUrl: { contains: id } }, select: { id: true } })
     if (avatarUser) authorized = true
+    // public if used as a group photo (visible to anyone who can see the group)
+    if (!authorized) {
+      const groupRef = await db.group.findFirst({ where: { avatarUrl: { contains: id } }, select: { id: true } })
+      if (groupRef) authorized = true
+    }
     // public if used as an ad creative (ads are meant to be seen by every user)
     if (!authorized) {
       const adRef = await db.ad.findFirst({ where: { imageUrl: { contains: id } }, select: { id: true } })

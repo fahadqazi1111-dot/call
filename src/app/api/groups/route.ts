@@ -18,6 +18,7 @@ function toGroupItem(
     id: string
     name: string
     avatarKey: number
+    avatarUrl?: string | null
     ownerId: string
     updatedAt: Date
     members: Array<{ userId: string; role: string; user: { id: string; name: string; username: string; avatarKey: number; avatarUrl: string | null } }>
@@ -31,6 +32,7 @@ function toGroupItem(
     id: g.id,
     name: g.name,
     avatarKey: g.avatarKey,
+    avatarUrl: g.avatarUrl ?? null,
     ownerId: g.ownerId,
     myRole,
     members: g.members.map((mm) => ({
@@ -44,6 +46,7 @@ function toGroupItem(
     lastMessage: last
       ? {
           id: last.id,
+          type: last.type,
           content: last.type === 'system' ? last.content : last.content.slice(0, 80),
           senderName: last.senderName,
           mine: last.senderId === meId,
@@ -110,15 +113,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Too many groups created — slow down' }, { status: 429 })
   }
   try {
-    const body = (await req.json()) as { name?: string; memberIds?: string[] }
+    const body = (await req.json()) as { name?: string; memberIds?: string[]; avatarUrl?: string | null }
     const name = String(body.name || '').trim().slice(0, 60)
     if (!name) return NextResponse.json({ error: 'Group name is required' }, { status: 400 })
     const memberIds = Array.from(new Set((body.memberIds || []).filter((x) => x && x !== me.id))).slice(0, 50)
+    const avatarUrl = typeof body.avatarUrl === 'string' && body.avatarUrl.length < 300 ? body.avatarUrl : null
 
     const group = await db.group.create({
       data: {
         name,
         ownerId: me.id,
+        avatarUrl,
         members: {
           create: [
             { userId: me.id, role: 'owner' },

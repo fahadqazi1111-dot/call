@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const to = String(body.to || '')
-    const type = ['text', 'voice', 'call', 'image'].includes(body.type) ? body.type : 'text'
+    const type = ['text', 'voice', 'call', 'image', 'video'].includes(body.type) ? body.type : 'text'
     let content = String(body.content ?? '')
     if (!to || !content) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 

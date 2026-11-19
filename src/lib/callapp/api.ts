@@ -165,7 +165,7 @@ export const api = {
   deleteChat: (peerId: string) => request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'DELETE' }),
   chatState: (peerId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute') =>
     request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
-  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image'; content: string; duration?: number; forwarded?: boolean }) =>
+  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image' | 'video'; content: string; duration?: number; forwarded?: boolean }) =>
     request<{ message: Message }>('/api/messages', { method: 'POST', body: JSON.stringify(payload) }),
   deleteMessage: (id: string, scope: 'everyone' | 'me') =>
     request<{ ok: boolean; scope: string; deletedAt?: string }>(`/api/messages/${id}?scope=${scope}`, { method: 'DELETE' }),
@@ -218,6 +218,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   uploadVoice: async (blob: Blob) => uploadFile(blob, 'voice.webm', 'media'),
+  uploadImage: async (blob: Blob) => uploadFile(blob, 'photo.jpg', 'media'),
+  uploadVideo: async (blob: Blob) => uploadFile(blob, 'video.webm', 'media'),
   uploadAvatar: async (blob: Blob, mime: string) => {
     const ext = mime === 'image/png' ? 'avatar.png' : mime === 'image/webp' ? 'avatar.webp' : 'avatar.jpg'
     return uploadFile(blob, ext, 'avatar')
@@ -402,19 +404,29 @@ export const api = {
 
   /* ---------- group chats ---------- */
   groups: () => request<{ groups: GroupItem[] }>('/api/groups'),
-  createGroup: (name: string, memberIds: string[]) =>
-    request<{ group: GroupItem }>('/api/groups', { method: 'POST', body: JSON.stringify({ name, memberIds }) }),
+  createGroup: (name: string, memberIds: string[], avatarUrl?: string | null) =>
+    request<{ group: GroupItem }>('/api/groups', { method: 'POST', body: JSON.stringify({ name, memberIds, avatarUrl }) }),
+  groupUpdate: (id: string, patch: { name?: string; avatarUrl?: string | null }) =>
+    request<{ ok: boolean; name: string; avatarUrl: string | null }>(`/api/groups/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   groupDetail: (id: string) => request<{ group: GroupItem & { myRole: string }; messages: GroupMessageItem[] }>(`/api/groups/${id}`),
   groupMessages: (id: string, before?: string) =>
     request<{ messages: GroupMessageItem[] }>(
       `/api/groups/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`
     ),
-  groupSend: (id: string, content: string) =>
-    request<{ message: GroupMessageItem }>(`/api/groups/${id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }),
+  groupSend: (
+    id: string,
+    payload: { type: 'text' | 'voice' | 'image' | 'video'; content?: string; mediaId?: string; duration?: number }
+  ) =>
+    request<{ message: GroupMessageItem }>(`/api/groups/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   groupAddMembers: (id: string, memberIds: string[]) =>
     request<{ ok: boolean; added: number }>(`/api/groups/${id}/members`, { method: 'POST', body: JSON.stringify({ memberIds }) }),
+  groupSetRole: (id: string, userId: string, role: 'admin' | 'member') =>
+    request<{ ok: boolean; role: string }>(`/api/groups/${id}/members`, { method: 'PATCH', body: JSON.stringify({ userId, role }) }),
   groupLeave: (id: string) =>
-    request<{ ok: boolean; dissolved: boolean }>(`/api/groups/${id}`, { method: 'DELETE' }),
+    request<{ ok: boolean; dissolved: boolean; newOwner?: string }>(`/api/groups/${id}`, { method: 'DELETE' }),
 
   /* ---------- notifications ---------- */
   notifications: (unreadOnly?: boolean) =>

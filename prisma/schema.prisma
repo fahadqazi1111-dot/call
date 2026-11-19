@@ -541,6 +541,7 @@ model Group {
   id        String        @id @default(cuid())
   name      String
   avatarKey Int           @default(0)
+  avatarUrl String?
   ownerId   String
   owner     User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   createdAt DateTime      @default(now())
@@ -571,8 +572,10 @@ model GroupMessage {
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   senderId  String
   sender    User     @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
-  type      String   @default("text") // text | system
+  type      String   @default("text") // text | system | voice | image | video
   content   String
+  mediaId   String? // uploaded media id (voice/image/video)
+  duration  Int? // voice seconds
   createdAt DateTime @default(now())
 
   @@index([groupId, createdAt])

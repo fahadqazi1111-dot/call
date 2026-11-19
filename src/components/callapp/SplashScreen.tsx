@@ -3,38 +3,54 @@
 import { useEffect, useState } from 'react'
 import { CallWordmark } from './CallLogo'
 import { useApp } from '@/lib/callapp/store'
-import { api } from '@/lib/callapp/api'
 
+/**
+ * Splash screen — the admin can disable it from the panel ("App experience").
+ * Hydration-safe: the first paint is a plain dark background (identical on
+ * server and client); after mount we read the cached setting — when disabled
+ * we jump straight to the app, otherwise the animated logo plays briefly.
+ */
 export function SplashScreen() {
   const bootstrap = useApp((s) => s.bootstrap)
   const booted = useApp((s) => s.booted)
   const phase = useApp((s) => s.phase)
-  /** admin can disable the splash entirely — fetch once, skip immediately */
-  const [skip, setSkip] = useState<boolean | null>(null)
+  const splashEnabled = useApp((s) => s.splashEnabled)
+  /** null = pre-hydration (render nothing), true = show visuals, false = skip */
+  const [show, setShow] = useState<boolean | null>(null)
 
   useEffect(() => {
-    void bootstrap()
-    void api
-      .appConfig()
-      .then((c) => setSkip(!c.splashEnabled))
-      .catch(() => setSkip(false))
+    // deferred one tick so the first paint matches the server (hydration-safe)
+    const t = window.setTimeout(() => {
+      // local cache decides the FIRST paint (fetch refresh happens in bootstrap)
+      let cached = true
+      try {
+        cached = window.localStorage.getItem('call.splash') !== '0'
+      } catch {}
+      setShow(cached)
+      useApp.setState({ splashEnabled: cached })
+      if (!cached) {
+        useApp.setState({ phase: useApp.getState().phase === 'main' ? 'main' : 'onboarding' })
+      }
+      void bootstrap()
+    }, 0)
+    return () => window.clearTimeout(t)
   }, [bootstrap])
 
   useEffect(() => {
-    if (skip) {
+    if (show === false || splashEnabled === false) {
       useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
       return
     }
-    if (skip === false && booted) {
+    if (show && booted) {
       const t = window.setTimeout(() => {
         useApp.setState({ phase: phase === 'main' ? 'main' : 'onboarding' })
       }, 900)
       return () => window.clearTimeout(t)
     }
-  }, [booted, phase, skip])
+  }, [booted, phase, show, splashEnabled])
 
-  // admin disabled the splash → render nothing (instant jump to auth/app)
-  if (skip) return null
+  // disabled (or pre-hydration frame) → plain dark background only
+  if (!show) return null
 
   return (
     <div className="bg-dark-grad absolute inset-0 z-50 flex flex-col items-center justify-center text-white">

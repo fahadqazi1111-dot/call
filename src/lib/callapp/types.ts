@@ -19,7 +19,7 @@ export interface Me {
 
 export interface Message {
   id: string
-  type: 'text' | 'voice' | 'call' | 'image'
+  type: 'text' | 'voice' | 'call' | 'image' | 'video'
   content: string
   duration?: number | null
   createdAt: string
@@ -36,7 +36,7 @@ export interface ChatSummary {
   peer: Me
   lastMessage: {
     id: string
-    type: 'text' | 'voice' | 'call' | 'image'
+    type: 'text' | 'voice' | 'call' | 'image' | 'video'
     content: string
     duration?: number | null
     createdAt: string
@@ -430,8 +430,10 @@ export interface GroupMemberItem {
 
 export interface GroupMessageItem {
   id: string
-  type: string // text | system
+  type: string // text | system | voice | image | video
   content: string
+  mediaId?: string | null
+  duration?: number | null
   mine: boolean
   sender: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   createdAt: string
@@ -441,11 +443,13 @@ export interface GroupItem {
   id: string
   name: string
   avatarKey: number
+  avatarUrl?: string | null
   ownerId: string
   myRole?: string
   members: GroupMemberItem[]
   lastMessage: {
     id: string
+    type: string
     content: string
     senderName: string
     mine: boolean

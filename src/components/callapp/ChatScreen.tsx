@@ -4,12 +4,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar, OfficialAvatar } from './Avatar'
 import { VoiceBubble } from './VoiceBubble'
 import { useRecorder } from './useRecorder'
+import { MediaComposer } from './MediaComposer'
+import { getMediaUrl } from '@/lib/callapp/media'
 import { useApp } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
 import { StaffTick } from './StaffTick'
 import { SponsoredAdCard, type ServedAd } from './GiftsUI'
-import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan, Copy, Forward, Undo2, CheckSquare, X, Search, ClipboardCheck } from 'lucide-react'
+import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan, Copy, Forward, Undo2, CheckSquare, X, Search, ClipboardCheck, ImageIcon, Film, Loader2 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { toast } from 'sonner'
 import { PeerProfileSheet } from './PeerProfileSheet'
@@ -39,6 +41,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const closeChat = useApp((s) => s.closeChat)
   const sendText = useApp((s) => s.sendText)
   const sendVoice = useApp((s) => s.sendVoice)
+  const sendMedia = useApp((s) => s.sendMedia)
   const startCall = useApp((s) => s.startCall)
   const loadMessages = useApp((s) => s.loadMessages)
   const deleteMessages = useApp((s) => s.deleteMessages)
@@ -75,6 +78,22 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const inputRef = useRef<HTMLInputElement>(null)
   const typingLast = useRef(0)
   const recorder = useRecorder()
+  /* ---------- media: photo (crop) / video (trim) composer ---------- */
+  const [mediaCompose, setMediaCompose] = useState<{ file: File; kind: 'image' | 'video' } | null>(null)
+  const [mediaBusy, setMediaBusy] = useState(false)
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
+  const videoInputRef = useRef<HTMLInputElement | null>(null)
+  const submitMedia = async (media: { blob: Blob; ext: string; durationSec?: number }, kind: 'image' | 'video') => {
+    setMediaBusy(true)
+    try {
+      await sendMedia(peerId, kind, media.blob, media.durationSec)
+      setMediaCompose(null)
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not send')
+    } finally {
+      setMediaBusy(false)
+    }
+  }
   const desk = variant === 'desktop'
   const official = !!peer?.isOfficial
 
@@ -592,6 +611,47 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
             </div>
           )}
           <div className="flex items-center gap-2.5">
+            {/* WhatsApp-style attachments: photo (crop) / video (trim) */}
+            <button
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-csoft text-cbrand disabled:opacity-50"
+              aria-label="Send photo"
+              title="Photo — crop before sending"
+              disabled={composerLocked || mediaBusy}
+              onClick={() => photoInputRef.current?.click()}
+            >
+              <ImageIcon size={20} />
+            </button>
+            <button
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-csoft text-cbrand disabled:opacity-50"
+              aria-label="Send video"
+              title="Video — trim before sending"
+              disabled={composerLocked || mediaBusy}
+              onClick={() => videoInputRef.current?.click()}
+            >
+              <Film size={20} />
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) setMediaCompose({ file: f, kind: 'image' })
+                e.target.value = ''
+              }}
+            />
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) setMediaCompose({ file: f, kind: 'video' })
+                e.target.value = ''
+              }}
+            />
             <button
               className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-csoft text-cbrand disabled:opacity-50"
               aria-label="Emoji"
@@ -707,6 +767,151 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
           onClose={() => setForwardOpen(false)}
           onSend={onForwardSend}
         />
+      )}
+
+      {/* photo (crop) / video (trim) composer — WhatsApp-style preview before send */}
+      {mediaCompose && (
+        <MediaComposer
+          file={mediaCompose.file}
+          kind={mediaCompose.kind}
+          onSend={(media) => submitMedia(media, mediaCompose.kind)}
+          onClose={() => setMediaCompose(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/** photo / video message bubble — resolves the private media URL for display */
+function MediaMessageRow({
+  msg,
+  mine,
+  peerName,
+  selectMode,
+  selected,
+  onToggleSelect,
+  onOpenActions,
+}: {
+  msg: Message
+  mine: boolean
+  peerName: string
+  selectMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
+  onOpenActions?: (m: Message) => void
+}) {
+  const [url, setUrl] = useState<string | null>(msg.mediaUrl ?? null)
+  const [lightbox, setLightbox] = useState(false)
+  useEffect(() => {
+    if (!url && msg.content) void getMediaUrl(msg.content).then((u) => u && setUrl(u))
+  }, [msg.content, url])
+
+  const deleted = !!msg.deletedAt
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressClick = useRef(false)
+  const armLongPress = () => {
+    if (selectMode || deleted || !onOpenActions) return
+    pressTimer.current = setTimeout(() => {
+      suppressClick.current = true
+      try {
+        navigator.vibrate?.(12)
+      } catch {}
+      onOpenActions(msg)
+    }, 480)
+  }
+  const disarmLongPress = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current)
+      pressTimer.current = null
+    }
+  }
+  const selectOverlay = selectMode ? (
+    <button
+      type="button"
+      className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] focus:outline-none"
+      aria-label={selected ? 'Deselect message' : 'Select message'}
+      onClick={onToggleSelect}
+    />
+  ) : null
+  const ring = selected ? 'ring-2 ring-cbrand/70' : ''
+  const forwardedChip = msg.forwarded ? (
+    <div className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold italic opacity-70">
+      <Forward size={11} /> Forwarded
+    </div>
+  ) : null
+
+  if (deleted) {
+    return (
+      <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+        <div className={`rounded-[20px] px-3.5 py-2 shadow-sm max-w-[272px] ${ring} ${mine ? 'rounded-br-md bg-[#E8ECF6] text-cmut' : 'rounded-bl-md bg-white text-cmut'}`}>
+          <p className="text-[13.5px] italic leading-5">{mine ? 'You unsent a message' : `${peerName} unsent a message`}</p>
+          <div className="mt-1 flex items-center justify-end text-[11px] opacity-75">
+            <span>{fmtTime(msg.createdAt)}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+      <div
+        onTouchStart={armLongPress}
+        onTouchEnd={disarmLongPress}
+        onTouchMove={disarmLongPress}
+        onContextMenu={(e) => {
+          if (selectMode || deleted || !onOpenActions) return
+          e.preventDefault()
+          onOpenActions(msg)
+        }}
+        className={`relative max-w-[272px] sm:max-w-[320px] ${ring}`}
+      >
+        {forwardedChip}
+        <div className={`overflow-hidden rounded-[20px] shadow-sm ${mine ? 'rounded-br-md bg-brand-grad' : 'rounded-bl-md bg-white'}`}>
+          {msg.type === 'image' ? (
+            url ? (
+              <button
+                type="button"
+                className="block"
+                onClick={(e) => {
+                  if (suppressClick.current) {
+                    e.stopPropagation()
+                    suppressClick.current = false
+                    return
+                  }
+                  setLightbox(true)
+                }}
+                aria-label="Open photo"
+              >
+                <img src={url} alt="Photo" className="max-h-[340px] w-full object-cover" loading="lazy" />
+              </button>
+            ) : (
+              <div className="flex h-44 w-56 items-center justify-center bg-black/5 text-cmut">
+                <Loader2 size={20} className="animate-spin" />
+              </div>
+            )
+          ) : url ? (
+            <video src={url} controls playsInline preload="metadata" className="max-h-[340px] w-full bg-black object-contain" />
+          ) : (
+            <div className="flex h-44 w-56 items-center justify-center bg-black/5 text-cmut">
+              <Loader2 size={20} className="animate-spin" />
+            </div>
+          )}
+        </div>
+        <div className={`flex items-center justify-end gap-1.5 pt-0.5 text-[11px] ${mine ? 'text-[#9AA8C7]' : 'text-cmut'}`}>
+          {msg.duration ? <span>{fmtDuration(msg.duration)}</span> : null}
+          <span>{fmtTime(msg.createdAt)}</span>
+          {mine && (msg.readAt ? <CheckCheck size={13} className="text-cbrand" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-[#9AA8C7]" /> : <Check size={13} />)}
+        </div>
+        {selectOverlay}
+      </div>
+      {lightbox && url && (
+        <div className="fixed inset-0 z-[92] flex items-center justify-center bg-black/95" onClick={() => setLightbox(false)} role="dialog" aria-label="Photo viewer">
+          <img src={url} alt="Photo" className="max-h-[92vh] max-w-[96vw] object-contain" />
+          <button className="absolute right-4 top-[max(env(safe-area-inset-top),16px)] rounded-full bg-white/10 p-2.5 text-white" onClick={() => setLightbox(false)} aria-label="Close photo">
+            <X size={20} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -854,6 +1059,11 @@ function MessageRow({
         </div>
       </div>
     )
+  }
+
+  /* photo / video bubbles (WhatsApp-style, tap photo to open full view) */
+  if (msg.type === 'image' || msg.type === 'video') {
+    return <MediaMessageRow msg={msg} mine={mine} peerName={peerName} selectMode={selectMode} selected={selected} onToggleSelect={onToggleSelect} onOpenActions={onOpenActions} />
   }
 
   return (
