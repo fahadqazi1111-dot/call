@@ -16,5 +16,11 @@
     "bytes": 1985826,
     "taskId": "20261120043012d51d73f2271d4bc4",
     "generatedAt": "2026-11-19T20:31:13.852Z"
+  },
+  "dragon": {
+    "url": "https://aigc-files.bigmodel.cn/api/cogvideo/ac891858-e459-11f1-8360-92d9c959708e_0.mp4",
+    "bytes": 4743438,
+    "taskId": "202611200442028bafa0d0b9154c59",
+    "generatedAt": "2026-11-19T20:43:03.901Z"
   }
 }
