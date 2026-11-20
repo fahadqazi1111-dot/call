@@ -1,13 +1,12 @@
 /**
  * Server-side AI provider engine.
  *
- * External providers (Google AI, OpenRouter, Groq, Venom AI) all expose an
+ * Every provider (Google AI, OpenRouter, Groq, Venom AI) exposes an
  * OpenAI-compatible chat completions endpoint, so one client covers them all.
- * If the active external provider fails (missing key, network, quota) we
- * transparently fall back to the built-in Z-AI provider so the CALL AI agent
- * never goes down.
+ * There is NO built-in fallback: if the active provider is not connected,
+ * rate-limited or fails, an AiUnavailableError is raised and the user sees a
+ * friendly "We are Facing High Traffic" notice.
  */
-import ZAI from 'z-ai-web-dev-sdk'
 import {
   AI_PROVIDERS,
   MASK_RE,
@@ -23,6 +22,16 @@ export { AI_PROVIDERS, maskKey }
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+}
+
+/** Raised whenever the agent cannot answer through the connected providers. */
+export class AiUnavailableError extends Error {
+  code: 'not_connected' | 'rate_limited' | 'unavailable'
+  constructor(code: 'not_connected' | 'rate_limited' | 'unavailable', message: string) {
+    super(message)
+    this.name = 'AiUnavailableError'
+    this.code = code
+  }
 }
 
 /** Clone the AI config with every provider API key masked (safe for the client). */
@@ -57,13 +66,14 @@ export function mergeAiConfig(
     if (!key || MASK_RE.test(key)) next.apiKey = prev.apiKey || ''
     providers[id] = next
   }
+  delete providers.zai // legacy built-in provider no longer exists
   inc.providers = providers
   return { ...cur, ...inc }
 }
 
 /** Resolve the effective settings for a provider id (falls back to active). */
 export function resolveProvider(cfg: AiConfig, providerId?: string) {
-  const id = (providerId || cfg.activeProvider || 'zai') as AiProviderId
+  const id = (providerId || cfg.activeProvider || 'google') as AiProviderId
   const meta = AI_PROVIDERS.find((p) => p.id === id) || AI_PROVIDERS[0]
   const conf = (cfg.providers || {})[meta.id] || {}
   const storedKey = conf.apiKey || ''
@@ -73,22 +83,8 @@ export function resolveProvider(cfg: AiConfig, providerId?: string) {
     apiKey: storedKey,
     baseUrl: (conf.baseUrl || meta.baseUrl || '').replace(/\/+$/, ''),
     model: conf.model || meta.defaultModel,
-    ready: meta.keyless || !!storedKey,
+    ready: !!storedKey,
   }
-}
-
-/** Run a completion on the built-in Z-AI provider. */
-async function zaiCompletion(messages: ChatMessage[]): Promise<string> {
-  const zai = await ZAI.create()
-  const completion = await zai.chat.completions.create({
-    // the Z-AI endpoint expects the leading prompt as role 'assistant'
-    messages: messages.map((m) => ({
-      role: m.role === 'system' ? ('assistant' as const) : m.role,
-      content: m.content,
-    })),
-    thinking: { type: 'disabled' },
-  })
-  return completion.choices[0]?.message?.content?.trim() || ''
 }
 
 /** Minimal OpenAI-compatible chat completion with a hard timeout. */
@@ -128,30 +124,39 @@ async function openAiCompatible(
 }
 
 /**
- * Run a chat completion through the configured provider, falling back to the
- * built-in Z-AI provider on any failure.
+ * Run a chat completion through the active connected provider. No silent
+ * fallback — failures surface as AiUnavailableError so the UI can show the
+ * "We are Facing High Traffic" notice.
  */
 export async function runChatCompletion(
   messages: ChatMessage[],
   cfg: AiConfig
 ): Promise<{ text: string; provider: string; model: string }> {
   const p = resolveProvider(cfg)
-  if (p.id !== 'zai' && p.ready && p.baseUrl) {
-    try {
-      const text = await openAiCompatible(p, messages)
-      return { text, provider: p.id, model: p.model }
-    } catch (e) {
-      console.error(`ai provider ${p.id} failed — falling back to built-in:`, e)
-    }
+  if (!p.ready || !p.baseUrl) {
+    throw new AiUnavailableError('not_connected', 'No AI provider is connected yet')
   }
-  const text = await zaiCompletion(messages)
-  return { text, provider: 'zai', model: 'default' }
+  try {
+    const text = await openAiCompatible(p, messages)
+    return { text, provider: p.id, model: p.model }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (e instanceof AiUnavailableError) throw e
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new AiUnavailableError('unavailable', 'Timed out after 45s')
+    }
+    if (/\b429\b|rate.?limit|quota|too many requests/i.test(msg)) {
+      throw new AiUnavailableError('rate_limited', msg)
+    }
+    console.error(`ai provider ${p.id} failed:`, msg)
+    throw new AiUnavailableError('unavailable', msg)
+  }
 }
 
 /**
  * Provider connectivity test used by the admin panel. A fresh key typed into
  * the form is tested directly; a masked/omitted key falls back to the stored
- * one. Z-AI is tested through the SDK itself.
+ * one.
  */
 export async function testProvider(
   opts: { provider: AiProviderId; model?: string; apiKey?: string; baseUrl?: string },
@@ -162,10 +167,6 @@ export async function testProvider(
   try {
     const meta = AI_PROVIDERS.find((p) => p.id === opts.provider)
     if (!meta) return { ok: false, latencyMs: 0, error: 'Unknown provider' }
-    if (meta.keyless) {
-      const reply = await zaiCompletion(ping)
-      return { ok: true, latencyMs: Date.now() - started, reply: reply.slice(0, 60) || 'OK', model: 'default' }
-    }
     const conf = (cfg.providers || {})[meta.id] || {}
     const key = opts.apiKey && !MASK_RE.test(opts.apiKey) ? opts.apiKey : conf.apiKey || ''
     if (!key) return { ok: false, latencyMs: Date.now() - started, error: 'No API key saved for this provider' }

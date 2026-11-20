@@ -42,6 +42,16 @@ import type {
 
 const TOKEN_KEY = 'call.auth.token'
 
+/** API error carrying the server-side error code (e.g. ai_high_traffic). */
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem(TOKEN_KEY)
@@ -67,7 +77,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     window.dispatchEvent(new CustomEvent('call:unauthorized'))
   }
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((data as { error?: string })?.error || `Request failed (${res.status})`)
+  if (!res.ok) throw new ApiError((data as { error?: string })?.error || `Request failed (${res.status})`, (data as { code?: string })?.code)
   return data as T
 }
 

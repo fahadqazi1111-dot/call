@@ -13,16 +13,13 @@ export async function GET(req: Request) {
     dailyVoiceLimit: number
     voiceReplies: boolean
     imageGen: boolean
-    provider: string
-    defaultModel: string
+    activeProvider?: string
   }>('ai', {
     dailyTextLimit: 100,
     dailyImageLimit: 10,
     dailyVoiceLimit: 40,
     voiceReplies: true,
     imageGen: true,
-    provider: 'zai',
-    defaultModel: 'default',
   })
   const usage = await db.aiUsage.findUnique({
     where: { userId_day: { userId: me.id, day } },
@@ -40,6 +37,6 @@ export async function GET(req: Request) {
       voiceReplies: cfg.voiceReplies,
       imageGen: cfg.imageGen,
     },
-    provider: { name: cfg.provider, model: cfg.defaultModel },
+    provider: { name: cfg.activeProvider || 'not_connected', model: '' },
   })
 }

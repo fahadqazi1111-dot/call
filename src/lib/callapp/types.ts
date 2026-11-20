@@ -481,6 +481,8 @@ export interface AiMsg {
   text: string
   mediaUrl?: string | null
   createdAt: string
+  /** client-only: rendered as the "We are Facing High Traffic" notice card */
+  highTraffic?: boolean
 }
 
 export interface AiConversationItem {

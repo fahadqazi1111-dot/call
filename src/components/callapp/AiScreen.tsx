@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   X, Send, Mic, MicOff, ImagePlus, Sparkles, Volume2, Trash2, Loader2,
-  Plus, MessageSquare, ImageIcon, Bot,
+  Plus, MessageSquare, ImageIcon, Bot, Activity, RotateCcw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, uploadFile } from '@/lib/callapp/api'
+import { ApiError, api, uploadFile } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { CallLogoMark } from './CallLogo'
 import type { AiConversationItem, AiMsg } from '@/lib/callapp/types'
@@ -57,6 +57,7 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
   const [attachedImage, setAttachedImage] = useState<{ id: string; preview: string } | null>(null)
   const [ttsOn, setTtsOn] = useState(true)
   const [listening, setListening] = useState(false)
+  const [retry, setRetry] = useState<{ text: string; optimisticId: string } | null>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
   const recRef = useRef<MediaRecorder | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -111,6 +112,7 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
 
   const openConversation = async (id: string) => {
     setActiveId(id)
+    setRetry(null)
     try {
       const res = await api.aiConversation(id)
       setMessages(res.conversation.messages)
@@ -120,6 +122,7 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
   const newConversation = () => {
     setActiveId(null)
     setMessages([])
+    setRetry(null)
   }
 
   /** Toast once (throttled) when TTS fails — never spammy. */
@@ -188,15 +191,57 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
     }
   }
 
+  /** Core text send: POST /api/ai/chat, with the "high traffic" notice on
+   * provider failure (rate-limited or not connected). */
+  const runChatSend = async (text: string, optimisticId: string) => {
+    setBusy(true)
+    try {
+      const res = await api.aiChat({ conversationId: activeId ?? undefined, text })
+      setActiveId(res.conversationId)
+      setMessages((m) => [...m.filter((x) => x.id !== optimisticId), res.userMessage, res.reply])
+      void speak(res.reply.text)
+      setUsage((u) => (u ? { ...u, text: u.text + 1 } : u))
+      setRetry(null)
+      void loadConversations()
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'ai_high_traffic') {
+        setRetry({ text, optimisticId })
+        setMessages((m) => [
+          ...m,
+          { id: `ht${Date.now()}`, role: 'assistant', kind: 'text', text: '', createdAt: new Date().toISOString(), highTraffic: true },
+        ])
+      } else {
+        setMessages((m) => [
+          ...m,
+          { id: `err${Date.now()}`, role: 'assistant', kind: 'text', text: `⚠️ ${(e as Error).message}`, createdAt: new Date().toISOString() },
+        ])
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Retry the message that hit the high-traffic notice (WhatsApp-style: the
+   * failed bubble is replaced, not duplicated). */
+  const retrySend = async () => {
+    if (!retry || busy) return
+    const { text, optimisticId } = retry
+    setRetry(null)
+    const optimistic: AiMsg = { id: optimisticId, role: 'user', kind: 'text', text, createdAt: new Date().toISOString() }
+    setMessages((m) => [...m.filter((x) => x.id !== optimisticId && !x.highTraffic), optimistic])
+    await runChatSend(text, optimisticId)
+  }
+
   const send = async () => {
     const text = input.trim()
     if (!text || busy) return
     setInput('')
-    setBusy(true)
     const optimistic: AiMsg = { id: `tmp${Date.now()}`, role: 'user', kind: 'text', text, createdAt: new Date().toISOString() }
-    setMessages((m) => [...m, optimistic])
-    try {
-      if (attachedImage) {
+    setMessages((m) => [...m.filter((x) => !x.highTraffic), optimistic]) // a fresh send clears any stale notice
+    setRetry(null)
+    if (attachedImage) {
+      setBusy(true)
+      try {
         const res = await api.aiVision(attachedImage.id, text)
         const reply: AiMsg = {
           id: `v${Date.now()}`,
@@ -209,21 +254,17 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
         setMessages((m) => [...m.slice(0, -1), imgMsg, reply])
         void speak(res.reply)
         setAttachedImage(null)
-      } else {
-        const res = await api.aiChat({ conversationId: activeId ?? undefined, text })
-        setActiveId(res.conversationId)
-        setMessages((m) => [...m.slice(0, -1), res.userMessage, res.reply])
-        void speak(res.reply.text)
-        setUsage((u) => (u ? { ...u, text: u.text + 1 } : u))
+        void loadConversations()
+      } catch (e) {
+        setMessages((m) => [
+          ...m,
+          { id: `verr${Date.now()}`, role: 'assistant', kind: 'text', text: `⚠️ ${(e as Error).message}`, createdAt: new Date().toISOString() },
+        ])
+      } finally {
+        setBusy(false)
       }
-      void loadConversations()
-    } catch (e) {
-      setMessages((m) => [
-        ...m,
-        { id: `err${Date.now()}`, role: 'assistant', kind: 'text', text: `⚠️ ${(e as Error).message}`, createdAt: new Date().toISOString() },
-      ])
-    } finally {
-      setBusy(false)
+    } else {
+      await runChatSend(text, optimistic.id)
     }
   }
 
@@ -393,25 +434,56 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
             )}
-            {messages.map((m) => (
-              <div key={m.id} className={`mb-3 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {m.role === 'assistant' && m.kind === 'text' && (
-                  <span className="mr-2 mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-grad text-white">
-                    <CallLogoMark size={16} />
+            {messages.map((m) =>
+              m.highTraffic ? (
+                /* ---- "We are Facing High Traffic" notice card ---- */
+                <div key={m.id} className="mb-3 flex justify-start">
+                  <span className="mr-2 mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-rose-500 text-white shadow-md shadow-orange-200">
+                    <Activity size={15} />
                   </span>
-                )}
-                <div
-                  className={`max-w-[80%] rounded-[18px] px-4 py-2.5 text-[14px] leading-relaxed ${
-                    m.role === 'user' ? 'bg-cbrand text-white' : 'bg-cbg text-cink'
-                  }`}
-                >
-                  {m.kind === 'image' && m.mediaUrl ? (
-                    <img src={m.mediaUrl} alt={m.text || 'AI image'} className="mb-1 max-h-64 rounded-xl" />
-                  ) : null}
-                  <span className="whitespace-pre-wrap">{m.text}</span>
+                  <div className="relative max-w-[85%] overflow-hidden rounded-[18px] border border-amber-200/80 bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 px-4 pb-3.5 pt-4 shadow-[0_10px_30px_-12px_rgba(234,88,12,0.35)]">
+                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400" />
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-orange-500" />
+                      </span>
+                      <p className="text-[14px] font-extrabold tracking-tight text-orange-950">We are Facing High Traffic</p>
+                    </div>
+                    <p className="pt-1.5 text-[12.5px] leading-relaxed text-orange-900/75">
+                      CALL AI is receiving too many requests right now and couldn&apos;t answer. Please try again in a few moments.
+                    </p>
+                    {retry && (
+                      <button
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-500 to-rose-500 px-4 py-2 text-[12px] font-bold text-white shadow-md transition active:scale-95 disabled:opacity-60"
+                        disabled={busy}
+                        onClick={() => void retrySend()}
+                      >
+                        {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Try again
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div key={m.id} className={`mb-3 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {m.role === 'assistant' && m.kind === 'text' && (
+                    <span className="mr-2 mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-grad text-white">
+                      <CallLogoMark size={16} />
+                    </span>
+                  )}
+                  <div
+                    className={`max-w-[80%] rounded-[18px] px-4 py-2.5 text-[14px] leading-relaxed ${
+                      m.role === 'user' ? 'bg-cbrand text-white' : 'bg-cbg text-cink'
+                    }`}
+                  >
+                    {m.kind === 'image' && m.mediaUrl ? (
+                      <img src={m.mediaUrl} alt={m.text || 'AI image'} className="mb-1 max-h-64 rounded-xl" />
+                    ) : null}
+                    <span className="whitespace-pre-wrap">{m.text}</span>
+                  </div>
+                </div>
+              )
+            )}
             {busy && (
               <div className="mb-3 flex justify-start">
                 <span className="mr-2 mt-1 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-grad text-white">

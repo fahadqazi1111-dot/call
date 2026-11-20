@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, getSetting, rateLimit } from '@/lib/callapp/server'
-import { runChatCompletion, type AiConfig, type ChatMessage } from '@/lib/callapp/aiProviders'
+import { runChatCompletion, AiUnavailableError, type AiConfig, type ChatMessage } from '@/lib/callapp/aiProviders'
 
 const SYSTEM_PROMPT = `You are CALL AI Personal Agent — the built-in AI agent of the CALL app ("One World. One Call.").
 IDENTITY (very important): whenever someone asks your name, who you are, or what powers you, introduce yourself exactly in this spirit:
@@ -85,7 +85,22 @@ export async function POST(req: Request) {
           content: m.text,
         })),
     ]
-    const { text: reply, provider } = await runChatCompletion(messages, cfg)
+    let reply = ''
+    let provider = ''
+    try {
+      const out = await runChatCompletion(messages, cfg)
+      reply = out.text
+      provider = out.provider
+    } catch (e) {
+      // Keep the conversation clean for a retry — drop the just-saved user turn.
+      await db.aiMessage.deleteMany({ where: { id: userMsg.id } }).catch(() => {})
+      const code = e instanceof AiUnavailableError ? e.code : 'unavailable'
+      console.error('ai chat unavailable:', code, e instanceof Error ? e.message : e)
+      return NextResponse.json(
+        { error: 'We are facing high traffic right now. Please try again in a few moments.', code: 'ai_high_traffic' },
+        { status: 503 }
+      )
+    }
 
     const assistantMsg = await db.aiMessage.create({
       data: { conversationId, role: 'assistant', kind: 'text', text: reply || 'Sorry, I could not generate a reply.' },

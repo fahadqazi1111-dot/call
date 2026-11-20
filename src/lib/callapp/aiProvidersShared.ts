@@ -3,7 +3,7 @@
  * routes (server). This file must stay free of server-only imports.
  */
 
-export type AiProviderId = 'zai' | 'google' | 'openrouter' | 'groq' | 'venom'
+export type AiProviderId = 'google' | 'openrouter' | 'groq' | 'venom'
 
 export interface AiProviderMeta {
   id: AiProviderId
@@ -15,21 +15,10 @@ export interface AiProviderMeta {
   baseUrl?: string
   /** Venom lets the admin point at a different gateway */
   editableBaseUrl?: boolean
-  /** built-in provider — no credentials needed */
-  keyless?: boolean
   keyUrl?: string
-  note?: string
 }
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
-  {
-    id: 'zai',
-    label: 'Z-AI (built-in)',
-    models: ['default'],
-    defaultModel: 'default',
-    keyless: true,
-    note: 'Built into CALL — no API key required. Used automatically as a fallback when another provider fails.',
-  },
   {
     id: 'google',
     label: 'Google AI (Gemini)',

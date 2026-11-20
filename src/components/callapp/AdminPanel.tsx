@@ -862,7 +862,8 @@ function AiSection() {
   const num = (k: string) => Number(cfg[k] ?? 0)
   const set = (k: string, v: unknown) => setCfg({ ...cfg, [k]: v })
   const provs = (cfg.providers ?? {}) as Record<string, AiProviderConfUi>
-  const activeProvider = String(cfg.activeProvider ?? 'zai')
+  const activeRaw = String(cfg.activeProvider ?? '')
+  const activeProvider = AI_PROVIDERS.some((p) => p.id === activeRaw) ? activeRaw : ''
   const setProv = (id: string, patch: AiProviderConfUi) =>
     setCfg({
       ...cfg,
@@ -895,8 +896,8 @@ function AiSection() {
     <div className="max-w-xl">
       <h3 className="pb-1 text-[15px] font-extrabold text-cink">CALL AI configuration</h3>
       <p className="pb-4 text-[12px] text-cmut">
-        Active provider: <b>{activeProvider}</b> · API keys are stored server-side and never exposed to users.
-        If the active provider fails, the built-in Z-AI provider answers automatically.
+        Active provider: <b>{activeProvider || 'not connected'}</b> · API keys are stored server-side and never exposed to users.
+        When a provider is rate-limited or not connected, users see a friendly “We are Facing High Traffic” notice.
       </p>
 
       {/* ---- providers ---- */}
@@ -1020,10 +1021,7 @@ function ProviderCard({
       {result && (
         <p className={`pt-1.5 text-[11px] leading-4 ${result.ok ? 'text-emerald-600' : 'text-red-600'}`}>{result.text}</p>
       )}
-      {meta.keyless ? (
-        <p className="pt-1.5 text-[11.5px] text-cmut">{meta.note}</p>
-      ) : (
-        <div className="pt-2.5">
+      <div className="pt-2.5">
           <div className="flex items-center gap-2">
             <input
               type="password"
@@ -1069,8 +1067,7 @@ function ProviderCard({
               onChange={(e) => onChange({ model: e.target.value })}
             />
           </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
