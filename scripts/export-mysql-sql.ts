@@ -58,6 +58,15 @@ for (const l of lines) {
 }
 const ddl = readFileSync(DDL_FILE, 'utf8')
 
+// Re-import safety: drop existing tables before creating them, so the dump
+// can be imported repeatedly over a previous (partial) import without
+// "#1050 - Table 'X' already exists". Runs after SET FOREIGN_KEY_CHECKS = 0,
+// so FK-linked tables drop in any order.
+const ddlTables = [...ddl.matchAll(/CREATE TABLE `(\w+)`/g)].map((m) => m[1])
+const dropBlock = ddlTables.length
+  ? `-- Drop existing tables (re-import safe)\nDROP TABLE IF EXISTS ${ddlTables.map((t) => '`' + t + '`').join(', ')};\n\n`
+  : ''
+
 /* ---------- 3. read sqlite + emit inserts ---------- */
 const db = new Database(DB_FILE, { readonly: true })
 
@@ -128,7 +137,7 @@ parts.push(
   `SET FOREIGN_KEY_CHECKS = 0;`,
   `SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';`,
   ``,
-  ddl.trimEnd(),
+  dropBlock + ddl.trimEnd(),
   ``,
   `-- ============================================================`,
   `-- DATA`,

@@ -1,6 +1,6 @@
 -- ============================================================
 -- CALL — full MySQL dump (schema + data) for phpMyAdmin import
--- Generated 2026-11-20T15:50:27.245Z
+-- Generated 2026-11-20T15:58:53.781Z
 -- All DateTime values are UTC.
 -- ============================================================
 
@@ -8,6 +8,9 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET time_zone = '+00:00';
 SET FOREIGN_KEY_CHECKS = 0;
 SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
+
+-- Drop existing tables (re-import safe)
+DROP TABLE IF EXISTS `User`, `Otp`, `EmailOtp`, `Contact`, `Conversation`, `Message`, `MessageHide`, `ConversationState`, `UserBlock`, `UserReport`, `Call`, `Wallet`, `LedgerEntry`, `Payment`, `Gift`, `GiftSend`, `BankAccount`, `Withdrawal`, `Story`, `StoryView`, `StoryReaction`, `VoiceRoom`, `RoomParticipant`, `RoomMessage`, `LiveSession`, `LiveComment`, `Battle`, `BattleParticipant`, `Group`, `GroupMember`, `GroupMessage`, `Notification`, `AiConversation`, `AiMessage`, `AiUsage`, `AdminSetting`, `AdPackage`, `Ad`, `AdEvent`, `Broadcast`, `BroadcastDelivery`;
 
 -- CreateTable
 CREATE TABLE `User` (
