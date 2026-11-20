@@ -101,6 +101,28 @@ export function RoomScreen({
   }, [roomId])
 
   /* ---------- realtime chat / reactions / gifts / stage events ---------- */
+  /** Play one gift animation exactly once per transaction. Used by the
+   * relayed `room:gift` event AND by the local send fallback — so the gifter
+   * always sees their own animation instantly even if the relay is slow. */
+  const pushGiftAnim = (payload: {
+    sendId?: string
+    gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
+    from: { id?: string; name: string }
+    to: { name: string }
+  }) => {
+    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
+    if (seenGifts.current.has(dedupKey)) return
+    seenGifts.current.add(dedupKey)
+    const anim = animFromPayload(payload)
+    soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
+    setAnims((a) => [...a, anim])
+    window.setTimeout(() => {
+      setAnims((a) => a.filter((x) => x.key !== anim.key))
+      seenGifts.current.delete(dedupKey)
+    }, anim.durationMs + 400)
+    void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
+  }
+
   useEffect(() => {
     const onChat = (p: unknown) => {
       const d = p as { roomId: string; message: RoomChatMsg }
@@ -115,27 +137,10 @@ export function RoomScreen({
       window.setTimeout(() => setReacts((r) => r.filter((x) => x.key !== key)), 2600)
     }
     const onGift = (p: unknown) => {
-      const d = p as { roomId: string; payload: {
-        sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
-        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-      } }
+      const d = p as { roomId: string; payload: Parameters<typeof pushGiftAnim>[0] }
       if (d.roomId !== roomId) return
-      // duplicate protection: one animation per verified transaction
-      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
-      if (seenGifts.current.has(dedupKey)) return
-      seenGifts.current.add(dedupKey)
-      // Animation + gift-specific sound are driven SOLELY by the
-      // server-verified fulfillment event — nothing shows pre-payment.
-      const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
-      setAnims((a) => [...a, anim])
-      window.setTimeout(() => {
-        setAnims((a) => a.filter((x) => x.key !== anim.key))
-        seenGifts.current.delete(dedupKey)
-      }, anim.durationMs + 400)
-      void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
+      // one animation per verified transaction — local send echoes dedupe here
+      pushGiftAnim(d.payload)
     }
     const onRemoved = (p: unknown) => {
       const d = p as { roomId: string; reason: string }
@@ -323,10 +328,11 @@ export function RoomScreen({
     return true
   }
 
-  const sendGiftDone = () => {
-    // The animation for EVERYONE (including me) arrives via the server relay
-    // after payment verification — nothing is played pre-verification.
-    void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
+  const sendGiftDone = (payload?: Parameters<typeof pushGiftAnim>[0]) => {
+    // the gifter sees their own animation instantly; the relayed `room:gift`
+    // echo is deduped by sendId — nothing plays pre-verification
+    if (payload) pushGiftAnim(payload)
+    else void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
   }
 
   const endRoom = async () => {

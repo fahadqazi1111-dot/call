@@ -20,8 +20,13 @@ export async function relaySend(targets: string[], event: string, data: unknown)
       cache: 'no-store',
       signal: AbortSignal.timeout(2500),
     })
-    return res.ok
-  } catch {
+    if (!res.ok) {
+      console.error(`relay FAILED (${res.status}) event=${event} targets=${targets.join(',')} — is the call-service running?`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error(`relay FAILED event=${event} targets=${targets.join(',')}:`, e instanceof Error ? e.message : e, '— is the call-service running?')
     return false
   }
 }

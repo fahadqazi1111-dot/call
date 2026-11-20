@@ -357,7 +357,7 @@ async function deliverGift(args: {
       await relayToLive(args.liveId, 'battle:score', {
         battleId: args.battleId,
         side: args.battleSide,
-        added: gross,
+        added: battleAdded,
         total: battleTotal,
       })
     }

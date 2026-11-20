@@ -623,7 +623,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
       onSent({
         ok: true,
         sendId: res.sendId,
-        gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd },
+        gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd, imageUrl: gift.imageUrl },
         from: { id: 'me', name: 'You', avatarKey: 0, avatarUrl: null },
         to: { id: rid, name: recipient?.name ?? 'host', avatarKey: recipient?.avatarKey ?? 0, avatarUrl: recipient?.avatarUrl ?? null },
         battle: null,
@@ -704,7 +704,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
         onSent({
           ok: true,
           sendId: final.id,
-          gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd },
+          gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd, imageUrl: gift.imageUrl },
           from: { id: 'me', name: 'You', avatarKey: 0, avatarUrl: null },
           to: { id: recipient.id, name: recipient.name, avatarKey: recipient.avatarKey, avatarUrl: recipient.avatarUrl },
           battle: null,

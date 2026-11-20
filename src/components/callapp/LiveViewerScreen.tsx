@@ -74,6 +74,27 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     window.setTimeout(() => setHearts((h) => h.filter((h2) => h2.key !== key)), 1400)
   }, [])
 
+  /* dedupe across BOTH delivery paths (relayed echo + local send fallback) */
+  const seenGiftsRef = useRef(new Set<string>())
+
+  /** Play one gift animation exactly once per transaction. Used by the
+   * relayed `live:gift` event AND by the local send fallback — so the gifter
+   * always sees their own animation instantly even if the relay is slow. */
+  const pushGiftAnim = useCallback((payload: {
+    sendId?: string
+    gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
+    from: { id?: string; name: string }
+    to: { name: string }
+  }) => {
+    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
+    if (seenGiftsRef.current.has(dedupKey)) return
+    seenGiftsRef.current.add(dedupKey)
+    const anim = animFromPayload(payload)
+    soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
+    setAnims((a) => [...a, anim])
+    window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
+  }, [])
+
   /* ---------- join as viewer ---------- */
   useEffect(() => {
     if (!me) return
@@ -109,25 +130,11 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       if (d.comment?.id) seenComments.add(d.comment.id)
       setComments((c) => [...c.slice(-120), d.comment])
     }
-    const seenGifts = new Set<string>()
     const onGift = (p: unknown) => {
-      const d = p as { liveId: string; payload: {
-        sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
-        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-      } }
+      const d = p as { liveId: string; payload: Parameters<typeof pushGiftAnim>[0] }
       if (d.liveId !== session.id) return
-      // duplicate protection: one animation per verified transaction
-      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
-      if (seenGifts.has(dedupKey)) return
-      seenGifts.add(dedupKey)
-      // Animation is driven by the server-verified fulfillment event only,
-      // with the gift's own sound effect (synced to the banner→animation beat).
-      const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
-      setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
+      // one animation per verified transaction — local send echoes dedupe here
+      pushGiftAnim(d.payload)
     }
     const onEnded = (p: unknown) => {
       const d = p as { liveId: string }
@@ -196,7 +203,7 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       offT()
       offBE()
     }
-  }, [session.id, battle.id, onClose, pushReaction])
+  }, [session.id, battle.id, onClose, pushReaction, pushGiftAnim])
 
   /* ---------- battle timer ---------- */
   useEffect(() => {
@@ -459,8 +466,10 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
               ? { liveId: session.id, battleId: battle.id }
               : { liveId: session.id }
           }
-          onSent={() => {
-            // animation + battle score arrive via the server-verified relay
+          onSent={(payload) => {
+            // the gifter sees their own animation instantly; the relayed echo
+            // is deduped by sendId — battle score still arrives via relay
+            pushGiftAnim(payload as Parameters<typeof pushGiftAnim>[0])
           }}
           onClose={() => setGiftOpen(false)}
         />

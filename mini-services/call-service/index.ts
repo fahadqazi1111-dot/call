@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from 'http'
 import { Server, type Socket } from 'socket.io'
 
-const httpServer = createServer()
+const httpServer = createServer(() => {}) // bun: handler-less servers never emit request/upgrade events
 
 /* ================= internal HTTP relay (Next.js API -> socket clients) =================
  * The Next.js backend cannot emit socket events itself. Financial fulfillment
@@ -486,15 +486,24 @@ io.on('connection', (socket: Socket) => {
       }
       const role = v && v.role ? (v.role as string) : 'listener'
       const members = roomMembers.get(p.roomId) ?? new Map<string, RoomUser>()
-      members.set(p.user.id, {
-        userId: p.user.id,
-        name: p.user.name,
-        avatarKey: p.user.avatarKey ?? 0,
-        avatarUrl: p.user.avatarUrl ?? null,
-        role,
-        muted: false,
-        handRaised: false,
-      })
+      const existing = members.get(p.user.id)
+      if (existing) {
+        // already present (authoritative sync landed while the verify fetch
+        // was in flight) — refresh identity only, NEVER downgrade the role
+        existing.name = p.user.name
+        existing.avatarKey = p.user.avatarKey ?? 0
+        existing.avatarUrl = p.user.avatarUrl ?? null
+      } else {
+        members.set(p.user.id, {
+          userId: p.user.id,
+          name: p.user.name,
+          avatarKey: p.user.avatarKey ?? 0,
+          avatarUrl: p.user.avatarUrl ?? null,
+          role,
+          muted: false,
+          handRaised: false,
+        })
+      }
       roomMembers.set(p.roomId, members)
       myRooms.add(p.roomId)
       socket.join(`room:${p.roomId}`)
@@ -611,7 +620,14 @@ io.on('connection', (socket: Socket) => {
       let asHost = !!p.asHost
       if (asHost) {
         const v = await verify('live', p.liveId, p.user.id)
-        asHost = !!(v && v.isLive && (v.isHost || v.isParticipant))
+        if (v) {
+          // backend reachable — its verdict is authoritative
+          asHost = !!(v.isLive && (v.isHost || v.isParticipant))
+        }
+        // v === null → verify endpoint unreachable (dev recompile / restart):
+        // keep the claimed role so the host keeps publishing instead of being
+        // silently demoted to a viewer (which strands viewers on a spinner).
+        // The next live:join re-verifies once the backend is back.
       }
       socket.join(`live:${p.liveId}`)
       myLives.add(p.liveId)

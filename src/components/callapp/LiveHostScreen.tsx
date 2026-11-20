@@ -78,6 +78,27 @@ export function LiveHostScreen({
     window.setTimeout(() => setReacts((r) => r.filter((x2) => x2.key !== key)), 2700)
   }, [])
 
+  /* dedupe across BOTH delivery paths (relayed echo + local send fallback) */
+  const seenGiftsRef = useRef(new Set<string>())
+
+  /** Play one gift animation exactly once per transaction. Used by the
+   * relayed `live:gift` event AND by the local send fallback — so the gifter
+   * always sees their own animation instantly even if the relay is slow. */
+  const pushGiftAnim = useCallback((payload: {
+    sendId?: string
+    gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
+    from: { id?: string; name: string }
+    to: { name: string }
+  }) => {
+    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
+    if (seenGiftsRef.current.has(dedupKey)) return
+    seenGiftsRef.current.add(dedupKey)
+    const anim = animFromPayload(payload)
+    soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
+    setAnims((a) => [...a, anim])
+    window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
+  }, [])
+
   /* ---------- start broadcasting ---------- */
   useEffect(() => {
     let unsub: (() => void) | null = null
@@ -158,25 +179,11 @@ export function LiveHostScreen({
       if (d.comment?.id) seenComments.add(d.comment.id)
       setComments((c) => [...c.slice(-120), d.comment])
     }
-    const seenGifts = new Set<string>()
     const onGift = (p: unknown) => {
-      const d = p as { liveId: string; payload: {
-        sendId?: string
-        gift: { name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; imageUrl?: string | null }
-        from: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-        to: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
-      } }
+      const d = p as { liveId: string; payload: Parameters<typeof pushGiftAnim>[0] }
       if (d.liveId !== liveId) return
-      // duplicate protection: one animation per verified transaction
-      const dedupKey = d.payload.sendId || `${d.payload.gift.name}-${d.payload.from?.id}-${Date.now()}`
-      if (seenGifts.has(dedupKey)) return
-      seenGifts.add(dedupKey)
-      // Server-verified fulfillment event drives the animation + gift-specific sound
-      // (synced to the TikTok banner→animation beat).
-      const anim = animFromPayload(d.payload)
-      soundKit.giftEffect(d.payload.gift.animKind, anim.delayMs)
-      setAnims((a) => [...a, anim])
-      window.setTimeout(() => setAnims((a) => a.filter((x) => x.key !== anim.key)), anim.durationMs + 400)
+      // one animation per verified transaction — local send echoes dedupe here
+      pushGiftAnim(d.payload)
       void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
       // battle score updates also arrive via the relayed battle:score event
     }
@@ -212,7 +219,7 @@ export function LiveHostScreen({
       offEnded()
       offReact()
     }
-  }, [liveId, battle, onClose, pushReaction])
+  }, [liveId, battle, onClose, pushReaction, pushGiftAnim])
 
   /* ---------- battle invite flow (proper popup with search + audience) ---------- */
   const invited = (battleId: string, mode: '1v1' | '2v2', parts: BattleParticipantInfo[]) => {
@@ -597,8 +604,11 @@ export function LiveHostScreen({
             battleId: battle.id,
             battleSide: battle.participants.some((p) => p.userId === me.id && p.side === 0) ? 1 : 0,
           }}
-          onSent={() => {
-            // animation + score arrive via the server-verified relay
+          onSent={(payload) => {
+            // the gifter sees their own animation instantly; the relayed echo
+            // is deduped by sendId — score still arrives via relay
+            pushGiftAnim(payload as Parameters<typeof pushGiftAnim>[0])
+            void api.giftStats({ liveId }).then(setGiftStats).catch(() => {})
           }}
           onClose={() => setGiftOpen(false)}
         />
