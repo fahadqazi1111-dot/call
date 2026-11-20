@@ -51,6 +51,21 @@ for (const mod of models) {
     }
   }
 
+  // scalar fields of @relation(fields: [...]) — foreign keys. MySQL/MariaDB
+  // requires an exact type match between the FK column and the referenced
+  // column; referenced ids are VARCHAR(191), so FK columns must stay
+  // VARCHAR(191) as well. A TEXT FK column fails with errno 1825
+  // ("Incorrect options in FOREIGN KEY constraint") on phpMyAdmin import.
+  const fkFields = new Set<string>()
+  for (let j = mod.start; j <= mod.end; j++) {
+    for (const m of lines[j].matchAll(/fields:\s*\[([^\]]*)\]/g)) {
+      for (const f of m[1].split(',')) {
+        const name = f.trim().split(/\s+/)[0]
+        if (name) fkFields.add(name)
+      }
+    }
+  }
+
   for (let j = mod.start + 1; j < mod.end; j++) {
     const l = lines[j]
     // field lines are exactly "  name   Type   ...attributes // comment"
@@ -59,6 +74,7 @@ for (const mod of models) {
     const field = fm[1]
     if (/@id\b/.test(l) || /@unique\b/.test(l)) continue // keep VARCHAR for keys
     if (indexed.has(field)) continue // keep VARCHAR for indexed fields
+    if (fkFields.has(field)) continue // keep VARCHAR for foreign keys
     if (/@db\./.test(l)) continue // already has a native type attribute
 
     // insert "@db.Text" before the trailing // comment, else at end of line

@@ -106,7 +106,7 @@ model Message {
   id             String       @id @default(cuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderId       String @db.Text
+  senderId       String
   sender         User         @relation("MsgSender", fields: [senderId], references: [id], onDelete: Cascade)
   type           String @db.Text // text | voice | call | image
   content        String @db.Text // text body, media id, or call summary json
@@ -171,7 +171,7 @@ model UserBlock {
 
 model UserReport {
   id         String    @id @default(cuid())
-  reporterId String @db.Text
+  reporterId String
   reporter   User      @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
   reportedId String
   reported   User      @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
@@ -291,7 +291,7 @@ model Gift {
 
 model GiftSend {
   id           String   @id @default(cuid())
-  giftId       String @db.Text
+  giftId       String
   gift         Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
   senderId     String
   sender       User     @relation("GiftSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -413,7 +413,7 @@ model StoryReaction {
 
 model VoiceRoom {
   id           String            @id @default(cuid())
-  hostId       String @db.Text
+  hostId       String
   host         User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
   title        String @db.Text
   description  String            @default("") @db.Text
@@ -467,7 +467,7 @@ model RoomMessage {
 
 model LiveSession {
   id          String        @id @default(cuid())
-  hostId      String @db.Text
+  hostId      String
   host        User          @relation("LiveHost", fields: [hostId], references: [id], onDelete: Cascade)
   title       String        @default("Live") @db.Text
   status      String        @default("live") // live | ended
@@ -542,7 +542,7 @@ model Group {
   name      String @db.Text
   avatarKey Int           @default(0)
   avatarUrl String? @db.Text
-  ownerId   String @db.Text
+  ownerId   String
   owner     User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
@@ -573,7 +573,7 @@ model GroupMessage {
   id        String   @id @default(cuid())
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  senderId  String @db.Text
+  senderId  String
   sender    User     @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
   type      String   @default("text") @db.Text // text | system | voice | image | video
   content   String @db.Text
@@ -681,7 +681,7 @@ model Ad {
   mediaKind       String     @default("image") @db.Text // image | video
   linkUrl         String? @db.Text
   placements      String     @default("chats") @db.Text // csv: chats | rooms | profile
-  packageId       String? @db.Text
+  packageId       String?
   pkg             AdPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
   budget          Float      @default(0)
   totalCost       Float      @default(0)
@@ -732,7 +732,7 @@ model Broadcast {
   id             String              @id @default(cuid())
   title          String @db.Text
   body           String              @default("") @db.Text
-  senderId       String @db.Text
+  senderId       String
   sender         User                @relation("BroadcastSender", fields: [senderId], references: [id], onDelete: Cascade)
   createdBy      String @db.Text
   totalTargets   Int                 @default(0)

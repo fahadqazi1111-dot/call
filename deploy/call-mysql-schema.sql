@@ -80,7 +80,7 @@ CREATE TABLE `Conversation` (
 CREATE TABLE `Message` (
     `id` VARCHAR(191) NOT NULL,
     `conversationId` VARCHAR(191) NOT NULL,
-    `senderId` TEXT NOT NULL,
+    `senderId` VARCHAR(191) NOT NULL,
     `type` TEXT NOT NULL,
     `content` TEXT NOT NULL,
     `duration` INTEGER NULL,
@@ -137,7 +137,7 @@ CREATE TABLE `UserBlock` (
 -- CreateTable
 CREATE TABLE `UserReport` (
     `id` VARCHAR(191) NOT NULL,
-    `reporterId` TEXT NOT NULL,
+    `reporterId` VARCHAR(191) NOT NULL,
     `reportedId` VARCHAR(191) NOT NULL,
     `reason` TEXT NOT NULL,
     `details` TEXT NULL,
@@ -251,7 +251,7 @@ CREATE TABLE `Gift` (
 -- CreateTable
 CREATE TABLE `GiftSend` (
     `id` VARCHAR(191) NOT NULL,
-    `giftId` TEXT NOT NULL,
+    `giftId` VARCHAR(191) NOT NULL,
     `senderId` VARCHAR(191) NOT NULL,
     `recipientId` VARCHAR(191) NOT NULL,
     `context` TEXT NOT NULL,
@@ -362,7 +362,7 @@ CREATE TABLE `StoryReaction` (
 -- CreateTable
 CREATE TABLE `VoiceRoom` (
     `id` VARCHAR(191) NOT NULL,
-    `hostId` TEXT NOT NULL,
+    `hostId` VARCHAR(191) NOT NULL,
     `title` TEXT NOT NULL,
     `description` TEXT NOT NULL DEFAULT '',
     `coverUrl` TEXT NULL,
@@ -412,7 +412,7 @@ CREATE TABLE `RoomMessage` (
 -- CreateTable
 CREATE TABLE `LiveSession` (
     `id` VARCHAR(191) NOT NULL,
-    `hostId` TEXT NOT NULL,
+    `hostId` VARCHAR(191) NOT NULL,
     `title` TEXT NOT NULL DEFAULT 'Live',
     `status` VARCHAR(191) NOT NULL DEFAULT 'live',
     `mode` TEXT NOT NULL DEFAULT 'solo',
@@ -482,7 +482,7 @@ CREATE TABLE `Group` (
     `name` TEXT NOT NULL,
     `avatarKey` INTEGER NOT NULL DEFAULT 0,
     `avatarUrl` TEXT NULL,
-    `ownerId` TEXT NOT NULL,
+    `ownerId` VARCHAR(191) NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
@@ -510,7 +510,7 @@ CREATE TABLE `GroupMember` (
 CREATE TABLE `GroupMessage` (
     `id` VARCHAR(191) NOT NULL,
     `groupId` VARCHAR(191) NOT NULL,
-    `senderId` TEXT NOT NULL,
+    `senderId` VARCHAR(191) NOT NULL,
     `type` TEXT NOT NULL DEFAULT 'text',
     `content` TEXT NOT NULL,
     `mediaId` TEXT NULL,
@@ -611,7 +611,7 @@ CREATE TABLE `Ad` (
     `mediaKind` TEXT NOT NULL DEFAULT 'image',
     `linkUrl` TEXT NULL,
     `placements` TEXT NOT NULL DEFAULT 'chats',
-    `packageId` TEXT NULL,
+    `packageId` VARCHAR(191) NULL,
     `budget` DOUBLE NOT NULL DEFAULT 0,
     `totalCost` DOUBLE NOT NULL DEFAULT 0,
     `status` VARCHAR(191) NOT NULL DEFAULT 'active',
@@ -653,7 +653,7 @@ CREATE TABLE `Broadcast` (
     `id` VARCHAR(191) NOT NULL,
     `title` TEXT NOT NULL,
     `body` TEXT NOT NULL DEFAULT '',
-    `senderId` TEXT NOT NULL,
+    `senderId` VARCHAR(191) NOT NULL,
     `createdBy` TEXT NOT NULL,
     `totalTargets` INTEGER NOT NULL DEFAULT 0,
     `deliveredCount` INTEGER NOT NULL DEFAULT 0,

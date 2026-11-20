@@ -27,6 +27,14 @@ mkdirSync(path.join(standalone, '.next'), { recursive: true })
 copyFileSync(path.join(root, 'deploy', 'production-server.js'), path.join(standalone, 'production-server.js'))
 console.log('copy-production-runtime: production-server.js -> .next/standalone/')
 
+// 1b. environment file — Next standalone does NOT copy .env itself; without
+// this the runtime would only see env vars injected by the hosting panel.
+const envSrc = path.join(root, '.env')
+if (existsSync(envSrc)) {
+  copyFileSync(envSrc, path.join(standalone, '.env'))
+  console.log('copy-production-runtime: .env -> .next/standalone/')
+}
+
 // 2. realtime service bundle
 const serviceSrc = path.join(root, 'mini-services', 'call-service', 'service.ts')
 const committed = path.join(root, 'deploy', 'socket-service-bundle.cjs')
