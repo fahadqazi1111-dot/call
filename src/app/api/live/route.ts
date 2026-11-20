@@ -2,10 +2,60 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, getSetting, rateLimit } from '@/lib/callapp/server'
 
+const RELAY_SECRET = 'call-internal-relay-v1'
+const RELAY_BASE = (process.env.CALL_RELAY_URL || 'http://127.0.0.1:3004/internal/relay').replace('/internal/relay', '')
+
+/**
+ * Ghost-broadcast sweep: a live session whose host socket is no longer
+ * connected (tab closed, camera failed, crash) would otherwise stay
+ * `status: 'live'` forever and every viewer joining it would hang on an
+ * endless preloader. The socket service is the source of truth for which
+ * lives actually have a connected publisher — sessions without one (and
+ * past the startup grace window) are ended here and their stale viewers
+ * receive `live:ended` so their screens close gracefully.
+ */
+async function sweepGhostLives(): Promise<void> {
+  try {
+    const res = await fetch(`${RELAY_BASE}/internal/live-hosts`, {
+      headers: { 'x-internal-secret': RELAY_SECRET },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2500),
+    })
+    if (!res.ok) return
+    const data = (await res.json()) as { liveIds?: string[] }
+    const hosted = new Set(data.liveIds ?? [])
+    const stale = await db.liveSession.findMany({
+      where: { status: 'live', startedAt: { lt: new Date(Date.now() - 45_000) } },
+      select: { id: true },
+    })
+    const dead = stale.filter((s) => !hosted.has(s.id))
+    if (!dead.length) return
+    const ids = dead.map((s) => s.id)
+    const now = new Date()
+    await db.liveSession.updateMany({
+      where: { id: { in: ids }, status: 'live' },
+      data: { status: 'ended', endedAt: now },
+    })
+    for (const id of ids) {
+      // release viewers stranded on the ghost broadcast
+      await fetch(`${RELAY_BASE}/internal/relay`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-internal-secret': RELAY_SECRET },
+        body: JSON.stringify({ targets: [`live:${id}`], event: 'internal:live_ended', data: { liveId: id } }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      }).catch(() => {})
+    }
+  } catch {
+    // socket service down — leave sessions alone, the next pass retries
+  }
+}
+
 /** GET: live sessions currently broadcasting. */
 export async function GET(req: Request) {
   const me = await requireUser(req)
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  await sweepGhostLives()
   const sessions = await db.liveSession.findMany({
     where: { status: 'live' },
     orderBy: { startedAt: 'desc' },

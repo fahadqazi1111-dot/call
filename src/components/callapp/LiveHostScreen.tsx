@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   X, Mic, MicOff, Video, VideoOff, Send, Gift, Swords, Loader2, Eye,
-  RefreshCw, Trophy, Crown, Timer, Users, SmilePlus,
+  RefreshCw, Trophy, Crown, Timer, Users, SmilePlus, Volume2,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -48,6 +48,8 @@ export function LiveHostScreen({
   const [anims, setAnims] = useState<GiftAnim[]>([])
   const [giftStats, setGiftStats] = useState<GiftSessionStats | null>(null)
   const [giftOpen, setGiftOpen] = useState(false)
+  /** camera/mic failure panel (replaces the old blocking alert) */
+  const [camError, setCamError] = useState<{ title: string; hint: string; retrying: boolean } | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [preselected, setPreselected] = useState<Person | null>(null)
@@ -66,6 +68,7 @@ export function LiveHostScreen({
   const [countdown, setCountdown] = useState<number | null>(null)
   const animKey = useRef(0)
   const finishedRef = useRef(false)
+  const unsubRef = useRef<(() => void) | null>(null)
   /* TikTok-style floating reactions (sent by the audience) */
   const [reacts, setReacts] = useState<ReactionFloat[]>([])
   const [reactOpen, setReactOpen] = useState(false)
@@ -83,16 +86,20 @@ export function LiveHostScreen({
 
   /** Play one gift animation exactly once per transaction. Used by the
    * relayed `live:gift` event AND by the local send fallback — so the gifter
-   * always sees their own animation instantly even if the relay is slow. */
+   * always sees their own animation instantly even if the relay is slow.
+   * Dedupe covers BOTH ids: sendId (gift-send row) and paymentId (card
+   * checkout echo) so one transaction can never render twice. */
   const pushGiftAnim = useCallback((payload: {
     sendId?: string
+    paymentId?: string
     gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
     from: { id?: string; name: string }
     to: { name: string }
   }) => {
-    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
-    if (seenGiftsRef.current.has(dedupKey)) return
-    seenGiftsRef.current.add(dedupKey)
+    const { sendId, paymentId } = payload
+    if ((sendId && seenGiftsRef.current.has(sendId)) || (paymentId && seenGiftsRef.current.has(paymentId))) return
+    if (sendId) seenGiftsRef.current.add(sendId)
+    if (paymentId) seenGiftsRef.current.add(paymentId)
     const anim = animFromPayload(payload)
     soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
     setAnims((a) => [...a, anim])
@@ -100,53 +107,75 @@ export function LiveHostScreen({
   }, [])
 
   /* ---------- start broadcasting ---------- */
-  useEffect(() => {
-    let unsub: (() => void) | null = null
-    let disposed = false
-    const run = async () => {
-      try {
-        const stream = await liveManager.startPublishing(liveId, true, me?.id ?? '')
-        if (disposed) return
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          void videoRef.current.play().catch(() => {})
-        }
-        unsub = liveManager.subscribe((s) => setLm(s))
-        // comments history
-        try {
-          const res = await api.liveComments(liveId)
-          setComments(res.comments)
-        } catch {}
-        // announce to contacts via notification relay (viewers see "live started")
-        try {
-          const { contacts } = await api.contacts()
-          for (const c of contacts.filter((x) => x.user).slice(0, 50)) {
-            socketClient.emit('notify:new', {
-              to: c.user!.id,
-              payload: {
-                id: `live${Date.now()}${c.id}`,
-                kind: 'live_started',
-                title: `${me?.name ?? 'Someone'} is live: ${title}`,
-                refType: 'live',
-                refId: liveId,
-                read: false,
-                createdAt: new Date().toISOString(),
-              },
-            })
-          }
-        } catch {}
-      } catch {
-        alert('Camera and microphone are required to go live')
-        onClose()
+  /** The go-live sheet already captured camera + mic BEFORE the session was
+   *  created (liveManager.preflightCamera) — startPublishing reuses that warm
+   *  stream. If the device still fails here (unplugged mid-flight, OS lock),
+   *  a clear in-screen panel explains it and can retry — never a bare alert. */
+  const startBroadcast = async (isRetry = false) => {
+    if (isRetry) setCamError((c) => (c ? { ...c, retrying: true } : c))
+    try {
+      const stream = await liveManager.startPublishing(liveId, true, me?.id ?? '', {
+        id: me?.id ?? '',
+        name: me?.name ?? '',
+        avatarKey: me?.avatarKey ?? 0,
+        avatarUrl: me?.avatarUrl ?? null,
+      })
+      setCamError(null)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        void videoRef.current.play().catch(() => {})
       }
+      unsubRef.current = liveManager.subscribe((s) => setLm(s))
+      // comments history
+      try {
+        const res = await api.liveComments(liveId)
+        setComments(res.comments)
+      } catch {}
+      // announce to contacts via notification relay (viewers see "live started")
+      try {
+        const { contacts } = await api.contacts()
+        for (const c of contacts.filter((x) => x.user).slice(0, 50)) {
+          socketClient.emit('notify:new', {
+            to: c.user!.id,
+            payload: {
+              id: `live${Date.now()}${c.id}`,
+              kind: 'live_started',
+              title: `${me?.name ?? 'Someone'} is live: ${title}`,
+              refType: 'live',
+              refId: liveId,
+              read: false,
+              createdAt: new Date().toISOString(),
+            },
+          })
+        }
+      } catch {}
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError'
+      const hint =
+        name === 'NotAllowedError' || name === 'PermissionDeniedError'
+          ? window.self !== window.top
+            ? 'Embedded preview panes can block the camera even when the site permission is granted. Open CALL in its own browser tab and start the live there.'
+            : 'Allow camera + microphone for this site in the address bar (padlock icon), then try again.'
+          : name === 'NotReadableError' || name === 'TrackStartError'
+            ? 'The camera is busy in another app (Zoom / Meet / another tab). Close it and try again.'
+            : name === 'NotFoundError'
+              ? 'No camera or microphone was found on this device.'
+              : 'Reload the page or open CALL in a new tab, then try again.'
+      setCamError({ title: 'Camera & microphone unavailable', hint, retrying: false })
     }
-    void run()
+  }
+
+  /* mount once per live — re-running would close/re-open the camera mid-visit.
+   * "Try again" in the error panel re-invokes startBroadcast(true) directly.
+   * Deferred so the async publish never sets state inside the effect body. */
+  useEffect(() => {
+    const t = window.setTimeout(() => void startBroadcast(false), 0)
     return () => {
-      disposed = true
-      unsub?.()
+      window.clearTimeout(t)
+      unsubRef.current?.()
+      unsubRef.current = null
       void liveManager.leave()
     }
-     
   }, [liveId])
 
   /* ---------- elapsed timer ---------- */
@@ -398,6 +427,35 @@ export function LiveHostScreen({
         />
       ) : (
         <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+      )}
+
+      {/* ===== camera/mic failure panel (never a bare alert) ===== */}
+      {camError && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/85 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-[380px] rounded-[22px] border border-white/15 bg-[#14121a] p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-500/15">
+              <VideoOff size={26} className="text-red-400" />
+            </div>
+            <h3 className="mt-4 text-[16px] font-extrabold">{camError.title}</h3>
+            <p className="mt-2 text-[12.5px] leading-[18px] text-white/70">{camError.hint}</p>
+            {camError.retrying && <Loader2 size={18} className="mx-auto mt-4 animate-spin text-white/60" />}
+            <div className="mt-5 flex gap-2">
+              <button
+                className="h-11 flex-1 rounded-[14px] bg-white/10 text-[13.5px] font-bold transition hover:bg-white/20"
+                onClick={() => void endLive()}
+              >
+                End broadcast
+              </button>
+              <button
+                className="h-11 flex-1 rounded-[14px] bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] text-[13.5px] font-bold disabled:opacity-40"
+                disabled={camError.retrying}
+                onClick={() => void startBroadcast(true)}
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ===== top bar ===== */}
@@ -768,15 +826,41 @@ function BattleVideoFeed({
   mirrored: boolean
 }) {
   const ref = useRef<HTMLVideoElement>(null)
+  const [tapForSound, setTapForSound] = useState(false)
   useEffect(() => {
     const el = ref.current
     if (!el || !stream) return
     el.srcObject = stream
-    void el.play().catch(() => {})
-  }, [stream])
+    void el.play().catch(() => {
+      // autoplay policy — start muted, offer a tap for sound
+      el.muted = true
+      void el.play().catch(() => {})
+      if (!mirrored) setTapForSound(true)
+    })
+  }, [stream, mirrored])
+  const unmute = () => {
+    const el = ref.current
+    if (!el) return
+    el.muted = false
+    void el.play().catch(() => {
+      el.muted = true
+      void el.play().catch(() => {})
+      setTapForSound(true)
+    })
+    setTapForSound(false)
+  }
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
       <video ref={ref} autoPlay playsInline className={`h-full w-full object-cover ${mirrored ? 'scale-x-[-1]' : ''}`} muted={mirrored} />
+      {tapForSound && (
+        <button
+          className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-4 py-2.5 text-[13px] font-bold backdrop-blur"
+          onClick={unmute}
+          aria-label="Tap for sound"
+        >
+          <Volume2 size={16} /> Tap for sound
+        </button>
+      )}
       <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur">
         <Avatar name={participant.name} avatarKey={participant.avatarKey} size={18} src={participant.avatarUrl} />
         <span className="text-[11px] font-bold">{participant.name.split(' ')[0]}</span>

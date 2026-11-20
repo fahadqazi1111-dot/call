@@ -45,6 +45,9 @@ export function RoomScreen({
   const [fxBusy, setFxBusy] = useState(false)
   const [confirmInvite, setConfirmInvite] = useState(false)
   const [notice, setNotice] = useState('')
+  /** autoplay policy blocked room audio — offer a tap to unmute everyone */
+  const [soundBlocked, setSoundBlocked] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   /** stage invitation I received from the host (must accept to speak) */
   const [micInvite, setMicInvite] = useState<{ from: string; roomTitle: string } | null>(null)
   /** my mic request is awaiting host approval */
@@ -58,6 +61,25 @@ export function RoomScreen({
     setNotice(msg)
     window.setTimeout(() => setNotice(''), ms)
   }
+
+  /** user gesture — unmute + play every room audio element */
+  const enableRoomSound = () => {
+    const els = rootRef.current?.querySelectorAll('audio') ?? []
+    els.forEach((el) => {
+      el.muted = false
+      void el.play().catch(() => {})
+    })
+    setSoundBlocked(false)
+  }
+
+  /* any tap anywhere in the room also counts as the sound gesture */
+  useEffect(() => {
+    if (!soundBlocked) return
+    const onGesture = () => enableRoomSound()
+    document.addEventListener('pointerdown', onGesture, { once: true })
+    return () => document.removeEventListener('pointerdown', onGesture)
+     
+  }, [soundBlocked])
 
   /* ---------- join + bind ---------- */
   useEffect(() => {
@@ -103,22 +125,27 @@ export function RoomScreen({
   /* ---------- realtime chat / reactions / gifts / stage events ---------- */
   /** Play one gift animation exactly once per transaction. Used by the
    * relayed `room:gift` event AND by the local send fallback — so the gifter
-   * always sees their own animation instantly even if the relay is slow. */
+   * always sees their own animation instantly even if the relay is slow.
+   * Dedupe covers BOTH ids: sendId (gift-send row) and paymentId (card
+   * checkout echo) so one transaction can never render twice. */
   const pushGiftAnim = (payload: {
     sendId?: string
+    paymentId?: string
     gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
     from: { id?: string; name: string }
     to: { name: string }
   }) => {
-    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
-    if (seenGifts.current.has(dedupKey)) return
-    seenGifts.current.add(dedupKey)
+    const { sendId, paymentId } = payload
+    if ((sendId && seenGifts.current.has(sendId)) || (paymentId && seenGifts.current.has(paymentId))) return
+    if (sendId) seenGifts.current.add(sendId)
+    if (paymentId) seenGifts.current.add(paymentId)
     const anim = animFromPayload(payload)
     soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
     setAnims((a) => [...a, anim])
     window.setTimeout(() => {
       setAnims((a) => a.filter((x) => x.key !== anim.key))
-      seenGifts.current.delete(dedupKey)
+      if (sendId) seenGifts.current.delete(sendId)
+      if (paymentId) seenGifts.current.delete(paymentId)
     }, anim.durationMs + 400)
     void api.giftStats({ roomId }).then(setGiftStats).catch(() => {})
   }
@@ -355,7 +382,7 @@ export function RoomScreen({
   const sessionGross = giftStats?.totals.gross ?? 0
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col bg-gradient-to-b from-[#181b26] via-[#12141c] to-[#0b0d13] text-white">
+    <div ref={rootRef} className="fixed inset-0 z-[80] flex flex-col bg-gradient-to-b from-[#181b26] via-[#12141c] to-[#0b0d13] text-white">
       <GiftAnimationLayer gifts={anims} />
       {/* floating reactions */}
       <div className="pointer-events-none absolute inset-0 z-40">
@@ -413,6 +440,17 @@ export function RoomScreen({
         <div className="mx-4 rounded-xl bg-white/10 px-4 py-2 text-center text-[13px] font-semibold text-white/90">{notice}</div>
       )}
 
+      {/* autoplay blocked — TikTok-style tap for sound chip */}
+      {soundBlocked && (
+        <button
+          className="mx-auto flex items-center gap-2 rounded-full bg-[#FFD166] px-4 py-2 text-[13px] font-extrabold text-black shadow-lg"
+          onClick={enableRoomSound}
+          aria-label="Tap for sound"
+        >
+          <Volume2 size={15} /> Tap for sound
+        </button>
+      )}
+
       {/* speaker grid */}
       <div className="flex-1 overflow-y-auto px-4 pb-2 pt-3 app-scroll">
         <div className="grid grid-cols-3 gap-3">
@@ -425,6 +463,7 @@ export function RoomScreen({
               canModerate={isHostLike && p.userId !== me?.id}
               onModerate={(action) => void moderate(action, p.userId)}
               onGift={() => setGiftTarget(p)}
+              onAutoplayBlocked={() => setSoundBlocked(true)}
             />
           ))}
           {Array.from({ length: Math.max(0, MAX_SPEAKERS - Math.min(speakers.length, MAX_SPEAKERS)) }).map((_, i) => (
@@ -679,6 +718,7 @@ function SpeakerTile({
   canModerate,
   onModerate,
   onGift,
+  onAutoplayBlocked,
 }: {
   user: RoomUserState
   stream?: MediaStream
@@ -686,6 +726,7 @@ function SpeakerTile({
   canModerate: boolean
   onModerate: (action: string) => void
   onGift: () => void
+  onAutoplayBlocked: () => void
 }) {
   const [menu, setMenu] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -694,8 +735,14 @@ function SpeakerTile({
     const el = audioRef.current
     if (!el || !stream) return
     el.srcObject = stream
-    void el.play().catch(() => {})
-  }, [stream])
+    void el.play().catch(() => {
+      // autoplay policy — mute so playback starts, then surface the
+      // room-level tap-for-sound chip
+      el.muted = true
+      void el.play().catch(() => {})
+      onAutoplayBlocked()
+    })
+  }, [stream, onAutoplayBlocked])
 
   const roleBadge =
     user.role === 'host' ? <Crown size={14} className="text-[#FFD166]" /> : user.role === 'cohost' ? <Shield size={13} className="text-[#7DD3FC]" /> : null

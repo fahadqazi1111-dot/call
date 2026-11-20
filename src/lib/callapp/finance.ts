@@ -332,6 +332,9 @@ async function deliverGift(args: {
   const payload = {
     ok: true,
     sendId: send.id,
+    // the card checkout's local echo carries the PAYMENT id — relaying it lets
+    // clients dedupe the echo against this relayed event (single animation)
+    paymentId: paymentId,
     gift: {
       id: gift.id,
       name: gift.name,

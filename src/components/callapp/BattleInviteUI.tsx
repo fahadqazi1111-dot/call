@@ -112,16 +112,20 @@ function BattleParticipantScreen({ liveId, battleId, onClose }: { liveId: string
     let disposed = false
     const run = async () => {
       try {
-        const stream = await liveManager.startPublishing(liveId, true)
+        const stream = await liveManager.startPublishing(liveId, true, me?.id ?? '', {
+          id: me?.id ?? '',
+          name: me?.name ?? '',
+          avatarKey: me?.avatarKey ?? 0,
+          avatarUrl: me?.avatarUrl ?? null,
+        })
         if (disposed) return
-        liveManager.registerAsPublisher(liveId, me?.id ?? '')
+        liveManager.registerAsPublisher(liveId, me?.id ?? '', { id: me?.id ?? '', name: me?.name ?? '' })
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           void videoRef.current.play().catch(() => {})
         }
         unsub = liveManager.subscribe((s) => setStreams(s.publisherStreams))
       } catch {
-        alert('Camera and microphone are required for the battle')
         onClose()
       }
     }

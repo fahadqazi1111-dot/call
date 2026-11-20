@@ -25,8 +25,23 @@ function readBody(req: IncomingMessage, cb: (raw: string) => void) {
 }
 
 const relayServer = createServer((req, res) => {
-  // ---- internal GET endpoint: current viewers of a live (for the host's
-  // "pick from audience" battle sheet). lives are memory state here.
+  // ---- internal GET endpoint: which live sessions currently have a CONNECTED
+  // host socket. The backend uses this to auto-end ghost broadcasts (host
+  // closed the tab / camera failed) so viewers never hang on an endless
+  // preloader for a dead stream.
+  if (req.url && req.url.startsWith('/internal/live-hosts')) {
+    if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+      res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
+      return
+    }
+    const ids: string[] = []
+    for (const [liveId, hosts] of liveHosts) {
+      // a host entry only exists while at least one host socket is in the room
+      if (hosts.size > 0) ids.push(liveId)
+    }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, liveIds: ids }))
+    return
+  }
   if (req.url && req.url.startsWith('/internal/live-viewers')) {
     if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
       res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))

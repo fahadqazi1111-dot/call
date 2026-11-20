@@ -5,6 +5,7 @@ import { Clapperboard, Plus, Eye, Users, Loader2, Radio, ChevronUp, Swords } fro
 import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
+import { liveManager } from '@/lib/callapp/liveManager'
 import { Avatar } from './Avatar'
 import { AdBanner } from './GiftsUI'
 import { LiveHostScreen } from './LiveHostScreen'
@@ -51,6 +52,7 @@ export function LiveTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop'
   if (watching) {
     return (
       <LiveViewerScreen
+        key={watching.id}
         session={watching}
         onClose={() => {
           setWatching(null)
@@ -283,7 +285,7 @@ function LiveReels({
               </button>
             ) : isActive ? (
               /* the snapped-in session: the real viewer joins the stream */
-              <LiveViewerScreen session={s} embedded onClose={onEnded} />
+              <LiveViewerScreen key={s.id} session={s} embedded onClose={onEnded} />
             ) : (
               /* off-screen sessions: poster until snapped into view */
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
@@ -323,21 +325,75 @@ function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (titl
   const [mode, setMode] = useState<'solo' | 'battle'>('solo')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [errorHint, setErrorHint] = useState('')
+  const [perm, setPerm] = useState<'unknown' | 'ok' | 'failed'>('unknown')
+
+  /** Explain a getUserMedia failure in plain language (the browser error name
+   *  is the ground truth — permission prompts, OS-level device locks, iframe
+   *  policies and missing hardware all surface differently). */
+  const describeCamError = (name: string): { msg: string; hint: string } => {
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return {
+        msg: 'Camera & microphone access was denied.',
+        hint:
+          window.self !== window.top
+            ? 'You are viewing CALL inside a preview pane — embedded frames can be blocked even when the site permission is granted. Open CALL in its own browser tab and try again.'
+            : 'Allow camera + microphone for this site in the address bar (padlock icon), then tap Go live again.',
+      }
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return {
+        msg: 'Your camera is busy in another app.',
+        hint: 'Close Zoom / Meet / FaceTime or any other tab using the camera, then tap Go live again.',
+      }
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return { msg: 'No camera or microphone was found on this device.', hint: 'Connect a camera and try again.' }
+    }
+    if (name === 'OverconstrainedError') {
+      return { msg: 'The camera does not support the broadcast quality.', hint: 'Try a different camera or device.' }
+    }
+    return {
+      msg: 'Camera & microphone could not start.',
+      hint: window.self !== window.top ? 'Open CALL in its own browser tab and try again.' : 'Reload the page and try again.',
+    }
+  }
 
   const start = async () => {
     setBusy(true)
     setError('')
+    setErrorHint('')
     try {
+      // PREFLIGHT — capture camera/mic FIRST, inside this tap, BEFORE creating
+      // the session. The browser permission prompt appears right here; a
+      // failure never creates a ghost broadcast row.
+      const pre = await liveManager.preflightCamera()
+      if (!pre.ok) {
+        setPerm('failed')
+        const { msg, hint } = describeCamError(pre.errorName ?? 'UnknownError')
+        setError(msg)
+        setErrorHint(hint)
+        setBusy(false)
+        return
+      }
+      setPerm('ok')
       await onStart(title.trim() || 'Live', mode)
     } catch (e) {
+      liveManager.discardPreflight()
       toast.error((e as Error).message || 'Could not start the live')
       setError((e as Error).message)
       setBusy(false)
     }
   }
 
+  const cancel = () => {
+    // release the warmed camera when the user backs out without going live
+    liveManager.discardPreflight()
+    onClose()
+  }
+
   return (
-    <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50" onClick={onClose}>
+    <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/50" onClick={cancel}>
       <div className="rounded-t-[24px] border-t border-cline bg-white p-5 pb-10" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Go live">
         <h3 className="flex items-center gap-2 text-lg font-extrabold text-cink">
           <Radio size={20} className="text-[#E1306C]" /> Start a live broadcast
@@ -368,7 +424,15 @@ function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (titl
             ? 'You broadcast, viewers watch and send gifts.'
             : 'Invite 1 friend (1v1) or 3 friends (2v2) after going live. Viewers gift to score sides.'}
         </p>
-        {error && <p className="mt-3 text-[13px] font-semibold text-cred">{error}</p>}
+        {error && (
+          <div className="mt-3 rounded-[14px] border border-[#F5C2C7]/60 bg-[#FEF1F0] px-3.5 py-3">
+            <div className="text-[13px] font-bold text-cred">{error}</div>
+            {errorHint && <div className="mt-1 text-[12px] leading-[17px] text-[#8a4a4e]">{errorHint}</div>}
+          </div>
+        )}
+        {!error && perm === 'ok' && (
+          <p className="mt-3 flex items-center gap-1.5 text-[12px] font-semibold text-cgreen">Camera & microphone ready — starting…</p>
+        )}
         <button
           className="mt-5 h-[52px] w-full rounded-[16px] bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] text-[15px] font-bold text-white disabled:opacity-40"
           disabled={busy}

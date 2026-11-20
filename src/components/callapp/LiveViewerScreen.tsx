@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { X, Send, Gift, Eye, Swords, Loader2, Check, Trophy, SmilePlus, Hand } from 'lucide-react'
+import { X, Send, Gift, Eye, Swords, Loader2, Check, Trophy, SmilePlus, Hand, WifiOff, Volume2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -52,6 +52,13 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     remaining: number | null
   }>({ id: '', phase: 'none', participants: [], endsAt: null, sideScores: [0, 0], winnerSide: null, remaining: null })
   const animKey = useRef(0)
+  /* host-offline watchdog: a ghost broadcast (host tab closed / camera dead)
+   * never delivers a stream — after a grace period we stop the endless
+   * preloader and tell the viewer what happened instead. */
+  const [streamReady, setStreamReady] = useState(false)
+  const [hostOffline, setHostOffline] = useState(false)
+  /** autoplay with sound can be blocked — start muted and offer a tap-to-unmute */
+  const [tapForSound, setTapForSound] = useState(false)
   /* TikTok-style floating reactions + double-tap hearts */
   const [reacts, setReacts] = useState<ReactionFloat[]>([])
   const [hearts, setHearts] = useState<HeartBurst[]>([])
@@ -79,16 +86,20 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
 
   /** Play one gift animation exactly once per transaction. Used by the
    * relayed `live:gift` event AND by the local send fallback — so the gifter
-   * always sees their own animation instantly even if the relay is slow. */
+   * always sees their own animation instantly even if the relay is slow.
+   * Dedupe covers BOTH ids: sendId (gift-send row) and paymentId (card
+   * checkout echo) so one transaction can never render twice. */
   const pushGiftAnim = useCallback((payload: {
     sendId?: string
+    paymentId?: string
     gift: { name: string; emoji: string; animKind: string; sound?: string; durationMs: number; priceUsd?: number; imageUrl?: string | null }
     from: { id?: string; name: string }
     to: { name: string }
   }) => {
-    const dedupKey = payload.sendId || `${payload.gift.name}-${payload.from?.id ?? payload.from?.name}-${Date.now()}`
-    if (seenGiftsRef.current.has(dedupKey)) return
-    seenGiftsRef.current.add(dedupKey)
+    const { sendId, paymentId } = payload
+    if ((sendId && seenGiftsRef.current.has(sendId)) || (paymentId && seenGiftsRef.current.has(paymentId))) return
+    if (sendId) seenGiftsRef.current.add(sendId)
+    if (paymentId) seenGiftsRef.current.add(paymentId)
     const anim = animFromPayload(payload)
     soundKit.giftEffect(payload.gift.animKind, anim.delayMs)
     setAnims((a) => [...a, anim])
@@ -105,8 +116,15 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       // bind the first publisher's stream to the video element
       const first = Object.values(s.publisherStreams)[0]
       if (first && videoRef.current && videoRef.current.srcObject !== first) {
-        videoRef.current.srcObject = first
-        void videoRef.current.play().catch(() => {})
+        const el = videoRef.current
+        el.srcObject = first
+        void el.play().catch(() => {
+          // unmuted autoplay refused — fall back to muted, offer sound later
+          el.muted = true
+          void el.play().catch(() => {})
+          setTapForSound(true)
+        })
+        setStreamReady(true)
       }
     })
     void api
@@ -119,6 +137,18 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     }
      
   }, [session.id])
+
+  /* ---------- host-offline watchdog ---------- */
+  useEffect(() => {
+    if (streamReady) return
+    const t = window.setTimeout(() => {
+      // only flag offline when STILL nothing is playing
+      if (!videoRef.current?.srcObject || (videoRef.current.srcObject as MediaStream).getVideoTracks().every((tr) => tr.readyState !== 'live')) {
+        setHostOffline(true)
+      }
+    }, 12000)
+    return () => window.clearTimeout(t)
+  }, [streamReady, session.id])
 
   /* ---------- realtime events ---------- */
   useEffect(() => {
@@ -273,6 +303,28 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
   const battleLive = battle.phase === 'live' || battle.phase === 'ended'
   const lmStreams = liveManager.snapshot().publisherStreams
 
+  const unmuteLive = () => {
+    const el = videoRef.current
+    if (!el) return
+    el.muted = false
+    void el.play().catch(() => {
+      // gesture too stale — revert to muted playback and keep the chip
+      el.muted = true
+      void el.play().catch(() => {})
+      setTapForSound(true)
+    })
+    setTapForSound(false)
+  }
+
+  /* any tap anywhere on the live also counts as the sound gesture */
+  useEffect(() => {
+    if (!tapForSound) return
+    const onGesture = () => unmuteLive()
+    document.addEventListener('pointerdown', onGesture, { once: true })
+    return () => document.removeEventListener('pointerdown', onGesture)
+     
+  }, [tapForSound])
+
   return (
     <div className={`${embedded ? 'absolute inset-0' : 'fixed inset-0 z-[80]'} bg-black text-white`}>
       <GiftAnimationLayer gifts={anims} />
@@ -315,14 +367,47 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       ) : (
         <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline autoPlay />
       )}
-      {!battleLive && (
-        <div className="absolute inset-0 -z-10 flex items-center justify-center">
+      {!battleLive && !streamReady && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
           <Loader2 className="animate-spin text-white/40" size={34} />
+          <p className="text-[12.5px] font-semibold text-white/60">Connecting to the host…</p>
+        </div>
+      )}
+
+      {/* host-offline panel — replaces the endless preloader for dead broadcasts */}
+      {!battleLive && hostOffline && !streamReady && (
+        <div className="absolute inset-0 z-[45] flex items-center justify-center bg-black/80 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-[360px] rounded-[22px] border border-white/15 bg-[#14121a] p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
+              <WifiOff size={26} className="text-white/80" />
+            </div>
+            <h3 className="mt-4 text-[16px] font-extrabold">Broadcast unavailable</h3>
+            <p className="mt-2 text-[12.5px] leading-[18px] text-white/70">
+              The host seems to have disconnected — this broadcast can no longer be watched.
+            </p>
+            <button
+              className="mt-5 h-11 w-full rounded-[14px] bg-gradient-to-r from-[#E1306C] to-[#7B3FE4] text-[13.5px] font-bold"
+              onClick={onClose}
+            >
+              Back to the feed
+            </button>
+          </div>
         </div>
       )}
 
       {/* double-tap target — sits above the video, below the top bars */}
       <div className="absolute inset-0 z-10" onClick={handleVideoTap} aria-label="Double-tap to react" />
+
+      {/* autoplay was blocked — TikTok-style tap-for-sound chip */}
+      {tapForSound && !battleLive && (
+        <button
+          className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-4 py-2.5 text-[13px] font-bold backdrop-blur"
+          onClick={unmuteLive}
+          aria-label="Tap for sound"
+        >
+          <Volume2 size={16} /> Tap for sound
+        </button>
+      )}
 
       {/* top bar — pushed below the reels feed header when embedded */}
       <div

@@ -68,6 +68,8 @@ class LiveManager {
   private pendingViewerSignals = new Map<string, SignalMsg[]>()
   /** last viewer identity, so a reconnect can silently re-join the live room */
   private _lastViewerUser: { id: string; name: string; avatarKey: number; avatarUrl: string | null } | null = null
+  /** last host identity (id required by the server's live:join handler) */
+  private _lastHostUser: { id: string; name: string; avatarKey: number; avatarUrl: string | null } = { id: '', name: '', avatarKey: 0, avatarUrl: null }
 
   subscribe(fn: Listener) {
     this.listeners.add(fn)
@@ -119,7 +121,7 @@ class LiveManager {
         const u = this._lastViewerUser
         if (u) socketClient.emit('live:join', { liveId: this.state.liveId, user: u, asHost: false })
       } else {
-        socketClient.emit('live:join', { liveId: this.state.liveId, asHost: true })
+        socketClient.emit('live:join', { liveId: this.state.liveId, user: { id: this._myId, name: this._lastHostUser.name }, asHost: true })
       }
     })
   }
@@ -132,32 +134,78 @@ class LiveManager {
 
   /* ---------------- host / participant ---------------- */
 
-  async startPublishing(liveId: string, withVideo: boolean, myId = '') {
+  /** Broadcast constraints — shared by the preflight and the real publish so
+   *  the warmed stream from the "Go live" tap can be reused directly. */
+  private static readonly PUB_AUDIO: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true }
+  private static readonly PUB_VIDEO: MediaTrackConstraints = { width: { ideal: 720 }, height: { ideal: 1280 }, facingMode: 'user' }
+
+  /**
+   * Capture camera + mic BEFORE the session row is created (called inside the
+   * "Go live" tap, while the browser can still show its permission prompt on a
+   * user gesture). The stream is kept — startPublishing() reuses it, so the
+   * device is never opened twice. Failure returns the real browser error so
+   * the UI can explain exactly what happened (no session is created then).
+   */
+  async preflightCamera(): Promise<{ ok: boolean; errorName?: string }> {
+    try {
+      if (this.camStream && this.camStream.getVideoTracks().some((t) => t.readyState === 'live')) {
+        return { ok: true }
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: LiveManager.PUB_AUDIO,
+        video: LiveManager.PUB_VIDEO,
+      })
+      this.camStream = stream
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, errorName: e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError' }
+    }
+  }
+
+  /** Release a warmed preflight stream when the user cancels the go-live
+   *  sheet (so the camera indicator light turns off). Never touches an
+   *  active broadcast. */
+  discardPreflight() {
+    if (this.state.connected || this.state.liveId) return
+    if (this.camStream) {
+      this.camStream.getTracks().forEach((t) => t.stop())
+      this.camStream = null
+    }
+  }
+
+  async startPublishing(liveId: string, withVideo: boolean, myId = '', user?: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null }) {
     this.bindSocket()
     this._myId = myId || this._myId
+    this._lastHostUser = { id: this._myId, name: user?.name ?? this._lastHostUser.name, avatarKey: user?.avatarKey ?? 0, avatarUrl: user?.avatarUrl ?? null }
     this.state.liveId = liveId
     this.state.role = this.state.role ?? 'host'
     this.state.connected = true
-    this.camStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: withVideo
-        ? { width: { ideal: 720 }, height: { ideal: 1280 }, facingMode: 'user' }
-        : false,
-    })
+    // reuse the stream captured by preflightCamera() when its tracks are alive
+    const warm = this.camStream && this.camStream.getTracks().every((t) => t.readyState === 'live')
+    if (!warm) {
+      this.camStream = await navigator.mediaDevices.getUserMedia({
+        audio: LiveManager.PUB_AUDIO,
+        video: withVideo ? LiveManager.PUB_VIDEO : false,
+      })
+    }
     this.state.cameraOn = withVideo
-    socketClient.emit('live:join', { liveId, asHost: true })
+    // the server REQUIRES `user` on live:join (it keys presence by it) — a
+    // missing user silently drops the join and strands every viewer on a
+    // preloader forever
+    socketClient.emit('live:join', { liveId, user: this._lastHostUser, asHost: true })
     this.emit()
     return this.camStream
   }
 
   /** Battle participants reuse this after the host flow. */
-  registerAsPublisher(liveId: string, myId: string) {
+  registerAsPublisher(liveId: string, myId: string, user?: { id: string; name: string; avatarKey?: number; avatarUrl?: string | null }) {
     this.bindSocket()
     this._myId = myId
+    if (user) this._lastHostUser = { id: myId, name: user.name, avatarKey: user.avatarKey ?? 0, avatarUrl: user.avatarUrl ?? null }
     this.state.liveId = liveId
     this.state.role = 'cohost'
     this.state.connected = true
-    socketClient.emit('live:join', { liveId, asHost: true })
+    socketClient.emit('live:join', { liveId, user: { id: myId, name: this._lastHostUser.name }, asHost: true })
     this.emit()
   }
 
