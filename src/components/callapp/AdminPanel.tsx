@@ -7,6 +7,7 @@ import {
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
   Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall, Sparkles,
+  Download, Package, Database, FileJson,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -230,6 +231,61 @@ function OverviewSection() {
       <p className="pt-4 text-[12px] text-cmut">
         Use the sections on the left to manage the finance ledger, users, gifts, withdrawals, moderation, the CALL AI, ads and broadcasts.
       </p>
+      <DeploymentDownloadsCard />
+    </div>
+  )
+}
+
+/** One-click downloads of the ready-to-deploy ZIP + MySQL import file (admin only, files live in /public/downloads). */
+function DeploymentDownloadsCard() {
+  const items = [
+    {
+      href: '/downloads/call-deploy.zip',
+      file: 'call-deploy.zip',
+      Icon: Package,
+      title: 'Deploy ZIP (complete app)',
+      sub: 'Full source, assets, MySQL schema, production server + guide',
+    },
+    {
+      href: '/downloads/call-mysql.sql',
+      file: 'call-mysql.sql',
+      Icon: Database,
+      title: 'MySQL import file (phpMyAdmin)',
+      sub: '41 tables + all current data, UTC timestamps',
+    },
+    {
+      href: '/downloads/call-mysql-schema-only.sql',
+      file: 'call-mysql-schema-only.sql',
+      Icon: FileJson,
+      title: 'MySQL schema only (empty DB)',
+      sub: 'Same tables, no data — for a fresh start',
+    },
+  ]
+  return (
+    <div className="mt-5 rounded-[16px] border border-cline bg-white p-4">
+      <div className="flex items-center gap-2">
+        <Download size={17} className="text-cbrand" />
+        <h4 className="text-[13.5px] font-extrabold text-cink">Deployment package — download for your hosting</h4>
+      </div>
+      <p className="pt-1 text-[11.5px] leading-relaxed text-cmut">
+        Import the MySQL file via phpMyAdmin, upload the ZIP, then follow README-DEPLOY.md inside it. After the site is live, send the URL back so the Android/iOS app can be built.
+      </p>
+      <div className="grid gap-3 pt-3 sm:grid-cols-3">
+        {items.map(({ href, file, Icon, title, sub }) => (
+          <a
+            key={file}
+            href={href}
+            download={file}
+            className="flex items-start gap-3 rounded-[14px] border border-cline bg-[#F8FAFC] p-3 transition-colors hover:border-cbrand hover:bg-[#EFF6FF]"
+          >
+            <Icon size={18} className="mt-0.5 shrink-0 text-cbrand" />
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-bold text-cink">{title}</span>
+              <span className="block text-[11px] leading-snug text-cmut">{sub}</span>
+            </span>
+          </a>
+        ))}
+      </div>
     </div>
   )
 }
