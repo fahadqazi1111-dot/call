@@ -28,12 +28,27 @@ class SocketClient {
     const path = production ? process.env.NEXT_PUBLIC_SOCKET_PATH || '/socket.io/' : '/'
     const s = io(target, {
       path,
-      transports: ['websocket', 'polling'],
+      // Polling FIRST: Hostinger shared hosting (and many corporate proxies)
+      // block the WebSocket upgrade headers, so a websocket-first config fails
+      // with "WebSocket is closed before the connection is established" and
+      // retries forever. Polling works over plain HTTP through any proxy.
+      // socket.io will still TRY to upgrade to websocket after the polling
+      // connection is established — if the upgrade succeeds, we get low
+      // latency; if it fails (Hostinger blocks it), we stay on polling and
+      // everything still works (just slightly higher latency).
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      rememberUpgrade: true,
       forceNew: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 1200,
-      timeout: 10000,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 10000,
+      timeout: 15000,
+    })
+    s.on('connect_error', (err) => {
+      // Log once per attempt — avoids console spam while still being diagnosable
+      console.warn('[socket] connection error:', err.message || err)
     })
     s.on('connect', () => {
       this.connected = true
