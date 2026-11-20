@@ -13,32 +13,28 @@ class SocketClient {
 
   private ensure(): Socket {
     if (this.socket) return this.socket
-    // Production: NEXT_PUBLIC_SOCKET_URL is baked at build time (".env" sets it
-    // to "/" with NEXT_PUBLIC_SOCKET_PATH=/socket.io/) — the socket.io server
-    // runs inside the SAME Node process as Next.js (deploy/production-server.js).
+    // Production: the socket.io server runs inside the SAME Node process as
+    // Next.js (deploy/production-server.js) — always connect same-origin at
+    // /socket.io/. NEXT_PUBLIC_SOCKET_URL (".env", baked at build time) keeps
+    // compatibility with hosts that serve the API from another origin; even
+    // when it is missing we still connect same-origin so realtime works on
+    // every production deploy.
     //
-    // Dev sandbox: no env vars are set, so we keep the gateway form — the URL
-    // carries the XTransformPort query param and the socket.io path is '/'
-    // (derived from the URI), exactly as the Caddy gateway expects.
-    const production = !!process.env.NEXT_PUBLIC_SOCKET_URL
-    const s = production
-      ? io(process.env.NEXT_PUBLIC_SOCKET_URL, {
-          path: process.env.NEXT_PUBLIC_SOCKET_PATH || '/socket.io/',
-          transports: ['websocket', 'polling'],
-          forceNew: true,
-          reconnection: true,
-          reconnectionAttempts: Infinity,
-          reconnectionDelay: 1200,
-          timeout: 10000,
-        })
-      : io('/?XTransformPort=3003', {
-          transports: ['websocket', 'polling'],
-          forceNew: true,
-          reconnection: true,
-          reconnectionAttempts: Infinity,
-          reconnectionDelay: 1200,
-          timeout: 10000,
-        })
+    // Dev sandbox: no production env vars are set, so we keep the gateway
+    // form — the URL carries the XTransformPort query param and the socket.io
+    // path is '/' (derived from the URI), exactly as the Caddy gateway expects.
+    const production = process.env.NODE_ENV === 'production'
+    const target = production ? process.env.NEXT_PUBLIC_SOCKET_URL || '/' : '/?XTransformPort=3003'
+    const path = production ? process.env.NEXT_PUBLIC_SOCKET_PATH || '/socket.io/' : '/'
+    const s = io(target, {
+      path,
+      transports: ['websocket', 'polling'],
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1200,
+      timeout: 10000,
+    })
     s.on('connect', () => {
       this.connected = true
       if (this.userId) {

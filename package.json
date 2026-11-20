@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "prisma generate --schema prisma/schema.mysql.prisma && next build --webpack && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && node scripts/copy-production-runtime.js",
+    "build": "node scripts/check-env.js && prisma generate --schema prisma/schema.mysql.prisma && next build --webpack && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && node scripts/copy-production-runtime.js",
     "start": "node .next/standalone/production-server.js",
     "lint": "eslint .",
     "db:push": "prisma db push --accept-data-loss",

@@ -24,7 +24,10 @@ export async function POST(req: Request) {
     await db.user.update({ where: { id: user.id }, data: { lastSeen: new Date() } })
     await ensureWallet(user.id)
     return NextResponse.json({ ok: true, token: signToken(user.id), user: publicUser(user) })
-  } catch {
+  } catch (e) {
+    // Log the real cause — on hosting panels this lands in stderr and makes
+    // DB misconfiguration (missing/wrong DATABASE_URL) diagnosable.
+    console.error('[auth/password/login] failed:', e)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
 }
