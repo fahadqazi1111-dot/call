@@ -1042,7 +1042,14 @@ io.on('connection', (socket: Socket) => {
   if (!opts.httpServer) {
     const port = opts.port ?? 3003
     httpServer.listen(port, () => console.log(`CALL signaling service on port ${port}`))
-    process.on('SIGTERM', () => httpServer.close(() => process.exit(0)))
-    process.on('SIGINT', () => httpServer.close(() => process.exit(0)))
+    // graceful stop, but NEVER hang forever holding the port (a stuck socket
+    // would leave a zombie that blocks the respawn) — force-exit after 2s
+    const stop = () => {
+      httpServer.close(() => process.exit(0))
+      relayServer.close(() => process.exit(0))
+      setTimeout(() => process.exit(0), 2000).unref()
+    }
+    process.on('SIGTERM', stop)
+    process.on('SIGINT', stop)
   }
 }

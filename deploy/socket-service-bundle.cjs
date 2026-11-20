@@ -20165,6 +20165,7 @@ function createCallService(opts = {}) {
   });
   if (opts.relayPort !== null) {
     const relayPort = opts.relayPort ?? 3004;
+    relayServer.on("error", (e) => console.error(`CALL relay listen failed on 127.0.0.1:${relayPort}:`, e.message));
     relayServer.listen(relayPort, "127.0.0.1", () => console.log(`CALL internal relay on 127.0.0.1:${relayPort}`));
   }
   const VERIFY_URL = process.env.CALL_APP_URL || "http://127.0.0.1:3000";
@@ -20916,7 +20917,12 @@ function createCallService(opts = {}) {
   if (!opts.httpServer) {
     const port = opts.port ?? 3003;
     httpServer.listen(port, () => console.log(`CALL signaling service on port ${port}`));
-    process.on("SIGTERM", () => httpServer.close(() => process.exit(0)));
-    process.on("SIGINT", () => httpServer.close(() => process.exit(0)));
+    const stop = () => {
+      httpServer.close(() => process.exit(0));
+      relayServer.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 2000).unref();
+    };
+    process.on("SIGTERM", stop);
+    process.on("SIGINT", stop);
   }
 }
