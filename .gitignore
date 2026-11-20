@@ -40,7 +40,6 @@ public/downloads/
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -69,6 +68,24 @@ agent-ctx/
 upload/
 
 # Generated download artifacts (user downloads via chat, not git)
-download/call-deploy.zip
-download/call-mysql.sql
-download/call-mysql-schema-only.sql
+download/
+call-deploy.zip
+
+# Dev-only screenshots (not needed for deployment)
+shots/
+
+# Dev sandbox scripts (not for production)
+.zscripts/
+
+# Docker/test build scripts (not needed for Hostinger deploy)
+tests/
+
+# WebSocket demo examples (not part of the app)
+examples/
+
+# Dev sandbox gateway config (Hostinger doesn't use Caddy)
+Caddyfile
+
+# Dev-only scripts
+scripts/dev-keepalive.ts
+scripts/gift-test-fixture.ts
