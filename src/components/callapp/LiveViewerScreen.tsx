@@ -8,6 +8,7 @@ import { useApp } from '@/lib/callapp/store'
 import { liveManager, battleManager } from '@/lib/callapp/liveManager'
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
+import { preloadGiftMedia } from '@/lib/callapp/giftMedia'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { BattleVideoLayout } from './LiveHostScreen'
@@ -109,6 +110,8 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
   /* ---------- join as viewer ---------- */
   useEffect(() => {
     if (!me) return
+    // warm the gift media (SFX buffers + video clips) while the stream starts
+    const warmT = window.setTimeout(() => preloadGiftMedia(), 1200)
     let unsub: (() => void) | null = null
     void liveManager.joinAsViewer(session.id, me)
     unsub = liveManager.subscribe((s) => {
@@ -132,6 +135,7 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
       .then((res) => setComments(res.comments))
       .catch(() => {})
     return () => {
+      window.clearTimeout(warmT)
       unsub?.()
       void liveManager.leave()
     }
@@ -304,6 +308,9 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
   const lmStreams = liveManager.snapshot().publisherStreams
 
   const unmuteLive = () => {
+    // the same gesture also unlocks the WebAudio context — gift SFX must be
+    // audible for this viewer from now on (never the silent/synth fallback)
+    soundKit.unlock()
     const el = videoRef.current
     if (!el) return
     el.muted = false

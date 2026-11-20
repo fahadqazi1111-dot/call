@@ -27,6 +27,10 @@ const SFX_VOLUME: Record<string, number> = {
   fireworks: 0.9,
 }
 
+/** SFX decoded into memory (primeGiftSfx) — instant, autoplay-proof playback. */
+const sfxBuffers = new Map<string, AudioBuffer>()
+let priming = false
+
 /** Tiny WebAudio ringtones/UX sounds - free, no assets needed. */
 class SoundKit {
   private ctx: AudioContext | null = null
@@ -59,6 +63,9 @@ class SoundKit {
     if (!ctx) return
     this.unlocked = true
     void ctx.resume().catch(() => {})
+    // first gesture anywhere — start decoding the gift SFX into buffers so
+    // the host/listeners hear the real effect instantly (never the synth)
+    void this.primeGiftSfx().catch(() => {})
     // tiny silent blip — some engines only commit the resume after a sound
     try {
       const osc = ctx.createOscillator()
@@ -250,16 +257,68 @@ class SoundKit {
   }
 
   /**
+   * Fetch + decode every gift SFX into AudioBuffers. Called on the first
+   * user gesture (unlock) and when a live/room screen opens (giftMedia).
+   * With buffers in memory the gift sound plays INSTANTLY on every client
+   * (host/listeners included) through WebAudio — no MP3 fetch at play time,
+   * no HTMLAudio autoplay rejection, no falling back to the wrong synth beeps.
+   */
+  async primeGiftSfx(): Promise<void> {
+    if (priming) return
+    priming = true
+    try {
+      const ctx = this.ac()
+      if (!ctx) return
+      await Promise.all(
+        Object.entries(GIFT_SFX).map(async ([kind, src]) => {
+          if (sfxBuffers.has(kind) || this.sfxFailed.has(kind)) return
+          try {
+            const res = await fetch(src, { cache: 'force-cache' })
+            if (!res.ok) throw new Error(String(res.status))
+            const buf = await ctx.decodeAudioData(await res.arrayBuffer())
+            sfxBuffers.set(kind, buf)
+          } catch {
+            /* decode failed — keep the per-kind fallbacks below */
+          }
+        }),
+      )
+    } finally {
+      priming = false
+    }
+  }
+
+  /** Buffer-backed playback — returns false when no buffer is ready yet. */
+  private playSfxBuffer(animKind: string): boolean {
+    const ctx = this.ac()
+    const buf = sfxBuffers.get(animKind)
+    if (!ctx || !buf) return false
+    try {
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      const g = ctx.createGain()
+      g.gain.value = SFX_VOLUME[animKind] ?? 0.85
+      src.connect(g).connect(ctx.destination)
+      src.start()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Per-gift cinematic sound, matched to the gift's animKind.
-   * Prefers the real downloaded SFX file (roar/engine/chime...), falls back
-   * to the synthesized effect when the file is missing or fails to play.
-   * `delayMs` syncs the sound with the TikTok banner-then-animation beat.
+   * Prefers the decoded AudioBuffer (instant), then the MP3 file, then the
+   * synthesized effect. `delayMs` syncs the sound with the TikTok
+   * banner-then-animation beat.
    */
   giftEffect(animKind = 'generic', delayMs = 0) {
     const src = GIFT_SFX[animKind]
     if (src && !this.sfxFailed.has(animKind)) {
       this.sfxTimers.push(
         window.setTimeout(() => {
+          // 1) decoded buffer — instant and autoplay-proof
+          if (this.playSfxBuffer(animKind)) return
+          // 2) not decoded yet — play the file (also primes it for next time)
           this.playSfx(animKind, src)
         }, Math.max(0, delayMs)),
       )
@@ -283,10 +342,12 @@ class SoundKit {
         this.giftEffectSynth(animKind)
       }
       void audio.play().catch(() => {
-        this.giftEffectSynth(animKind)
+        // HTMLAudio blocked by the autoplay policy — the decoded buffer
+        // (WebAudio) still plays once the context is running; synth as last resort
+        if (!this.playSfxBuffer(animKind)) this.giftEffectSynth(animKind)
       })
     } catch {
-      this.giftEffectSynth(animKind)
+      if (!this.playSfxBuffer(animKind)) this.giftEffectSynth(animKind)
     }
   }
 

@@ -11,6 +11,7 @@ import { useApp } from '@/lib/callapp/store'
 import { roomManager, type RoomManagerState } from '@/lib/callapp/roomManager'
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
+import { preloadGiftMedia } from '@/lib/callapp/giftMedia'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { InviteUsersSheet, type PickPerson } from './UserSearchSheet'
@@ -64,6 +65,8 @@ export function RoomScreen({
 
   /** user gesture — unmute + play every room audio element */
   const enableRoomSound = () => {
+    // the same gesture unlocks WebAudio — gift SFX stay audible for everyone
+    soundKit.unlock()
     const els = rootRef.current?.querySelectorAll('audio') ?? []
     els.forEach((el) => {
       el.muted = false
@@ -84,6 +87,8 @@ export function RoomScreen({
   /* ---------- join + bind ---------- */
   useEffect(() => {
     if (!me) return
+    // warm the gift media (SFX buffers + video clips) while the room joins
+    const warmT = window.setTimeout(() => preloadGiftMedia(), 1200)
     const unsub = roomManager.subscribe((s) => setState(s))
     let disposed = false
     const run = async () => {
@@ -116,6 +121,7 @@ export function RoomScreen({
     }
     void run()
     return () => {
+      window.clearTimeout(warmT)
       disposed = true
       unsub()
       roomManager.scheduleLeave()

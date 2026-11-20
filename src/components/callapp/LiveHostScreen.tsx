@@ -10,6 +10,7 @@ import { useApp } from '@/lib/callapp/store'
 import { liveManager, battleManager, type LiveManagerState } from '@/lib/callapp/liveManager'
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
+import { preloadGiftMedia } from '@/lib/callapp/giftMedia'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { BattleInviteSheet, type Person } from './BattleInviteSheet'
@@ -169,9 +170,13 @@ export function LiveHostScreen({
    * "Try again" in the error panel re-invokes startBroadcast(true) directly.
    * Deferred so the async publish never sets state inside the effect body. */
   useEffect(() => {
+    // warm the gift media (SFX buffers + video clips) — the host hears/see
+    // gifts instantly, in sync with the viewers
+    const warmT = window.setTimeout(() => preloadGiftMedia(), 4000)
     const t = window.setTimeout(() => void startBroadcast(false), 0)
     return () => {
       window.clearTimeout(t)
+      window.clearTimeout(warmT)
       unsubRef.current?.()
       unsubRef.current = null
       void liveManager.leave()
