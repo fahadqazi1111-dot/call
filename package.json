@@ -4,14 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && node scripts/copy-production-runtime.js",
+    "start": "node .next/standalone/production-server.js",
     "lint": "eslint .",
     "db:push": "prisma db push --accept-data-loss",
     "db:seed": "bun run scripts/seed.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "generate:mysql": "prisma generate --schema prisma/schema.mysql.prisma",
+    "db:push:mysql": "prisma db push --schema prisma/schema.mysql.prisma",
+    "deploy:mysql": "bun run scripts/make-mysql-schema.ts && bun run scripts/export-mysql-sql.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

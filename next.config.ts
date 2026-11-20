@@ -28,6 +28,14 @@ function startCallServiceWatchdog() {
     const dir = path.join(process.cwd(), "mini-services", "call-service");
     if (!fs.existsSync(path.join(dir, "index.ts"))) return; // standalone build — platform scripts own it
 
+    // On hosts without bun (e.g. building the deploy ZIP on the customer's
+    // Node-only hosting) the watchdog can never spawn the service — stay quiet.
+    try {
+      require("child_process").execSync("bun --version", { stdio: "ignore", timeout: 5000 });
+    } catch {
+      return;
+    }
+
     const probe = (port: number) =>
       new Promise<boolean>((resolve) => {
         const s = net.connect(port, "127.0.0.1");

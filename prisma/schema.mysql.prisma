@@ -1,0 +1,757 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String         @id @default(cuid())
+  phone            String         @unique
+  email            String?        @unique
+  emailVerified    Boolean        @default(false)
+  passwordHash     String? @db.Text
+  googleId         String?        @unique
+  role             String         @default("user") @db.Text // user | admin | team
+  isOfficial       Boolean        @default(false) // CALL Official system account (welcome messages, broadcasts)
+  blocked          Boolean        @default(false)
+  name             String @db.Text
+  username         String         @unique // globally unique handle, lowercase a-z0-9_ (3-20 chars)
+  usernameChangedAt DateTime? // last username change; first change allowed 7 days after signup, then 1 per week
+  about            String         @default("Available on CALL") @db.Text
+  avatarKey        Int            @default(0)
+  avatarUrl        String? @db.Text
+  allowNonContacts Boolean        @default(false) // privacy: allow message requests from people not in contacts
+  createdAt        DateTime       @default(now())
+  lastSeen         DateTime       @default(now())
+  contacts         Contact[]      @relation("ContactOwner")
+  convA            Conversation[] @relation("ConvA")
+  convB            Conversation[] @relation("ConvB")
+  messages         Message[]      @relation("MsgSender")
+  callsMade        Call[]         @relation("CallCaller")
+  callsRecv        Call[]         @relation("CallCallee")
+  roomsHosted      VoiceRoom[]    @relation("RoomHost")
+  livesHosted      LiveSession[]  @relation("LiveHost")
+  withdrawals      Withdrawal[]   @relation("UserWithdrawals")
+  stories          Story[]        @relation("UserStories")
+  storyViews       StoryView[]    @relation("UserStoryViews")
+  wallet           Wallet?
+  bankAccounts     BankAccount[]
+  payments         Payment[]      @relation("UserPayments")
+  giftSent         GiftSend[]     @relation("GiftSender")
+  giftReceived     GiftSend[]     @relation("GiftRecipient")
+  adCampaigns      Ad[]           @relation("AdOwner")
+  broadcastsSent   Broadcast[]    @relation("BroadcastSender")
+  convStates       ConversationState[] @relation("ConvStateOwner")
+  messageHides     MessageHide[]       @relation("MsgHideOwner")
+  blocksIssued     UserBlock[]         @relation("BlocksIssued")
+  blocksReceived   UserBlock[]         @relation("BlocksReceived")
+  reportsFiled     UserReport[]        @relation("ReportsFiled")
+  reportsReceived  UserReport[]        @relation("ReportsReceived")
+  groupsOwned      Group[]             @relation("GroupOwner")
+  groupMemberships GroupMember[]       @relation("GroupMembership")
+  groupMessages    GroupMessage[]      @relation("GroupMsgSender")
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String @db.Text
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String
+  code      String @db.Text
+  purpose   String   @default("verify") @db.Text // verify | reset
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  ownerId   String
+  owner     User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String @db.Text
+  phone     String
+  createdAt DateTime @default(now())
+
+  @@unique([ownerId, phone])
+}
+
+model Conversation {
+  id            String    @id @default(cuid())
+  userAId       String
+  userA         User      @relation("ConvA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId       String
+  userB         User      @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime  @default(now())
+  messages      Message[]
+  states        ConversationState[]
+
+  @@unique([userAId, userBId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String @db.Text
+  sender         User         @relation("MsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+  type           String @db.Text // text | voice | call | image
+  content        String @db.Text // text body, media id, or call summary json
+  duration       Int? // voice seconds
+  createdAt      DateTime     @default(now())
+  deliveredAt    DateTime? // reached the recipient's device
+  readAt         DateTime?
+  deletedAt      DateTime? // "unsent for everyone" — content is wiped, tombstone remains
+  forwarded      Boolean      @default(false)
+  hides          MessageHide[]
+
+  @@index([conversationId, createdAt])
+}
+
+/** Per-user "delete for me" tombstones — the message stays for the other side. */
+model MessageHide {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("MsgHideOwner", fields: [userId], references: [id], onDelete: Cascade)
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, messageId])
+  @@index([userId])
+}
+
+/**
+ * ==================== USER SAFETY (block / restrict / report) ====================
+ * Per-user conversation state (archive, mute, restrict, cleared history, hidden).
+ * UserBlock cuts messaging + calls both ways once either side blocks.
+ * UserReport feeds the admin moderation queue (App Store compliance).
+ */
+
+model ConversationState {
+  id              String       @id @default(cuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation("ConvStateOwner", fields: [userId], references: [id], onDelete: Cascade)
+  archived        Boolean      @default(false)
+  muted           Boolean      @default(false)
+  restricted      Boolean      @default(false)
+  clearedBeforeAt DateTime?
+  deleted         Boolean      @default(false)
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([conversationId, userId])
+}
+
+model UserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blocker   User     @relation("BlocksIssued", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model UserReport {
+  id         String    @id @default(cuid())
+  reporterId String @db.Text
+  reporter   User      @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId String
+  reported   User      @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reason     String @db.Text // spam | harassment | inappropriate | scam | other
+  details    String? @db.Text
+  messageId  String? @db.Text
+  status     String    @default("open") // open | resolved | dismissed
+  adminNote  String? @db.Text
+  resolvedBy String? @db.Text
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([status])
+  @@index([reportedId])
+}
+
+model Call {
+  id          String    @id @default(cuid())
+  callerId    String
+  caller      User      @relation("CallCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  calleeId    String
+  callee      User      @relation("CallCallee", fields: [calleeId], references: [id], onDelete: Cascade)
+  type        String @db.Text // voice | video
+  status      String @db.Text // answered | declined | missed | no-answer
+  durationSec Int       @default(0)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+
+  @@index([callerId, startedAt])
+  @@index([calleeId, startedAt])
+}
+
+/**
+ * ==================== WALLET (REAL MONEY — NO COINS) ====================
+ * available  — withdrawable creator earnings (verified gifts/room income only)
+ * reserved   — locked into pending withdrawal requests (prevents double spend)
+ */
+
+model Wallet {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  available      Float    @default(0)
+  reserved       Float    @default(0)
+  totalReceived  Float    @default(0) // gross gift value received
+  totalEarned    Float    @default(0) // net creator earnings credited
+  totalWithdrawn Float    @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+/** Centralized append-only financial ledger. Every balance change lives here. */
+model LedgerEntry {
+  id             String   @id @default(cuid())
+  userId         String
+  kind           String @db.Text // gift_received | room_income | withdrawal_hold | withdrawal_release | withdrawal_paid | admin_adjustment | ad_campaign_charge
+  direction      String @db.Text // credit | debit
+  amount         Float
+  currency       String   @default("USD") @db.Text
+  availableAfter Float
+  reservedAfter  Float
+  refType        String? @db.Text
+  refId          String? @db.Text
+  note           String   @default("") @db.Text
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/**
+ * Payments — every real-money checkout (gift, room entry, ad campaign).
+ * status: pending | successful | failed | cancelled | refunded
+ * provider: stripe | sandbox (sandbox = clearly-labeled test mode, isTest=true)
+ */
+model Payment {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  provider    String @db.Text // stripe | sandbox
+  providerRef String? @db.Text // checkout session / payment intent id
+  purpose     String @db.Text // gift | room_entry | ad_campaign
+  status      String    @default("pending")
+  amount      Float
+  currency    String    @default("USD") @db.Text
+  feeAmount   Float     @default(0) // provider processing fee, kept separately identifiable
+  meta        String    @default("{}") @db.Text // JSON: giftId, toUserId, context, roomId, liveId, battleId, battleSide, campaignId
+  isTest      Boolean   @default(false) // sandbox transactions never count as real revenue
+  clientKey   String?   @unique // client idempotency key
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+/**
+ * ==================== GIFTS (direct money prices — admin controlled) ====================
+ */
+
+model Gift {
+  id          String  @id @default(cuid())
+  name        String @db.Text
+  emoji       String @db.Text // visual anchor
+  imageUrl    String? @db.Text // gift image (uploaded / generated)
+  description String  @default("") @db.Text
+  animKind    String @db.Text // rose | heart | flower | crown | car | rocket | dragon | lion | superlion | fireworks | castle | generic
+  sound       String  @default("gift") @db.Text // soundKit key
+  category    String  @default("both") @db.Text // room | live | both
+  priceUsd    Float // real money price
+  currency    String  @default("USD") @db.Text
+  platformMap String? @db.Text // JSON platform product mapping: { android: "gift_rose", ios: "gift_rose" }
+  durationMs  Int     @default(2200)
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+  sends       GiftSend[]
+}
+
+model GiftSend {
+  id           String   @id @default(cuid())
+  giftId       String @db.Text
+  gift         Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  senderId     String
+  sender       User     @relation("GiftSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId  String
+  recipient    User     @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  context      String @db.Text // room | live | battle
+  roomId       String?
+  liveId       String?
+  battleId     String? @db.Text
+  battleSide   Int?
+  grossAmount  Float // verified payment value
+  commission   Float    @default(0) // platform share
+  feeAmount    Float    @default(0) // payment processing fee
+  netAmount    Float    @default(0) // credited to creator
+  currency     String   @default("USD") @db.Text
+  paymentId    String? @db.Text
+  isTest       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([roomId, createdAt])
+  @@index([liveId, createdAt])
+}
+
+/**
+ * ==================== BANK + WITHDRAWALS (bank transfer only) ====================
+ */
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holderName    String @db.Text
+  bankName      String @db.Text
+  accountNumber String @db.Text
+  iban          String? @db.Text
+  swift         String? @db.Text
+  countryCode   String @db.Text
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Withdrawal {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation("UserWithdrawals", fields: [userId], references: [id], onDelete: Cascade)
+  amount        Float
+  currency      String    @default("USD") @db.Text
+  method        String    @default("bank") @db.Text // bank transfer is the only method
+  bankAccountId String? @db.Text
+  bankDetails   String    @default("{}") @db.Text // snapshot of bank details at request time
+  status        String    @default("pending") // pending | under_review | approved | rejected | paid
+  adminNote     String    @default("") @db.Text
+  transferRef   String? @db.Text // bank transfer reference recorded when marking paid
+  reviewedBy    String? @db.Text
+  reviewedAt    DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+/**
+ * ==================== STORIES ====================
+ */
+
+model Story {
+  id          String          @id @default(cuid())
+  userId      String
+  author      User            @relation("UserStories", fields: [userId], references: [id], onDelete: Cascade)
+  groupId     String // sequential clips of one story share a groupId
+  clipIndex   Int             @default(0)
+  kind        String @db.Text // photo | video | text | voice
+  mediaId     String? @db.Text
+  text        String? @db.Text // caption / text-story body
+  overlayJson String? @db.Text // JSON [{type:'text'|'emoji', text, x, y, size, color}]
+  bgColor     String          @default("#2F5BE0") @db.Text
+  durationMs  Int             @default(5000)
+  privacy     String          @default("contacts") @db.Text // contacts | all (all is capped to contacts by the feed gate)
+  createdAt   DateTime        @default(now())
+  expiresAt   DateTime
+  views       StoryView[]
+  reactions   StoryReaction[]
+
+  @@index([userId, expiresAt])
+  @@index([groupId])
+}
+
+model StoryView {
+  id        String   @id @default(cuid())
+  storyId   String
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewerId  String
+  viewer    User     @relation("UserStoryViews", fields: [viewerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([storyId, viewerId])
+  @@index([storyId])
+}
+
+model StoryReaction {
+  id        String   @id @default(cuid())
+  storyId   String
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  userId    String
+  emoji     String @db.Text
+  createdAt DateTime @default(now())
+
+  @@unique([storyId, userId])
+}
+
+/**
+ * ==================== VOICE ROOMS ====================
+ */
+
+model VoiceRoom {
+  id           String            @id @default(cuid())
+  hostId       String @db.Text
+  host         User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  title        String @db.Text
+  description  String            @default("") @db.Text
+  coverUrl     String? @db.Text
+  isPaid       Boolean           @default(false)
+  entryFee     Float             @default(0) // USD — direct payment at entry
+  status       String            @default("live") // live | ended
+  createdAt    DateTime          @default(now())
+  endedAt      DateTime?
+  participants RoomParticipant[]
+  messages     RoomMessage[]
+
+  @@index([status, createdAt])
+}
+
+model RoomParticipant {
+  id         String    @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String
+  role       String    @default("listener") @db.Text // host | cohost | speaker | listener
+  muted      Boolean   @default(false)
+  handRaised Boolean   @default(false)
+  /** host invited this listener onto the mic — must be accepted before promoting */
+  stageInvite Boolean  @default(false)
+  invitedAt  DateTime?
+  blocked    Boolean   @default(false)
+  entryPaid  Boolean   @default(false)
+  joinedAt   DateTime  @default(now())
+  leftAt     DateTime?
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+}
+
+model RoomMessage {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String @db.Text
+  name      String @db.Text
+  text      String @db.Text
+  createdAt DateTime  @default(now())
+
+  @@index([roomId, createdAt])
+}
+
+/**
+ * ==================== VIDEO LIVE + BATTLES ====================
+ */
+
+model LiveSession {
+  id          String        @id @default(cuid())
+  hostId      String @db.Text
+  host        User          @relation("LiveHost", fields: [hostId], references: [id], onDelete: Cascade)
+  title       String        @default("Live") @db.Text
+  status      String        @default("live") // live | ended
+  mode        String        @default("solo") @db.Text // solo | battle
+  battleId    String? @db.Text
+  viewerCount Int           @default(0)
+  peakViewers Int           @default(0)
+  startedAt   DateTime      @default(now())
+  endedAt     DateTime?
+  comments    LiveComment[]
+
+  @@index([status, startedAt])
+}
+
+model LiveComment {
+  id        String      @id @default(cuid())
+  liveId    String
+  session   LiveSession @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  userId    String @db.Text
+  name      String @db.Text
+  text      String @db.Text
+  createdAt DateTime    @default(now())
+
+  @@index([liveId, createdAt])
+}
+
+model Battle {
+  id           String              @id @default(cuid())
+  mode         String @db.Text // 1v1 | 2v2
+  liveId       String
+  status       String              @default("inviting") @db.Text // inviting | countdown | live | ended
+  durationSec  Int                 @default(120)
+  startedAt    DateTime?
+  endsAt       DateTime?
+  endedAt      DateTime?
+  winnerSide   Int?
+  /** TikTok-style team points — gifts add price×100, double-taps add 1 each */
+  sideAPoints  Float               @default(0)
+  sideBPoints  Float               @default(0)
+  createdAt    DateTime            @default(now())
+  participants BattleParticipant[]
+
+  @@index([liveId])
+}
+
+model BattleParticipant {
+  id        String  @id @default(cuid())
+  battleId  String
+  battle    Battle  @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  userId    String
+  side      Int // 0 | 1 (team)
+  slot      Int // 0 | 1 (position in team)
+  name      String @db.Text
+  avatarKey Int     @default(0)
+  avatarUrl String? @db.Text
+  accepted  Boolean @default(false)
+  score     Float   @default(0) // verified gift value ($) — no separate scoring economy
+  connected Boolean @default(false)
+
+  @@unique([battleId, userId])
+}
+
+/**
+ * ==================== GROUP CHATS ====================
+ * Group conversations with multiple members. Messages are stored in
+ * GroupMessage (separate from 1:1 Message so neither feature can corrupt
+ * the other); realtime delivery goes through the group:<id> socket room.
+ */
+
+model Group {
+  id        String        @id @default(cuid())
+  name      String @db.Text
+  avatarKey Int           @default(0)
+  avatarUrl String? @db.Text
+  ownerId   String @db.Text
+  owner     User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  members   GroupMember[]
+  messages  GroupMessage[]
+
+  @@index([updatedAt])
+}
+
+model GroupMember {
+  id              String    @id @default(cuid())
+  groupId         String
+  group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation("GroupMembership", fields: [userId], references: [id], onDelete: Cascade)
+  role            String    @default("member") @db.Text // owner | admin | member
+  lastReadAt      DateTime  @default(now())
+  joinedAt        DateTime  @default(now())
+  // per-user chat state (WhatsApp semantics — only affects this member)
+  clearedBeforeAt DateTime? // "Clear chat": hide messages older than this for me only
+  deletedAt       DateTime? // "Delete chat": hide the group from my list until a new message arrives
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+model GroupMessage {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  senderId  String @db.Text
+  sender    User     @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+  type      String   @default("text") @db.Text // text | system | voice | image | video
+  content   String @db.Text
+  mediaId   String? @db.Text // uploaded media id (voice/image/video)
+  duration  Int? // voice seconds
+  createdAt DateTime @default(now())
+
+  @@index([groupId, createdAt])
+}
+
+/**
+ * ==================== NOTIFICATIONS ====================
+ */
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String @db.Text // message | missed_call | story_reaction | story_reply | room_invite | live_started | gift | gift_payment | battle_invite | battle_result | wallet | withdrawal | ad | broadcast | ai | security
+  title     String @db.Text
+  body      String   @default("") @db.Text
+  refType   String? @db.Text
+  refId     String? @db.Text
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+}
+
+/**
+ * ==================== CALL AI ASSISTANT ====================
+ */
+
+model AiConversation {
+  id        String      @id @default(cuid())
+  userId    String
+  title     String      @default("New conversation") @db.Text
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  messages  AiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String @db.Text // user | assistant
+  kind           String         @default("text") @db.Text // text | image | voice
+  text           String         @default("") @db.Text
+  mediaId        String? @db.Text
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model AiUsage {
+  id         String   @id @default(cuid())
+  userId     String
+  day        String // YYYY-MM-DD
+  textCount  Int      @default(0)
+  imageCount Int      @default(0)
+  voiceCount Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, day])
+}
+
+/**
+ * ==================== ADMIN + ADVERTISING ====================
+ */
+
+model AdminSetting {
+  key       String   @id
+  value     String @db.Text // JSON string
+  updatedAt DateTime @updatedAt
+}
+
+/** Ad packages define price + duration + placements (admin managed). */
+model AdPackage {
+  id          String @id @default(cuid())
+  name        String @db.Text
+  description String  @default("") @db.Text
+  priceUsd    Float
+  durationDays Int    @default(7)
+  placements  String  @default("chats,rooms,profile") @db.Text
+  minBudget   Float   @default(0)
+  active      Boolean @default(true)
+  order       Int     @default(0)
+  campaigns   Ad[]
+}
+
+/**
+ * Ad — admin house ads (ownerId null) AND user-created campaigns.
+ * User campaign status flow:
+ *   draft → pending_payment → payment_completed → pending_approval
+ *         → approved → active ⇄ paused → completed | rejected
+ */
+model Ad {
+  id              String     @id @default(cuid())
+  ownerId         String?
+  owner           User?      @relation("AdOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  title           String @db.Text
+  body            String     @default("") @db.Text
+  imageUrl        String? @db.Text
+  mediaKind       String     @default("image") @db.Text // image | video
+  linkUrl         String? @db.Text
+  placements      String     @default("chats") @db.Text // csv: chats | rooms | profile
+  packageId       String? @db.Text
+  pkg             AdPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  budget          Float      @default(0)
+  totalCost       Float      @default(0)
+  status          String     @default("active") // draft | pending_payment | payment_completed | pending_approval | approved | active | paused | rejected | completed
+  paymentId       String? @db.Text
+  isUserAd        Boolean    @default(false)
+  rejectionReason String? @db.Text
+  impressions     Int        @default(0)
+  clicks          Int        @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  weight          Int        @default(1)
+  /** fair rotation: when this ad was last picked by the ad server */
+  lastServedAt    DateTime?
+  serves          Int        @default(0)
+  reviewedBy      String? @db.Text
+  reviewedAt      DateTime?
+  createdAt       DateTime   @default(now())
+  events          AdEvent[]
+
+  @@index([status, createdAt])
+  @@index([ownerId])
+}
+
+/**
+ * Per-event ad tracking with viewer dedup. One row per (ad, kind, viewer, day):
+ * duplicate impressions/clicks from the same viewer on the same day are
+ * rejected by the unique index, so counters never inflate.
+ */
+model AdEvent {
+  id        String   @id @default(cuid())
+  adId      String
+  ad        Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  kind      String // impression | click
+  viewerKey String // userId or anonymous device id
+  dayKey    String // YYYY-MM-DD (UTC)
+  createdAt DateTime @default(now())
+
+  @@unique([adId, kind, viewerKey, dayKey])
+  @@index([adId, kind, createdAt])
+}
+
+/**
+ * ==================== ADMIN BROADCASTS (with delivery records) ====================
+ */
+
+model Broadcast {
+  id             String              @id @default(cuid())
+  title          String @db.Text
+  body           String              @default("") @db.Text
+  senderId       String @db.Text
+  sender         User                @relation("BroadcastSender", fields: [senderId], references: [id], onDelete: Cascade)
+  createdBy      String @db.Text
+  totalTargets   Int                 @default(0)
+  deliveredCount Int                 @default(0)
+  failedCount    Int                 @default(0)
+  status         String              @default("completed") @db.Text // processing | completed
+  createdAt      DateTime            @default(now())
+  deliveries     BroadcastDelivery[]
+}
+
+model BroadcastDelivery {
+  id          String    @id @default(cuid())
+  broadcastId String
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId      String
+  status      String    @default("sent") @db.Text // sent | failed
+  error       String? @db.Text
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([broadcastId, userId])
+}

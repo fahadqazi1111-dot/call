@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# deploy ZIP download folder (assembled locally, downloadable from the app)
+public/downloads/
 
 # vercel
 .vercel

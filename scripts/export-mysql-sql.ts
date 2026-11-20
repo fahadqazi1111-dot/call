@@ -1,0 +1,177 @@
+/**
+ * Exports the CALL database (SQLite) to a MySQL dump importable via phpMyAdmin.
+ *
+ * Output:
+ *   deploy/call-mysql-schema.sql  — DDL only (from prisma migrate diff)
+ *   deploy/call-mysql-full.sql    — DDL + all data (recommended import)
+ *
+ * Type conversion (SQLite storage -> MySQL):
+ *   DateTime  INTEGER ms  -> 'YYYY-MM-DD HH:MM:SS.mmm'  (UTC)
+ *   Boolean   0/1         -> 0/1
+ *   String    TEXT        -> escaped 'literal'
+ *   Int/Float             -> number
+ *
+ * Run:  bun run scripts/export-mysql-sql.ts
+ */
+import { readFileSync, writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { Database } from 'bun:sqlite'
+
+const SCHEMA = 'prisma/schema.prisma'
+const DB_FILE = 'db/custom.db'
+const DDL_FILE = 'deploy/call-mysql-schema.sql'
+const OUT_FULL = 'deploy/call-mysql-full.sql'
+
+/* ---------- 1. parse prisma schema: model -> { field: primitive type } ---------- */
+const src = readFileSync(SCHEMA, 'utf8')
+const lines = src.split('\n')
+const PRIMITIVES = new Set(['String', 'Int', 'Float', 'Boolean', 'DateTime', 'BigInt', 'Decimal', 'Json', 'Bytes'])
+const fieldTypes = new Map<string, Map<string, string>>() // model -> field -> type
+let currentModel: string | null = null
+for (const l of lines) {
+  const mm = l.match(/^model\s+(\w+)\s*\{/)
+  if (mm) {
+    currentModel = mm[1]
+    fieldTypes.set(currentModel, new Map())
+    continue
+  }
+  if (currentModel && l.startsWith('}')) {
+    currentModel = null
+    continue
+  }
+  if (currentModel) {
+    const fm = l.match(/^ {2}(\w+)\s+([A-Za-z]+)(\?)?\s*(\[[^\]]*\])?\s*(@|$|\s)/)
+    if (fm && PRIMITIVES.has(fm[2])) {
+      fieldTypes.get(currentModel)!.set(fm[1], fm[2])
+    }
+  }
+}
+
+/* ---------- 2. DDL (always regenerated from the mysql schema) ---------- */
+{
+  console.log('Generating DDL via prisma migrate diff ...')
+  execSync(
+    'DATABASE_URL="mysql://user:pass@127.0.0.1:3306/call" bunx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.mysql.prisma --script -o ' +
+      DDL_FILE,
+    { stdio: 'inherit', cwd: process.cwd() }
+  )
+}
+const ddl = readFileSync(DDL_FILE, 'utf8')
+
+/* ---------- 3. read sqlite + emit inserts ---------- */
+const db = new Database(DB_FILE, { readonly: true })
+
+const tables = (
+  db
+    .query(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations' ORDER BY rowid"
+    )
+    .all() as { name: string }[]
+).map((r) => r.name)
+
+const esc = (s: string) =>
+  s
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\x1a/g, '\\Z')
+    .replace(/\0/g, '\\0')
+
+const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+
+function dateTimeFromValue(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+  // Prisma 6 + SQLite stores DateTime as epoch millis (INTEGER); be tolerant
+  // of older TEXT-stored values too.
+  let ms: number
+  if (typeof v === 'number') ms = v
+  else {
+    const n = Number(v)
+    if (Number.isFinite(n) && /^\d{10,}$/.test(String(v).trim())) ms = n
+    else {
+      const d = new Date(String(v))
+      if (isNaN(d.getTime())) return null
+      ms = d.getTime()
+    }
+  }
+  const d = new Date(ms)
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${String(d.getUTCMilliseconds()).padStart(3, '0')}`
+  )
+}
+
+function sqlValue(table: string, col: string, v: unknown): string {
+  if (v === null || v === undefined) return 'NULL'
+  const type = fieldTypes.get(table)?.get(col)
+  if (type === 'DateTime') {
+    const s = dateTimeFromValue(v)
+    return s ? `'${s}'` : 'NULL'
+  }
+  if (typeof v === 'number' || typeof v === 'bigint') return String(v)
+  if (typeof v === 'string') return `'${esc(v)}'`
+  // Buffer etc. — serialize as string
+  return `'${esc(String(v))}'`
+}
+
+const parts: string[] = []
+parts.push(
+  `-- ============================================================`,
+  `-- CALL — full MySQL dump (schema + data) for phpMyAdmin import`,
+  `-- Generated ${new Date().toISOString()}`,
+  `-- All DateTime values are UTC.`,
+  `-- ============================================================`,
+  ``,
+  `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;`,
+  `SET time_zone = '+00:00';`,
+  `SET FOREIGN_KEY_CHECKS = 0;`,
+  `SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';`,
+  ``,
+  ddl.trimEnd(),
+  ``,
+  `-- ============================================================`,
+  `-- DATA`,
+  `-- ============================================================`,
+  ``,
+  `START TRANSACTION;`,
+  ``
+)
+
+let totalRows = 0
+for (const table of tables) {
+  const cols = (
+    db.query(`PRAGMA table_info('${table}')`).all() as {
+      cid: number
+      name: string
+      type: string
+    }[]
+  ).map((c) => c.name)
+  if (!cols.length) {
+    console.log(`  (skip ${table}: no columns)`)
+    continue
+  }
+  const count = (db.query(`SELECT COUNT(*) AS c FROM "${table}"`).get() as { c: number }).c
+  if (count === 0) {
+    console.log(`  ${table}: 0 rows`)
+    continue
+  }
+  const colList = cols.map((c) => '`' + c + '`').join(', ')
+  const selectStmt = db.query(`SELECT * FROM "${table}"`)
+  const rows = selectStmt.all() as Record<string, unknown>[]
+  const CHUNK = 100
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK)
+    const values = chunk
+      .map((row) => `(${cols.map((c) => sqlValue(table, c, row[c])).join(', ')})`)
+      .join(',\n  ')
+    parts.push(`INSERT INTO \`${table}\` (${colList}) VALUES\n  ${values};`)
+  }
+  totalRows += count
+  console.log(`  ${table}: ${count} rows`)
+}
+
+parts.push(``, `COMMIT;`, ``, `SET FOREIGN_KEY_CHECKS = 1;`, ``)
+
+writeFileSync(OUT_FULL, parts.join('\n'))
+console.log(`\nWrote ${OUT_FULL} — ${totalRows} rows across ${tables.length} tables`)
