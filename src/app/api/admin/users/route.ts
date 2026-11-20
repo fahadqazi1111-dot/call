@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     where: q ? { OR: [{ name: { contains: q } }, { phone: { contains: q } }, { email: { contains: q } }, { username: { contains: q } }] } : {},
     orderBy: { createdAt: 'desc' },
     take: limit,
-    include: { wallet: true },
+    include: { wallet: true, coinWallet: true },
   })
   return NextResponse.json({
     users: users.map((u) => ({
@@ -35,6 +35,9 @@ export async function GET(req: Request) {
       reserved: u.wallet?.reserved ?? 0,
       totalEarned: u.wallet?.totalEarned ?? 0,
       totalWithdrawn: u.wallet?.totalWithdrawn ?? 0,
+      // coin wallet is created lazily on first coin purchase/conversion;
+      // users who never interacted with the coin system show 0.
+      coins: u.coinWallet?.coins ?? 0,
     })),
   })
 }

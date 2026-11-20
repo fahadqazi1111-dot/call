@@ -281,6 +281,112 @@ export async function applyLedgerDelta(
   }
 }
 
+/* ---------------- COIN WALLET (in-app currency) ----------------
+ * Parallel to the USD Wallet. Coins are bought with USD or converted from
+ * USD earnings. They are spent to send gifts. NOT withdrawable.
+ */
+
+export async function ensureCoinWallet(userId: string) {
+  let w = await db.coinWallet.findUnique({ where: { userId } })
+  if (!w) w = await db.coinWallet.create({ data: { userId } })
+  return w
+}
+
+export interface CoinWalletDelta {
+  coins?: number
+  totals?: { totalPurchased?: number; totalConverted?: number; totalSpent?: number; totalReceived?: number }
+}
+
+export interface CoinLedgerResult {
+  applied: boolean
+  wallet: { coins: number; totalPurchased: number; totalConverted: number; totalSpent: number; totalReceived: number }
+}
+
+/**
+ * Apply a coin-wallet delta and append a CoinLedgerEntry. Idempotent by
+ * `idempotencyKey` (a retry never double-credits or double-debits). Mirrors
+ * the USD `applyLedgerDelta` so the coin ledger is the source of truth for
+ * every coin balance change.
+ */
+export async function applyCoinLedgerDelta(
+  userId: string,
+  kind: string,
+  delta: CoinWalletDelta,
+  note: string,
+  refType?: string,
+  refId?: string,
+  idempotencyKey?: string
+): Promise<CoinLedgerResult> {
+  if (idempotencyKey) {
+    const existing = await db.coinLedgerEntry.findUnique({ where: { idempotencyKey } })
+    if (existing) {
+      const w = await ensureCoinWallet(userId)
+      return { applied: false, wallet: w }
+    }
+  }
+  const wallet = await ensureCoinWallet(userId)
+  const dCoins = Math.round(delta.coins ?? 0)
+  const coins = Math.max(0, Math.round(wallet.coins + dCoins))
+  const data: Record<string, unknown> = { coins, updatedAt: new Date() }
+  const t = delta.totals ?? {}
+  if (t.totalPurchased) data.totalPurchased = Math.round(wallet.totalPurchased + t.totalPurchased)
+  if (t.totalConverted) data.totalConverted = Math.round(wallet.totalConverted + t.totalConverted)
+  if (t.totalSpent) data.totalSpent = Math.round(wallet.totalSpent + t.totalSpent)
+  if (t.totalReceived) data.totalReceived = Math.round(wallet.totalReceived + t.totalReceived)
+  await db.coinWallet.update({ where: { userId }, data: data as never })
+  const direction = dCoins >= 0 ? 'credit' : 'debit'
+  await db.coinLedgerEntry.create({
+    data: {
+      userId,
+      kind,
+      direction,
+      amount: Math.abs(dCoins),
+      coinsAfter: coins,
+      refType: refType ?? null,
+      refId: refId ?? null,
+      note,
+      idempotencyKey: idempotencyKey ?? null,
+    },
+  })
+  const updated = await db.coinWallet.findUnique({ where: { userId } })
+  return {
+    applied: true,
+    wallet: updated ?? { coins, totalPurchased: wallet.totalPurchased, totalConverted: wallet.totalConverted, totalSpent: wallet.totalSpent, totalReceived: wallet.totalReceived },
+  }
+}
+
+/* ---------------- COIN FINANCE SETTINGS ---------------- */
+
+export interface CoinPack {
+  id: string
+  coins: number
+  priceUsd: number
+  bonus: number
+  label: string
+  popular?: boolean
+}
+
+export interface CoinSettings {
+  coinsPerUsd: number // how many coins per $1 when buying (default 100)
+  convertBonusPercent: number // bonus % when converting USD earnings to coins (default 10 = 110 coins per $1)
+  coinPacks: CoinPack[]
+  coinsEnabled: boolean // master switch
+}
+
+export async function getCoinSettings(): Promise<CoinSettings> {
+  return getSetting<CoinSettings>('coins', {
+    coinsPerUsd: 100,
+    convertBonusPercent: 10,
+    coinsEnabled: true,
+    coinPacks: [
+      { id: 'pack_starter', coins: 100, priceUsd: 0.99, bonus: 0, label: 'Starter' },
+      { id: 'pack_popular', coins: 550, priceUsd: 4.99, bonus: 50, label: 'Popular', popular: true },
+      { id: 'pack_pro', coins: 1200, priceUsd: 9.99, bonus: 200, label: 'Pro' },
+      { id: 'pack_whale', coins: 3000, priceUsd: 24.99, bonus: 500, label: 'Whale' },
+    ],
+  })
+}
+
 /* ---------------- simple in-memory rate limiter ---------------- */
 
 const buckets = new Map<string, { count: number; resetAt: number }>()

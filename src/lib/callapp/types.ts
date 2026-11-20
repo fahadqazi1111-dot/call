@@ -191,6 +191,58 @@ export interface BankAccountItem {
   createdAt: string
 }
 
+/* ================= coins (virtual currency for gifts) ================= */
+
+/** Lightweight USD-wallet snapshot returned alongside coin operations. */
+export interface WalletSnapshot {
+  available: number
+  reserved: number
+  totalReceived: number
+  totalEarned: number
+  totalWithdrawn: number
+}
+
+/** Coin wallet snapshot — coins are virtual, spendable on gifts, non-withdrawable. */
+export interface CoinWalletSnapshot {
+  coins: number
+  totalPurchased: number
+  totalConverted: number
+  totalSpent: number
+}
+
+/** A single line in the coin ledger (purchase / conversion / gift spend). */
+export interface CoinLedgerItem {
+  id: string
+  /** 'purchase' | 'convert_in' | 'gift_spend' | 'admin_adjustment' | 'refund' */
+  kind: string
+  /** 'credit' | 'debit' */
+  direction: string
+  amount: number
+  coinsAfter: number
+  note: string
+  refType?: string
+  refId?: string
+  createdAt: string
+}
+
+/** A purchasable coin pack shown in the Coin Store. */
+export interface CoinPack {
+  id: string
+  coins: number
+  priceUsd: number
+  bonus: number
+  label: string
+  popular?: boolean
+}
+
+/** Coin system settings (rates, packs, on/off flag). */
+export interface CoinSettings {
+  coinsPerUsd: number
+  convertBonusPercent: number
+  coinPacks: CoinPack[]
+  coinsEnabled: boolean
+}
+
 export interface PaymentInfo {
   id: string
   status: 'pending' | 'successful' | 'failed' | 'cancelled' | 'refunded'
@@ -215,6 +267,8 @@ export interface GiftItem {
   sound: string
   category: string
   priceUsd: number
+  /** Coin price for the "pay with coins" flow (0 → coin payment not offered). */
+  priceCoins?: number
   durationMs: number
   description?: string
   active?: boolean

@@ -15,6 +15,9 @@ import type {
   CallRecord,
   ChatSummary,
   CheckoutResult,
+  CoinLedgerItem,
+  CoinSettings,
+  CoinWalletSnapshot,
   ContactItem,
   FinanceSummary,
   GiftItem,
@@ -38,6 +41,7 @@ import type {
   StoryViewer,
   VoiceRoomItem,
   WalletInfo,
+  WalletSnapshot,
   WithdrawalItem,
 } from './types'
 
@@ -339,6 +343,10 @@ export const api = {
       gifts: GiftReceivedItem[]
       withdrawals: WithdrawalItem[]
       bankAccounts: BankAccountItem[]
+      /** Coin system — present when the user's coin wallet is enabled. */
+      coinWallet?: CoinWalletSnapshot
+      coinLedger?: CoinLedgerItem[]
+      coinSettings?: CoinSettings
     }>('/api/wallet'),
   bankAccounts: () => request<{ accounts: BankAccountItem[] }>('/api/wallet/bank'),
   addBankAccount: (payload: {
@@ -399,6 +407,46 @@ export const api = {
     request<{ ok: boolean; sendId: string | null; alreadyProcessed: boolean; wallet: { available: number } }>(
       '/api/gifts/send-wallet',
       { method: 'POST', body: JSON.stringify(payload) }
+    ),
+
+  /* ---------- coins (virtual currency — buy with USD, spend on gifts) ---------- */
+  /** Buy coins: returns a Stripe checkout URL (production) or a sandbox
+   *  paymentId (test mode). The caller redirects for Stripe, or opens the
+   *  PaymentModal for the sandbox. */
+  coinTopup: (body: { packId?: string; amountUsd?: number; clientKey: string }) =>
+    request<{
+      ok: boolean
+      paymentId: string
+      checkoutUrl?: string
+      coins: number
+      amountUsd: number
+      provider: string
+      isTest: boolean
+    }>('/api/coins/topup', { method: 'POST', body: JSON.stringify(body) }),
+  /** Convert USD wallet earnings into coins at a bonus rate (10% bonus vs.
+   *  withdrawing). The USD wallet is debited server-side; both snapshots are
+   *  returned so the UI refreshes in a single pass. */
+  coinConvert: (body: { amountUsd: number; clientKey: string }) =>
+    request<{ ok: boolean; coins: number; wallet: WalletSnapshot; coinWallet: CoinWalletSnapshot }>(
+      '/api/coins/convert',
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  /** Send a gift by spending coins (not USD). Mirrors giftSendWallet but
+   *  deducts from the coin wallet. The animation still arrives via socket
+   *  relay for everyone in the room/live. */
+  giftSendCoins: (body: {
+    giftId: string
+    toUserId: string
+    context: 'room' | 'live' | 'battle'
+    roomId?: string
+    liveId?: string
+    battleId?: string
+    battleSide?: number
+    clientKey: string
+  }) =>
+    request<{ ok: boolean; sendId: string; coinWallet: CoinWalletSnapshot }>(
+      '/api/gifts/send-coins',
+      { method: 'POST', body: JSON.stringify(body) }
     ),
 
   /* ---------- stories ---------- */
@@ -679,6 +727,8 @@ export const api = {
         reserved: number
         totalEarned: number
         totalWithdrawn: number
+        /** Spendable coin balance (0 when the user has no coin wallet yet). */
+        coins: number
       }>
     }>(`/api/admin/users?q=${encodeURIComponent(q || '')}`),
   adminUserAction: (targetId: string, action: string, value?: number, note?: string) =>
@@ -689,11 +739,14 @@ export const api = {
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   adminGifts: () => request<{ gifts: GiftItem[] }>('/api/admin/gifts'),
-  adminGiftCreate: (payload: Partial<GiftItem> & { androidProduct?: string; iosProduct?: string; description?: string }) =>
-    request<{ ok: boolean }>('/api/admin/gifts', { method: 'POST', body: JSON.stringify(payload) }),
-  adminGiftUpdate: (id: string, patch: Partial<GiftItem> & { androidProduct?: string; iosProduct?: string }) =>
+  adminGiftCreate: (body: { name: string; emoji: string; priceUsd: number; priceCoins?: number; animKind?: string; category?: string }) =>
+    request<{ ok: boolean }>('/api/admin/gifts', { method: 'POST', body: JSON.stringify(body) }),
+  adminGiftUpdate: (id: string, patch: { priceUsd?: number; priceCoins?: number; active?: boolean }) =>
     request<{ ok: boolean }>('/api/admin/gifts', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
   adminGiftDelete: (id: string) => request<{ ok: boolean }>(`/api/admin/gifts?id=${id}`, { method: 'DELETE' }),
+  /** Admin adjusts a user's coin balance (credit or debit) — recorded in the coin ledger. */
+  adminCoinAdjust: (body: { userId: string; amount: number; note: string }) =>
+    request<{ ok: boolean; coinWallet: CoinWalletSnapshot }>('/api/admin/coins/adjust', { method: 'POST', body: JSON.stringify(body) }),
   adminFinance: (filters?: { from?: string; to?: string; purpose?: string; provider?: string; status?: string; userId?: string }) => {
     const qs = new URLSearchParams()
     if (filters?.from) qs.set('from', filters.from)

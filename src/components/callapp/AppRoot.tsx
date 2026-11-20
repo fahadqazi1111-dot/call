@@ -24,6 +24,7 @@ import { AuthBranding } from './AuthBranding'
 import { StoryComposer } from './StoryComposer'
 import { AiScreen } from './AiScreen'
 import { WalletScreen } from './WalletScreen'
+import { CoinStoreScreen } from './CoinStoreScreen'
 import { AdsScreen } from './AdsScreen'
 import { NotificationCenter } from './NotificationCenter'
 import { AdminPanel } from './AdminPanel'
@@ -42,6 +43,7 @@ function OverlayHost() {
     <>
       {overlay === 'ai' && <AiScreen onClose={() => setOverlay(null)} />}
       {overlay === 'wallet' && <WalletScreen onClose={() => setOverlay(null)} />}
+      {overlay === 'coin-store' && <CoinStoreScreen onClose={() => setOverlay(null)} />}
       {overlay === 'ads' && <AdsScreen onClose={() => setOverlay(null)} />}
       {overlay === 'notifications' && <NotificationCenter onClose={() => setOverlay(null)} />}
       {overlay === 'admin' && <AdminPanel onClose={() => setOverlay(null)} />}

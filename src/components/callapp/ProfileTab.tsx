@@ -42,6 +42,8 @@ import {
   Square,
   Trash2,
   AlertTriangle,
+  Coins,
+  ShoppingBag,
 } from 'lucide-react'
 import { RINGTONE_OPTIONS, getSelectedRingtone, setRingtone } from '@/lib/callapp/ringtones'
 
@@ -466,10 +468,14 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       {/* ============ quick actions ============ */}
       <section className={`mt-6 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Quick actions">
         <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Explore</h2>
-        <div className={`grid gap-3 ${isStaff ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3 sm:grid-cols-4'}`}>
+        <div className={`grid gap-3 ${isStaff ? 'grid-cols-3 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-5'}`}>
           <button className="qa-tile" onClick={() => setOverlay('wallet')}>
             <span className="qa-ico bg-[#E7F7EF] text-[#0B8A46]"><Wallet size={20} /></span>
             <span className="qa-lbl">Wallet</span>
+          </button>
+          <button className="qa-tile" onClick={() => setOverlay('coin-store')}>
+            <span className="qa-ico bg-amber-50 text-amber-600"><Coins size={20} /></span>
+            <span className="qa-lbl">Coin Store</span>
           </button>
           <button className="qa-tile" onClick={() => setOverlay('ads')}>
             <span className="qa-ico bg-[#FFF0F3] text-[#D6336C]"><Megaphone size={20} /></span>

@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { applyLedgerDelta, ensureWallet, getFinance, providerFeeFor, round2 } from './server'
+import { applyLedgerDelta, ensureWallet, getFinance, providerFeeFor, round2, applyCoinLedgerDelta } from './server'
 import { relayToLive, relayToRoom, relayToUser } from './relay'
 import { safeJson } from './payments'
 
@@ -66,12 +66,43 @@ export async function fulfillPayment(paymentId: string): Promise<FulfillResult> 
     if (payment.purpose === 'ad_campaign') {
       return await fulfillAdCampaign(payment, meta)
     }
+    if (payment.purpose === 'coin_topup') {
+      return await fulfillCoinTopup(payment, meta)
+    }
     return { ok: true, reason: 'no_fulfillment_needed' }
   } catch (err) {
     console.error('fulfillment error', paymentId, err)
     // keep payment successful (money verified) but surface the failure for ops
     return { ok: false, reason: 'fulfillment_error' }
   }
+}
+
+/* ---------------- coin topup ---------------- */
+
+/**
+ * Credits coins after a successful coin-pack purchase. The coin amount is
+ * locked at checkout time and stored on payment.meta.coins, so a later
+ * change to CoinSettings can never retroactively alter what was paid for.
+ * Idempotent by the payment's pending→successful transition (handled by
+ * fulfillPayment) plus the `cointopup:{paymentId}` idempotency key.
+ */
+async function fulfillCoinTopup(
+  payment: { id: string; userId: string; isTest: boolean; amount: number },
+  meta: Record<string, unknown>
+): Promise<FulfillResult> {
+  const coinAmount = Math.max(0, Math.floor(Number(meta.coins) || 0))
+  if (coinAmount <= 0) return { ok: false, reason: 'coin_amount_missing' }
+  const note = `Coin purchase — ${coinAmount} coins for $${round2(payment.amount).toFixed(2)}${payment.isTest ? ' (test)' : ''}`
+  await applyCoinLedgerDelta(
+    payment.userId,
+    'coin_purchase',
+    { coins: coinAmount, totals: { totalPurchased: coinAmount } },
+    note,
+    'payment',
+    payment.id,
+    `cointopup:${payment.id}`
+  )
+  return { ok: true }
 }
 
 /* ---------------- gift ---------------- */
@@ -98,8 +129,10 @@ async function fulfillGift(
     battleId: (meta.battleId as string) || null,
     battleSide: typeof meta.battleSide === 'number' ? meta.battleSide : null,
     gross,
+    grossCoins: 0,
     feeAmount,
     commissionPercent,
+    paymentMethod: 'card',
     paymentId: payment.id,
     isTest: payment.isTest,
     idempotencyTag: `giftcredit:${payment.id}`,
@@ -214,8 +247,10 @@ export async function sendGiftFromWallet(
     battleId: input.battleId || null,
     battleSide: typeof input.battleSide === 'number' ? input.battleSide : null,
     gross,
+    grossCoins: 0,
     feeAmount,
     commissionPercent,
+    paymentMethod: 'wallet',
     paymentId: null,
     isTest: false,
     idempotencyTag: `giftcredit:wallet:${clientKey}`,
@@ -236,12 +271,16 @@ export async function sendGiftFromWallet(
 }
 
 /**
- * THE single delivery path for every gift (card or wallet):
+ * THE single delivery path for every gift (card, wallet, or coins):
  * GiftSend row → recipient credit → battle scoring → notification → realtime relay.
  * Idempotent by idempotencyTag.
+ *
+ * Exported so the coin-send route can route through it exactly like card and
+ * wallet gifts — every animation, notification and battle-score update runs
+ * through THIS function so coin gifts are never a second-class citizen.
  */
-async function deliverGift(args: {
-  gift: { id: string; name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; currency: string; imageUrl?: string | null }
+export interface DeliverGiftArgs {
+  gift: { id: string; name: string; emoji: string; animKind: string; sound: string; durationMs: number; priceUsd: number; priceCoins: number; currency: string; imageUrl?: string | null }
   sender: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   recipient: { id: string; name: string; avatarKey: number; avatarUrl: string | null }
   context: 'room' | 'live' | 'battle'
@@ -250,13 +289,19 @@ async function deliverGift(args: {
   battleId: string | null
   battleSide: number | null
   gross: number
+  /** coins spent on this gift, if paid with coins (0 for card/wallet) */
+  grossCoins: number
   feeAmount: number
   commissionPercent: number
+  /** 'card' | 'wallet' | 'coins' — stored on GiftSend for reporting */
+  paymentMethod: 'card' | 'wallet' | 'coins'
   paymentId: string | null
   isTest: boolean
   idempotencyTag: string
-}): Promise<FulfillResult> {
-  const { gift, sender, recipient, context, gross, feeAmount, commissionPercent, paymentId, isTest } = args
+}
+
+export async function deliverGift(args: DeliverGiftArgs): Promise<FulfillResult> {
+  const { gift, sender, recipient, context, gross, grossCoins, feeAmount, commissionPercent, paymentMethod, paymentId, isTest } = args
 
   const { commission, net } = splitAmounts(gross, feeAmount, commissionPercent)
 
@@ -271,9 +316,11 @@ async function deliverGift(args: {
       battleId: args.battleId,
       battleSide: args.battleSide,
       grossAmount: gross,
+      grossCoins,
       commission,
       feeAmount,
       netAmount: net,
+      paymentMethod,
       paymentId,
       isTest,
     },
@@ -350,6 +397,8 @@ async function deliverGift(args: {
     // the card checkout's local echo carries the PAYMENT id — relaying it lets
     // clients dedupe the echo against this relayed event (single animation)
     paymentId: paymentId,
+    paymentMethod,
+    grossCoins,
     gift: {
       id: gift.id,
       name: gift.name,
@@ -358,6 +407,7 @@ async function deliverGift(args: {
       sound: gift.sound,
       durationMs: gift.durationMs,
       priceUsd: gift.priceUsd,
+      priceCoins: gift.priceCoins,
       imageUrl: gift.imageUrl,
     },
     from: { id: sender.id, name: sender.name, avatarKey: sender.avatarKey, avatarUrl: sender.avatarUrl },

@@ -44,7 +44,7 @@ export async function PUT(req: Request) {
     const key = String(body.key || '')
     const allowed = [
       'finance', 'rooms', 'live', 'calls', 'ai', 'ads', 'auth', 'smtp',
-      'messaging', 'app', 'otp',
+      'messaging', 'app', 'otp', 'coins',
     ]
     if (!allowed.includes(key)) return NextResponse.json({ error: 'Unknown settings key' }, { status: 400 })
     const existing = await getSetting<Record<string, unknown>>(key, {})

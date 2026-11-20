@@ -26,6 +26,7 @@ export async function POST(req: Request) {
         sound: String(body.sound || 'gift'),
         category: ['room', 'live', 'both'].includes(body.category) ? body.category : 'both',
         priceUsd: round2(Math.max(0.1, Number(body.priceUsd) || 1)),
+        priceCoins: Math.max(0, Math.floor(Number(body.priceCoins) || 0)),
         currency: 'USD',
         platformMap: JSON.stringify({
           android: String(body.androidProduct || '').slice(0, 80) || null,
@@ -55,6 +56,7 @@ export async function PUT(req: Request) {
     if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl ? String(body.imageUrl).slice(0, 300) : null
     if (body.description !== undefined) data.description = String(body.description).slice(0, 160)
     if (body.priceUsd !== undefined) data.priceUsd = round2(Math.max(0.1, Number(body.priceUsd)))
+    if (body.priceCoins !== undefined) data.priceCoins = Math.max(0, Math.floor(Number(body.priceCoins)))
     if (body.active !== undefined) data.active = !!body.active
     if (body.category !== undefined && ['room', 'live', 'both'].includes(body.category)) data.category = body.category
     if (body.sortOrder !== undefined) data.sortOrder = Math.floor(Number(body.sortOrder))

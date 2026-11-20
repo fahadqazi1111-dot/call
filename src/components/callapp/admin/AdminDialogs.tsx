@@ -261,8 +261,11 @@ export interface FormField {
   label: string
   placeholder?: string
   defaultValue?: string
-  type?: 'text' | 'number'
+  /** 'checkbox' renders a single toggle (value: 'true' | 'false'). */
+  type?: 'text' | 'number' | 'checkbox'
   required?: boolean
+  /** Optional hint shown under the label (useful for checkbox fields). */
+  hint?: string
 }
 
 interface FormDialogProps {
@@ -299,6 +302,7 @@ function FormDialogBody({
 
   const submit = () => {
     for (const f of fields) {
+      if (f.type === 'checkbox') continue
       if (f.required && !values[f.key]?.trim()) {
         setError(`${f.label} is required`)
         return
@@ -310,30 +314,53 @@ function FormDialogBody({
   return (
     <SheetShell open onClose={close} title={title} description={description} loading={loading}>
       <div className="mt-3 space-y-3">
-        {fields.map((f) => (
-          <label key={f.key} className="block">
-            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">
-              {f.label}{f.required && <span className="ml-0.5 text-cred">*</span>}
-            </span>
-            <input
-              type={f.type === 'number' ? 'number' : 'text'}
-              className="app-input w-full"
-              placeholder={f.placeholder}
-              value={values[f.key] ?? ''}
-              disabled={loading}
-              onChange={(e) => {
-                setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                setError(null)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  submit()
-                }
-              }}
-            />
-          </label>
-        ))}
+        {fields.map((f) => {
+          if (f.type === 'checkbox') {
+            const checked = values[f.key] === 'true'
+            return (
+              <label key={f.key} className="flex items-start gap-2.5 rounded-[12px] bg-[#F0F3FA] px-4 py-2.5 text-[13px] text-cink">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 flex-none accent-[#2f5bea]"
+                  checked={checked}
+                  disabled={loading}
+                  onChange={(e) => {
+                    setValues((v) => ({ ...v, [f.key]: e.target.checked ? 'true' : 'false' }))
+                    setError(null)
+                  }}
+                />
+                <span>
+                  <span className="font-semibold">{f.label}</span>
+                  {f.hint && <span className="mt-0.5 block text-[11.5px] text-cmut">{f.hint}</span>}
+                </span>
+              </label>
+            )
+          }
+          return (
+            <label key={f.key} className="block">
+              <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">
+                {f.label}{f.required && <span className="ml-0.5 text-cred">*</span>}
+              </span>
+              <input
+                type={f.type === 'number' ? 'number' : 'text'}
+                className="app-input w-full"
+                placeholder={f.placeholder}
+                value={values[f.key] ?? ''}
+                disabled={loading}
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                  setError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submit()
+                  }
+                }}
+              />
+            </label>
+          )
+        })}
       </div>
       {error && <p className="mt-2 text-[12px] font-semibold text-cred">{error}</p>}
       <div className="mt-4 flex flex-row gap-2">

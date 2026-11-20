@@ -16,6 +16,9 @@ import type {
   CallRecord,
   CallState,
   ChatSummary,
+  CoinLedgerItem,
+  CoinSettings,
+  CoinWalletSnapshot,
   ContactItem,
   GiftReceivedItem,
   LedgerEntryItem,
@@ -27,7 +30,7 @@ import type {
 
 export type AppPhase = 'splash' | 'boot' | 'onboarding' | 'auth' | 'main'
 export type AppTab = 'chats' | 'calls' | 'rooms' | 'live' | 'contacts' | 'profile'
-export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'ads' | 'story-composer' | null
+export type AppOverlay = 'ai' | 'admin' | 'notifications' | 'wallet' | 'ads' | 'story-composer' | 'coin-store' | null
 /** Staff members land in the console; they can switch to the normal user app. */
 export type StaffView = 'console' | 'app'
 
@@ -98,6 +101,11 @@ interface AppState {
   /** userIds I blocked (safety) — refreshed by loadBlockedIds */
   blockedIds: Record<string, boolean>
 
+  /* coin system — virtual currency for sending gifts (parallel to USD wallet) */
+  coinWallet: CoinWalletSnapshot | null
+  coinLedger: CoinLedgerItem[]
+  coinSettings: CoinSettings | null
+
   setPhase: (p: AppPhase) => void
   setTab: (t: AppTab) => void
   setOverlay: (o: AppOverlay) => void
@@ -159,6 +167,32 @@ interface AppState {
   loadWallet: () => Promise<void>
   withdraw: (amount: number, bankAccountId: string) => Promise<{ id: string; amount: number; status: string } | null>
 
+  /** Buy coins — either a pre-defined pack or a custom USD amount.
+   *  Returns a Stripe checkoutUrl (redirect) or a sandbox paymentId
+   *  (caller shows the PaymentModal). Returns null on failure. */
+  buyCoins: (packId: string | null, amountUsd: number) => Promise<{
+    paymentId: string
+    checkoutUrl?: string
+    coins: number
+    amountUsd: number
+    provider: string
+    isTest: boolean
+  } | null>
+  /** Convert USD wallet earnings into coins at a bonus rate. Refreshes both
+   *  wallets and returns the number of coins credited (null on failure). */
+  convertUsdToCoins: (amountUsd: number) => Promise<number | null>
+  /** Send a gift by spending coins. Returns the new coin balance (null on
+   *  failure). Mirrors the existing giftSendWallet flow but debits coins. */
+  sendGiftWithCoins: (args: {
+    giftId: string
+    toUserId: string
+    context: 'room' | 'live' | 'battle'
+    roomId?: string
+    liveId?: string
+    battleId?: string
+    battleSide?: number
+  }) => Promise<{ sendId: string; coins: number } | null>
+
   loadNotifications: () => Promise<void>
   markNotifs: (payload: { ids?: string[]; all?: boolean }) => Promise<void>
   pushNotification: (n: AppNotification) => void
@@ -197,6 +231,10 @@ export const useApp = create<AppState>((set, get) => ({
   notifications: [],
   unreadNotifs: 0,
   blockedIds: {},
+
+  coinWallet: null,
+  coinLedger: [],
+  coinSettings: null,
 
   setPhase: (p) => set({ phase: p }),
   setTab: (t) => set({ tab: t }),
@@ -321,6 +359,9 @@ export const useApp = create<AppState>((set, get) => ({
       blockedIds: {},
       overlay: null,
       staffView: 'app',
+      coinWallet: null,
+      coinLedger: [],
+      coinSettings: null,
     })
   },
 
@@ -359,6 +400,9 @@ export const useApp = create<AppState>((set, get) => ({
       blockedIds: {},
       overlay: null,
       staffView: 'app',
+      coinWallet: null,
+      coinLedger: [],
+      coinSettings: null,
     })
     // Hard redirect to "/" so the whole app remounts on the login screen — no
     // stale socket listeners, no cached query data, no chance of the deleted
@@ -658,6 +702,9 @@ export const useApp = create<AppState>((set, get) => ({
         walletGifts: res.gifts,
         withdrawals: res.withdrawals,
         bankAccounts: res.bankAccounts,
+        coinWallet: res.coinWallet ?? null,
+        coinLedger: res.coinLedger ?? [],
+        coinSettings: res.coinSettings ?? null,
       })
     } catch {}
   },
@@ -668,6 +715,99 @@ export const useApp = create<AppState>((set, get) => ({
       await get().loadWallet()
       return res.withdrawal
     } catch {
+      return null
+    }
+  },
+
+  buyCoins: async (packId, amountUsd) => {
+    if (!packId && (!amountUsd || amountUsd <= 0)) {
+      toast.error('Pick a coin pack or enter a USD amount')
+      return null
+    }
+    try {
+      const res = await api.coinTopup({
+        packId: packId ?? undefined,
+        amountUsd: amountUsd > 0 ? amountUsd : undefined,
+        clientKey: `coin:${packId ?? 'custom'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      })
+      // Stripe: the caller redirects to res.checkoutUrl; coins are credited by
+      // the webhook after verified payment. Sandbox: caller opens the
+      // PaymentModal; coins are credited on confirmation.
+      if (res.provider === 'stripe' && res.checkoutUrl) {
+        toast.loading('Opening secure checkout…', { duration: 2500 })
+        if (typeof window !== 'undefined') window.location.href = res.checkoutUrl
+      } else {
+        toast.success(res.isTest
+          ? `Test purchase — ${res.coins.toLocaleString()} coins pending verification`
+          : `Purchase started — ${res.coins.toLocaleString()} coins`)
+      }
+      return {
+        paymentId: res.paymentId,
+        checkoutUrl: res.checkoutUrl,
+        coins: res.coins,
+        amountUsd: res.amountUsd,
+        provider: res.provider,
+        isTest: res.isTest,
+      }
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not start coin purchase')
+      return null
+    }
+  },
+
+  convertUsdToCoins: async (amountUsd) => {
+    if (!amountUsd || amountUsd <= 0) {
+      toast.error('Enter a USD amount to convert')
+      return null
+    }
+    const wallet = get().wallet
+    if (wallet && amountUsd > wallet.available) {
+      toast.error('Amount exceeds your available USD balance')
+      return null
+    }
+    try {
+      const res = await api.coinConvert({
+        amountUsd,
+        clientKey: `coinconvert:${amountUsd}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      })
+      // Server returns both snapshots — apply directly (no extra round-trip).
+      const prev = get().wallet
+      set({
+        wallet: prev
+          ? { ...prev, available: res.wallet.available, reserved: res.wallet.reserved }
+          : { available: res.wallet.available, reserved: res.wallet.reserved, totalReceived: res.wallet.totalReceived, totalEarned: res.wallet.totalEarned, totalWithdrawn: res.wallet.totalWithdrawn },
+        coinWallet: res.coinWallet,
+      })
+      // Refresh the ledger lists so the convert_in entry shows up immediately.
+      void get().loadWallet()
+      toast.success(`Converted $${amountUsd.toFixed(2)} → ${res.coins.toLocaleString()} coins`)
+      return res.coins
+    } catch (e) {
+      toast.error((e as Error).message || 'Conversion failed')
+      return null
+    }
+  },
+
+  sendGiftWithCoins: async ({ giftId, toUserId, context, roomId, liveId, battleId, battleSide }) => {
+    try {
+      const res = await api.giftSendCoins({
+        giftId,
+        toUserId,
+        context,
+        roomId,
+        liveId,
+        battleId,
+        battleSide,
+        clientKey: `giftn:${giftId}:${toUserId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      })
+      set({ coinWallet: res.coinWallet })
+      toast.success('Sent with coins!')
+      // Refresh the coin ledger so the spend line shows up.
+      void get().loadWallet()
+      return { sendId: res.sendId, coins: res.coinWallet.coins }
+    } catch (e) {
+      const msg = (e as Error).message || 'Could not send the gift'
+      toast.error(msg)
       return null
     }
   },

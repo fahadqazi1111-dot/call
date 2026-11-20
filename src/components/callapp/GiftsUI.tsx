@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Gift as GiftIcon, Loader2, ChevronLeft, Users, Sparkles, Info, Megaphone, ExternalLink, X } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
+import { useApp } from '@/lib/callapp/store'
 import { adViewerKey } from '@/lib/callapp/utils'
 import { GIFT_VIDEOS, VIDEO_CLIP_MS, giftVideoFor, preloadedGiftVideoUrl, ensureGiftVideo } from '@/lib/callapp/giftMedia'
 import { toast } from 'sonner'
@@ -602,7 +603,9 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
   const [checkout, setCheckout] = useState<{ payment: PendingPayment } | null>(null)
   const [busy, setBusy] = useState(false)
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
-  /** TikTok flow: tap a gift → choose HOW to pay: wallet balance or card */
+  /** Coin wallet balance — used to enable / disable the "pay with coins" option. */
+  const [coinBalance, setCoinBalance] = useState<number>(0)
+  /** TikTok flow: tap a gift → choose HOW to pay: coins, wallet balance, or card */
   const [payFor, setPayFor] = useState<GiftItem | null>(null)
   /** confirm popup before spending wallet balance */
   const [confirmFor, setConfirmFor] = useState<GiftItem | null>(null)
@@ -626,6 +629,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
         setCommission(g.platformCommission ?? 30)
         setRecipients(r.recipients)
         setWalletBalance(w ? Math.floor(w.wallet.available) : null)
+        setCoinBalance(w?.coinWallet?.coins ?? 0)
         if (r.recipients.length === 1) setRecipientId(r.recipients[0].id)
         if (r.recipients.length === 0) {
           toast.error('No eligible gift recipients right now — only people on the mic / hosts can receive gifts')
@@ -641,6 +645,44 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
   }, [])
 
   const recipient = useMemo(() => recipients.find((r) => r.id === recipientId) ?? null, [recipients, recipientId])
+
+  /** coin-first instant send — spend coins from the coin wallet. Mirrors
+   *  sendByWallet but debits coins. The store action surfaces the "Sent with
+   *  coins!" toast; we just close the sheet on success. */
+  const sendByCoins = async (gift: GiftItem, rid: string): Promise<boolean> => {
+    setBusy(true)
+    try {
+      const res = await useApp.getState().sendGiftWithCoins({
+        giftId: gift.id,
+        toUserId: rid,
+        context,
+        roomId: extra?.roomId,
+        liveId: extra?.liveId,
+        battleId: extra?.battleId,
+        battleSide: extra?.battleSide,
+      })
+      if (!res) {
+        setBusy(false)
+        return false
+      }
+      setCoinBalance(res.coins)
+      // the animation arrives via the server relay for the whole room/live
+      onSent({
+        ok: true,
+        sendId: res.sendId,
+        gift: { name: gift.name, emoji: gift.emoji, animKind: gift.animKind, sound: gift.sound, durationMs: gift.durationMs, priceUsd: gift.priceUsd, imageUrl: gift.imageUrl },
+        from: { id: 'me', name: 'You', avatarKey: 0, avatarUrl: null },
+        to: { id: rid, name: recipient?.name ?? 'host', avatarKey: recipient?.avatarKey ?? 0, avatarUrl: recipient?.avatarUrl ?? null },
+        battle: null,
+      })
+      setPayFor(null)
+      setConfirmFor(null)
+      onClose()
+      return true
+    } finally {
+      setBusy(false)
+    }
+  }
 
   /** wallet-first instant send — falls back to card checkout when balance is short */
   const sendByWallet = async (gift: GiftItem, rid: string): Promise<boolean> => {
@@ -785,9 +827,11 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
               <div>
                 <div className="text-[14.5px] font-extrabold text-cink">{stage === 'recipient' ? 'Choose a recipient' : 'Send a gift'}</div>
                 <div className="text-[11px] text-cmut">
-                  {walletBalance !== null
-                    ? `Wallet $${walletBalance.toFixed(2)} · tap a gift to send instantly`
-                    : 'Direct payment · no coins'}
+                  {coinBalance > 0
+                    ? `🪙 ${coinBalance.toLocaleString()} coins · ${walletBalance !== null ? `$${walletBalance.toFixed(2)} · ` : ''}tap a gift to send`
+                    : walletBalance !== null
+                      ? `Wallet $${walletBalance.toFixed(2)} · tap a gift to send instantly`
+                      : 'Direct payment · tap a gift to send'}
                 </div>
               </div>
             </div>
@@ -861,6 +905,11 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                     <span className="rounded-full bg-[#FFE8EE] px-1.5 py-0.5 text-[10px] font-extrabold text-[#D6336C]">
                       ${g.priceUsd.toFixed(2)}
                     </span>
+                    {g.priceCoins && g.priceCoins > 0 ? (
+                      <span className="flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-600 ring-1 ring-amber-200">
+                        🪙 {g.priceCoins.toLocaleString()}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -871,7 +920,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                   : `The host earns ≈${100 - commission}% after commission and processing fees — credited the moment your payment is verified.`}
               </div>
 
-              {/* ---- payment chooser: balance or card ---- */}
+              {/* ---- payment chooser: coins, balance, or card ---- */}
               {payFor && recipientId && (
                 <div className="mt-3 rounded-[18px] border border-cline bg-cbg p-3">
                   <div className="flex items-center gap-2.5">
@@ -880,7 +929,12 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                       <div className="truncate text-[13.5px] font-extrabold text-cink">
                         Send {payFor.name} to {recipient?.name ?? 'host'}
                       </div>
-                      <div className="text-[11.5px] text-cmut">Choose how to pay ${payFor.priceUsd.toFixed(2)}</div>
+                      <div className="text-[11.5px] text-cmut">
+                        Choose how to pay · ${payFor.priceUsd.toFixed(2)}
+                        {payFor.priceCoins && payFor.priceCoins > 0
+                          ? ` or 🪙 ${payFor.priceCoins.toLocaleString()} coins`
+                          : ''}
+                      </div>
                     </div>
                     <button
                       className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-white text-cmut ring-1 ring-cline"
@@ -891,6 +945,21 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
                     </button>
                   </div>
                   <div className="mt-3 grid grid-cols-1 gap-2">
+                    {payFor.priceCoins && payFor.priceCoins > 0 ? (
+                      coinBalance >= payFor.priceCoins ? (
+                        <button
+                          className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-amber-500 text-[14px] font-bold text-white disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => void sendByCoins(payFor, recipientId)}
+                        >
+                          {busy ? <Loader2 size={17} className="animate-spin" /> : '🪙'} Pay with coins · {coinBalance.toLocaleString()} available
+                        </button>
+                      ) : (
+                        <div className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-amber-50 text-[13px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                          🪙 Not enough coins ({coinBalance.toLocaleString()} / {payFor.priceCoins.toLocaleString()})
+                        </div>
+                      )
+                    ) : null}
                     {walletBalance !== null && walletBalance >= payFor.priceUsd ? (
                       <button
                         className="flex h-12 items-center justify-center gap-2 rounded-[14px] bg-cbrand text-[14px] font-bold text-white disabled:opacity-50"

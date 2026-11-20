@@ -7,16 +7,16 @@ import {
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
   Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall, Sparkles,
-  MessageSquare,
+  MessageSquare, Coins,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { AI_PROVIDERS, type AiProviderMeta } from '@/lib/callapp/aiProvidersShared'
 import { StaffTick } from './StaffTick'
 import { ConfirmDialog, InputDialog, FormDialog } from './admin/AdminDialogs'
-import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
+import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, CoinPack, CoinSettings, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp' | 'auth'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'coins' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp' | 'auth'
 
 interface StaffMember {
   id: string
@@ -75,6 +75,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
       { id: 'users', label: 'Users', Icon: Users, adminOnly: false },
       { id: 'team', label: 'Team', Icon: UserPlus, adminOnly: true },
       { id: 'gifts', label: 'Gifts & pricing', Icon: Gift, adminOnly: false },
+      { id: 'coins', label: 'Coin system', Icon: Coins, adminOnly: false },
       { id: 'withdrawals', label: 'Withdrawals', Icon: Landmark, adminOnly: false },
       { id: 'moderation', label: 'Moderation', Icon: Radio, adminOnly: false },
       { id: 'ai', label: 'CALL AI', Icon: Bot, adminOnly: false },
@@ -144,6 +145,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'users' && <UsersSection />}
           {section === 'team' && isAdmin && <TeamSection />}
           {section === 'gifts' && <GiftsSection />}
+          {section === 'coins' && <CoinsSection />}
           {section === 'finance' && <FinanceSection />}
           {section === 'withdrawals' && <WithdrawalsSection />}
           {section === 'moderation' && <ModerationSection />}
@@ -241,7 +243,7 @@ function OverviewSection() {
 function UsersSection() {
   const me = useApp((s) => s.me)
   const isAdmin = me?.role === 'admin'
-  const [users, setUsers] = useState<Array<{ id: string; name: string; username: string; phone: string; email: string | null; emailVerified: boolean; phoneVerified: boolean; role: string; blocked: boolean; available: number; reserved: number; totalEarned: number; totalWithdrawn: number }>>([])
+  const [users, setUsers] = useState<Array<{ id: string; name: string; username: string; phone: string; email: string | null; emailVerified: boolean; phoneVerified: boolean; role: string; blocked: boolean; available: number; reserved: number; totalEarned: number; totalWithdrawn: number; coins: number }>>([])
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -249,6 +251,9 @@ function UsersSection() {
   const [balanceOpen, setBalanceOpen] = useState(false)
   const [balanceBusy, setBalanceBusy] = useState(false)
   const [balanceUser, setBalanceUser] = useState<{ id: string; name: string } | null>(null)
+  // ---- adjust-coins modal (InputDialog → /api/admin/coins/adjust) ----
+  const [coinUser, setCoinUser] = useState<{ id: string; name: string; coins: number } | null>(null)
+  const [coinBusy, setCoinBusy] = useState(false)
   // ---- create-user modal ----
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
@@ -323,6 +328,34 @@ function UsersSection() {
     }
   }
 
+  const adjustCoins = (u: { id: string; name: string; coins: number }) => {
+    setCoinUser(u)
+  }
+
+  const submitCoinAdjust = async (amountStr: string) => {
+    if (!coinUser) return
+    const amount = Number(amountStr)
+    if (!amount || isNaN(amount)) {
+      toast.error('Invalid amount')
+      return
+    }
+    setCoinBusy(true)
+    try {
+      await api.adminCoinAdjust({
+        userId: coinUser.id,
+        amount,
+        note: `Admin adjustment by ${me?.name ?? 'admin'}`,
+      })
+      await load(q)
+      toast.success(`Coins updated for ${coinUser.name}`)
+      setCoinUser(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCoinBusy(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center gap-2 pb-3">
@@ -382,9 +415,18 @@ function UsersSection() {
               <p className="text-[12.5px] font-extrabold text-cink">${u.available.toFixed(2)}</p>
               <p className="text-[9.5px] text-cmut">available{u.reserved > 0 ? ` · $${u.reserved.toFixed(2)} reserved` : ''}</p>
             </div>
+            <div className="rounded-[12px] bg-amber-50/60 px-3 py-1.5 text-right">
+              <p className="text-[12.5px] font-extrabold text-[#B7791F]">🪙 {u.coins.toLocaleString()}</p>
+              <p className="text-[9.5px] text-cmut">coins</p>
+            </div>
             {isAdmin && (
               <button className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand" onClick={() => adjustBalance(u)}>
                 <DollarSign size={12} className="mr-1 inline" /> Adjust
+              </button>
+            )}
+            {isAdmin && (
+              <button className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-[#B7791F]" onClick={() => adjustCoins(u)}>
+                <Coins size={12} className="mr-1 inline" /> Coins
               </button>
             )}
             {isAdmin && (
@@ -437,6 +479,27 @@ function UsersSection() {
         onConfirm={(v) => void submitBalance(v)}
       />
 
+      {/* adjust coins — InputDialog (positive = credit, negative = debit) → /api/admin/coins/adjust */}
+      <InputDialog
+        open={!!coinUser}
+        onOpenChange={(o) => { if (!o) setCoinUser(null) }}
+        title={coinUser ? `Adjust coins — ${coinUser.name}` : 'Adjust coins'}
+        description={coinUser ? `Current balance: 🪙 ${coinUser.coins.toLocaleString()}. Positive = credit, negative = debit. The change is recorded in the coin ledger.` : undefined}
+        label="Amount in coins (e.g. 100 or -50)"
+        placeholder="100"
+        defaultValue=""
+        confirmLabel="Apply adjustment"
+        loading={coinBusy}
+        validate={(v) => {
+          const n = Number(v)
+          if (!v.trim() || isNaN(n) || n === 0) return 'Enter a non-zero number'
+          if (!Number.isInteger(n)) return 'Amount must be a whole number'
+          if (Math.abs(n) > 10_000_000) return 'Amount out of range'
+          return null
+        }}
+        onConfirm={(v) => void submitCoinAdjust(v)}
+      />
+
       {/* create user — FormDialog with name, username, phone, email, password, role */}
       <FormDialog
         open={createOpen}
@@ -466,7 +529,7 @@ function GiftsSection() {
   // ---- create-gift modal (replaces 3 prompts) ----
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
-  // ---- edit-price modal (replaces 1 prompt) ----
+  // ---- edit-price modal (now FormDialog with both USD + coin prices) ----
   const [editing, setEditing] = useState<GiftItem | null>(null)
   const [priceBusy, setPriceBusy] = useState(false)
   // ---- delete-gift confirm (replaces confirm()) ----
@@ -494,12 +557,18 @@ function GiftsSection() {
     const emoji = (values.emoji || '').trim() || '🎁'
     const priceUsd = Number(values.priceUsd)
     if (!priceUsd || priceUsd <= 0) {
-      toast.error('Invalid price')
+      toast.error('Invalid USD price')
       return
     }
+    // Coins are optional — when the admin leaves the field blank we default
+    // to the standard $1 = 100 coins conversion so the gift is immediately
+    // purchasable with coins. Setting 0 means "coin payment disabled".
+    const rawCoins = (values.priceCoins || '').trim()
+    const priceCoins =
+      rawCoins === '' ? Math.round(priceUsd * 100) : Math.max(0, Math.floor(Number(rawCoins) || 0))
     setCreateBusy(true)
     try {
-      await api.adminGiftCreate({ name, emoji, priceUsd, category: 'both' })
+      await api.adminGiftCreate({ name, emoji, priceUsd, priceCoins, category: 'both' })
       toast.success('Gift created')
       setCreateOpen(false)
       await load()
@@ -510,17 +579,18 @@ function GiftsSection() {
     }
   }
 
-  const submitPrice = async (priceStr: string) => {
+  const submitPrice = async (values: Record<string, string>) => {
     if (!editing) return
-    const price = Number(priceStr)
-    if (!price || price <= 0) {
-      toast.error('Invalid price')
+    const priceUsd = Number(values.priceUsd)
+    if (!priceUsd || priceUsd <= 0) {
+      toast.error('Invalid USD price')
       return
     }
+    const priceCoins = Math.max(0, Math.floor(Number(values.priceCoins) || 0))
     setPriceBusy(true)
     try {
-      await api.adminGiftUpdate(editing.id, { priceUsd: price })
-      toast.success(`Price updated for ${editing.name}`)
+      await api.adminGiftUpdate(editing.id, { priceUsd, priceCoins })
+      toast.success(`Prices updated for ${editing.name}`)
       setEditing(null)
       await load()
     } catch (e) {
@@ -554,21 +624,26 @@ function GiftsSection() {
   return (
     <div>
       <div className="flex items-center gap-2 pb-2">
-        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Gifts & pricing (real money)</h3>
+        <h3 className="flex-1 text-[15px] font-extrabold text-cink">Gifts & pricing (USD + coins)</h3>
         <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => setCreateOpen(true)}>
           <Plus size={14} /> New gift
         </button>
       </div>
       <p className="pb-3 text-[12px] text-cmut">
-        Every gift has its own money price — buyers pay directly per gift (no coins/diamonds). Creators earn the net
-        amount after the platform commission and payment processing fee.
+        Every gift has a real-money price AND an optional coin price. Buyers can pay with USD (card)
+        or with coins earned via purchases / conversions. Leave the coin price at 0 to disable coin
+        payment for that gift.
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {gifts.map((g) => (
           <div key={g.id} className={`rounded-[16px] border border-cline p-3.5 text-center ${g.active ? '' : 'opacity-45'}`}>
             <p className="text-[30px]">{g.emoji}</p>
             <p className="text-[13px] font-bold text-cink">{g.name}</p>
-            <p className="text-[13px] font-extrabold text-[#D6336C]">${g.priceUsd.toFixed(2)}</p>
+            <p className="text-[13px] font-extrabold text-[#D6336C]">
+              ${g.priceUsd.toFixed(2)}
+              <span className="mx-1 text-cmut">/</span>
+              <span className="text-cbrand">🪙 {g.priceCoins ?? 0}</span>
+            </p>
             <p className="text-[10px] text-cmut">{g.category}</p>
             <div className="flex justify-center gap-1.5 pt-2">
               <button className="rounded-full bg-csoft px-2.5 py-1 text-[10px] font-bold text-cbrand" onClick={() => setEditing(g)}>
@@ -585,32 +660,34 @@ function GiftsSection() {
         ))}
       </div>
 
-      {/* create gift — FormDialog with name, emoji, price (replaces 3 prompts) */}
+      {/* create gift — FormDialog with name, emoji, priceUsd, priceCoins */}
       <FormDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         title="New gift"
-        description="Set the gift name, emoji and real-money price. Defaults to 🎁 if the emoji is blank."
+        description="Set the gift name, emoji and prices. Leave coin price blank to auto-derive from USD ($1 = 100 coins); set 0 to disable coin payment."
         fields={[
           { key: 'name', label: 'Gift name', placeholder: 'Super Sticker', required: true },
           { key: 'emoji', label: 'Emoji', placeholder: '🎁', defaultValue: '🎁' },
           { key: 'priceUsd', label: 'Price in USD (real money)', placeholder: '0.60', defaultValue: '1', type: 'number' as const, required: true },
+          { key: 'priceCoins', label: 'Coin price (blank = auto, 0 = disabled)', placeholder: '100', type: 'number' as const },
         ]}
         confirmLabel="Create gift"
         loading={createBusy}
         onConfirm={(v) => void submitCreate(v)}
       />
 
-      {/* edit price — InputDialog (replaces prompt) */}
-      <InputDialog
+      {/* edit prices — FormDialog with both USD and coin prices */}
+      <FormDialog
         open={!!editing}
         onOpenChange={(o) => { if (!o) setEditing(null) }}
-        title={editing ? `Edit price — ${editing.name}` : 'Edit price'}
-        description={editing ? `Current price is $${editing.priceUsd.toFixed(2)}. Enter the new USD price.` : undefined}
-        label="New USD price"
-        placeholder="0.60"
-        defaultValue={editing ? String(editing.priceUsd) : ''}
-        confirmLabel="Update price"
+        title={editing ? `Edit prices — ${editing.name}` : 'Edit prices'}
+        description={editing ? `Current: $${editing.priceUsd.toFixed(2)} / 🪙 ${editing.priceCoins ?? 0}. Set coin price to 0 to disable coin payment.` : undefined}
+        fields={[
+          { key: 'priceUsd', label: 'Price in USD', placeholder: '0.60', defaultValue: editing ? String(editing.priceUsd) : '', type: 'number' as const, required: true },
+          { key: 'priceCoins', label: 'Coin price (0 = disabled)', placeholder: '100', defaultValue: editing ? String(editing.priceCoins ?? 0) : '0', type: 'number' as const, required: true },
+        ]}
+        confirmLabel="Update prices"
         loading={priceBusy}
         onConfirm={(v) => void submitPrice(v)}
       />
@@ -626,6 +703,293 @@ function GiftsSection() {
         variant="destructive"
         loading={deleteBusy}
         onConfirm={() => void submitDelete()}
+      />
+    </div>
+  )
+}
+
+/* ================= Coin system ================= */
+
+const COIN_SETTINGS_DEFAULT: CoinSettings = {
+  coinsPerUsd: 100,
+  convertBonusPercent: 10,
+  coinsEnabled: true,
+  coinPacks: [
+    { id: 'pack_starter', coins: 100, priceUsd: 0.99, bonus: 0, label: 'Starter' },
+    { id: 'pack_popular', coins: 550, priceUsd: 4.99, bonus: 50, label: 'Popular', popular: true },
+    { id: 'pack_pro', coins: 1200, priceUsd: 9.99, bonus: 200, label: 'Pro' },
+    { id: 'pack_whale', coins: 3000, priceUsd: 24.99, bonus: 500, label: 'Whale' },
+  ],
+}
+
+function CoinsSection() {
+  const [settings, setSettings] = useState<CoinSettings | null>(null)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [savingPacks, setSavingPacks] = useState(false)
+  // ---- pack editor (add / edit share the same FormDialog) ----
+  const [editingPack, setEditingPack] = useState<{ pack: CoinPack | null; open: boolean }>({ pack: null, open: false })
+  const [packBusy, setPackBusy] = useState(false)
+  // ---- pack delete confirm ----
+  const [deletingPack, setDeletingPack] = useState<CoinPack | null>(null)
+  const [deletePackBusy, setDeletePackBusy] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.adminSettings()
+        const s = (res.settings.coins ?? null) as CoinSettings | null
+        // Merge with defaults so newly-enabled fields are always present.
+        setSettings({
+          coinsPerUsd: Number(s?.coinsPerUsd) || COIN_SETTINGS_DEFAULT.coinsPerUsd,
+          convertBonusPercent: Number(s?.convertBonusPercent) || COIN_SETTINGS_DEFAULT.convertBonusPercent,
+          coinsEnabled: s?.coinsEnabled !== false,
+          coinPacks: Array.isArray(s?.coinPacks) && s!.coinPacks.length > 0 ? s!.coinPacks : COIN_SETTINGS_DEFAULT.coinPacks,
+        })
+      } catch {
+        setSettings({ ...COIN_SETTINGS_DEFAULT })
+      }
+    })()
+  }, [])
+
+  if (!settings) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+
+  const setS = <K extends keyof CoinSettings>(k: K, v: CoinSettings[K]) =>
+    setSettings({ ...settings, [k]: v })
+
+  const saveSettings = async () => {
+    setSavingSettings(true)
+    try {
+      await api.adminSaveSettings('coins', {
+        coinsEnabled: settings.coinsEnabled,
+        coinsPerUsd: Number(settings.coinsPerUsd) || 100,
+        convertBonusPercent: Number(settings.convertBonusPercent) || 0,
+        // packs are saved separately, but we still echo them so the merge stays correct
+        coinPacks: settings.coinPacks,
+      })
+      toast.success('Coin settings saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  const savePacks = async (next: CoinPack[]) => {
+    setSavingPacks(true)
+    try {
+      await api.adminSaveSettings('coins', {
+        coinsEnabled: settings.coinsEnabled,
+        coinsPerUsd: settings.coinsPerUsd,
+        convertBonusPercent: settings.convertBonusPercent,
+        coinPacks: next,
+      })
+      setSettings({ ...settings, coinPacks: next })
+      toast.success('Coin packs saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingPacks(false)
+    }
+  }
+
+  const submitPack = async (values: Record<string, string>) => {
+    const label = (values.label || '').trim()
+    if (!label) {
+      toast.error('Label is required')
+      return
+    }
+    const coins = Math.max(1, Math.floor(Number(values.coins) || 0))
+    const priceUsd = Math.max(0.1, Number(values.priceUsd) || 0.1)
+    const bonus = Math.max(0, Math.floor(Number(values.bonus) || 0))
+    const popular = values.popular === 'true'
+
+    const existing = editingPack.pack
+    let next: CoinPack[]
+    if (existing) {
+      next = settings.coinPacks.map((p) => (p.id === existing.id ? { ...p, label, coins, priceUsd, bonus, popular } : p))
+    } else {
+      // unique-ish id so we can reference the pack again later
+      const id = `pack_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24)}_${Date.now().toString(36).slice(-4)}`
+      next = [...settings.coinPacks, { id, label, coins, priceUsd, bonus, popular }]
+    }
+    setPackBusy(true)
+    try {
+      await savePacks(next)
+      setEditingPack({ pack: null, open: false })
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPackBusy(false)
+    }
+  }
+
+  const submitDeletePack = async () => {
+    if (!deletingPack) return
+    setDeletePackBusy(true)
+    try {
+      const next = settings.coinPacks.filter((p) => p.id !== deletingPack.id)
+      await savePacks(next)
+      setDeletingPack(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeletePackBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <h3 className="text-[15px] font-extrabold text-cink">Coin system</h3>
+      <p className="pb-4 pt-1 text-[12px] leading-5 text-cmut">
+        Coins are CALL&apos;s virtual currency. Users buy them with USD (coin packs) or convert them
+        from gift earnings, and spend them on gifts. Coins are NOT withdrawable — only real USD
+        earnings are. Disable the system here to hide the coin UI app-wide (existing balances are
+        preserved).
+      </p>
+
+      {/* ---- Coin settings card ---- */}
+      <div className="rounded-[16px] border border-cline bg-white p-4">
+        <h4 className="text-[13.5px] font-extrabold text-cink">Coin settings</h4>
+        <p className="pb-3 pt-1 text-[11.5px] text-cmut">
+          Changing the conversion rate only affects future purchases / conversions — existing coin
+          balances are not retroactively recalculated.
+        </p>
+
+        <AuthToggle
+          label="Enable coin system"
+          hint="When off, the coin wallet, coin store and coin payments are hidden app-wide."
+          checked={settings.coinsEnabled}
+          onChange={(v) => setS('coinsEnabled', v)}
+        />
+
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Coins per USD</span>
+            <input
+              type="number"
+              min={1}
+              className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] font-medium outline-none"
+              value={settings.coinsPerUsd}
+              onChange={(e) => setS('coinsPerUsd', Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+            />
+            <span className="mt-1 block text-[11px] text-cmut">
+              100 = $1 buys 100 coins. Higher = cheaper coins for users.
+            </span>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Conversion bonus %</span>
+            <input
+              type="number"
+              min={0}
+              max={1000}
+              className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] font-medium outline-none"
+              value={settings.convertBonusPercent}
+              onChange={(e) => setS('convertBonusPercent', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            />
+            <span className="mt-1 block text-[11px] text-cmut">
+              10 = converting $1 of earnings gives 110 coins (10% bonus). Encourages retention over withdrawals.
+            </span>
+          </label>
+        </div>
+
+        <button
+          className="mt-3 h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+          disabled={savingSettings}
+          onClick={() => void saveSettings()}
+        >
+          {savingSettings ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save settings'}
+        </button>
+      </div>
+
+      {/* ---- Coin packs manager ---- */}
+      <div className="mt-4 rounded-[16px] border border-cline bg-white p-4">
+        <div className="flex items-center gap-2">
+          <h4 className="flex-1 text-[13.5px] font-extrabold text-cink">Coin packs</h4>
+          <button
+            className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white"
+            onClick={() => setEditingPack({ pack: null, open: true })}
+          >
+            <Plus size={14} /> Add pack
+          </button>
+        </div>
+        <p className="pb-3 pt-1 text-[11.5px] text-cmut">
+          Packs are the buyable options in the Coin Store. The popular flag highlights one pack as
+          &quot;best value&quot;. Bonus coins are added on top of the base amount.
+        </p>
+
+        <div className="space-y-2">
+          {settings.coinPacks.length === 0 && (
+            <p className="rounded-[12px] bg-cbg px-3 py-3 text-center text-[12.5px] text-cmut">
+              No coin packs yet. Add one to open the Coin Store.
+            </p>
+          )}
+          {settings.coinPacks.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-[14px] border border-cline px-3.5 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1.5 text-[14px] font-bold text-cink">
+                  {p.label}
+                  {p.popular && (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9.5px] font-bold text-[#B7791F]">
+                      POPULAR
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-cmut">
+                  🪙 {p.coins.toLocaleString()} coins + {p.bonus.toLocaleString()} bonus
+                </p>
+              </div>
+              <div className="rounded-[12px] bg-cbg px-3 py-1.5 text-right">
+                <p className="text-[12.5px] font-extrabold text-[#D6336C]">${p.priceUsd.toFixed(2)}</p>
+                <p className="text-[9.5px] text-cmut">
+                  {p.priceUsd > 0 ? `${Math.round((p.coins + p.bonus) / p.priceUsd)} coins/$` : '—'}
+                </p>
+              </div>
+              <button
+                className="rounded-full bg-csoft px-3 py-1.5 text-[11px] font-bold text-cbrand"
+                onClick={() => setEditingPack({ pack: p, open: true })}
+              >
+                Edit
+              </button>
+              <button
+                className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
+                onClick={() => setDeletingPack(p)}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- pack add / edit FormDialog ---- */}
+      <FormDialog
+        open={editingPack.open}
+        onOpenChange={(o) => { if (!o) setEditingPack({ pack: null, open: false }) }}
+        title={editingPack.pack ? `Edit pack — ${editingPack.pack.label}` : 'Add coin pack'}
+        description="Coins are sold as packs. The popular flag highlights one pack as best value in the store."
+        fields={[
+          { key: 'label', label: 'Pack label', placeholder: 'Starter', defaultValue: editingPack.pack?.label ?? '', required: true },
+          { key: 'coins', label: 'Coins (base amount)', placeholder: '100', defaultValue: editingPack.pack ? String(editingPack.pack.coins) : '100', type: 'number' as const, required: true },
+          { key: 'priceUsd', label: 'Price in USD', placeholder: '0.99', defaultValue: editingPack.pack ? String(editingPack.pack.priceUsd) : '0.99', type: 'number' as const, required: true },
+          { key: 'bonus', label: 'Bonus coins (added on top)', placeholder: '0', defaultValue: editingPack.pack ? String(editingPack.pack.bonus) : '0', type: 'number' as const, required: true },
+          { key: 'popular', label: 'Mark as popular (best value)', type: 'checkbox' as const, defaultValue: editingPack.pack?.popular ? 'true' : 'false', hint: 'Only one pack should usually be popular — the store highlights it.' },
+        ]}
+        confirmLabel={editingPack.pack ? 'Save pack' : 'Add pack'}
+        loading={packBusy || savingPacks}
+        onConfirm={(v) => void submitPack(v)}
+      />
+
+      {/* ---- pack delete confirm ---- */}
+      <ConfirmDialog
+        open={!!deletingPack}
+        onOpenChange={(o) => { if (!o) setDeletingPack(null) }}
+        title={deletingPack ? `Delete ${deletingPack.label}?` : 'Delete pack?'}
+        description="Removes the pack from the Coin Store. Existing coin purchases already made with this pack are preserved in the ledger."
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        variant="destructive"
+        loading={deletePackBusy || savingPacks}
+        onConfirm={() => void submitDeletePack()}
       />
     </div>
   )

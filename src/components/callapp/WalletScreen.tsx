@@ -19,6 +19,10 @@ import {
   FlaskConical,
   Building2,
   Clock,
+  Coins,
+  ShoppingBag,
+  ArrowLeftRight,
+  Sparkles,
 } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { api } from '@/lib/callapp/api'
@@ -26,7 +30,7 @@ import { toast } from 'sonner'
 import { Avatar } from './Avatar'
 import type { BankAccountItem } from '@/lib/callapp/types'
 
-type WalletTab = 'overview' | 'gifts' | 'ledger' | 'withdraw'
+type WalletTab = 'overview' | 'coins' | 'gifts' | 'ledger' | 'withdraw'
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Pending', cls: 'bg-[#FFF7E6] text-[#B7791F]' },
@@ -66,7 +70,18 @@ function timeAgo(iso: string) {
 
 /** REAL-MONEY WALLET — creator earnings dashboard (no coins, no diamonds). */
 export function WalletScreen({ onClose }: { onClose: () => void }) {
-  const { wallet, walletCurrency, walletLedger, walletGifts, withdrawals, bankAccounts, loadWallet } = useApp()
+  const {
+    wallet,
+    walletCurrency,
+    walletLedger,
+    walletGifts,
+    withdrawals,
+    bankAccounts,
+    coinWallet,
+    coinLedger,
+    loadWallet,
+    setOverlay,
+  } = useApp()
   const [tab, setTab] = useState<WalletTab>('overview')
   const [provider, setProvider] = useState<{ id: string; isTest: boolean }>({ id: 'sandbox', isTest: true })
   const [minWithdrawal, setMinWithdrawal] = useState(25)
@@ -217,11 +232,51 @@ export function WalletScreen({ onClose }: { onClose: () => void }) {
           </div>
         </section>
 
+        {/* coin balance card — virtual currency for sending gifts */}
+        <section className="px-5 pt-3">
+          <div className="relative overflow-hidden rounded-[22px] border border-amber-200 bg-gradient-to-br from-amber-50 to-[#FFF7E6] p-4">
+            <div className="pointer-events-none absolute -right-6 -top-8 h-28 w-28 rounded-full bg-amber-200/40 blur-2xl" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-12 w-12 flex-none items-center justify-center rounded-2xl bg-amber-500 text-white shadow-[0_8px_18px_rgba(245,158,11,0.36)]">
+                  <Coins size={22} />
+                </span>
+                <div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-700">
+                    Coins
+                  </div>
+                  <div className="text-[26px] font-extrabold leading-none tracking-tight text-cink">
+                    {(coinWallet?.coins ?? 0).toLocaleString()}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-semibold text-cmut">
+                    Spend on gifts · cannot be withdrawn
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                className="flex h-11 items-center justify-center gap-1.5 rounded-[14px] bg-amber-500 text-[13.5px] font-extrabold text-white shadow-sm transition hover:bg-amber-600 active:scale-[.98]"
+                onClick={() => setOverlay('coin-store')}
+              >
+                <ShoppingBag size={15} /> Buy coins
+              </button>
+              <button
+                className="flex h-11 items-center justify-center gap-1.5 rounded-[14px] bg-white text-[13.5px] font-extrabold text-cink ring-1 ring-cline transition hover:bg-amber-50 active:scale-[.98]"
+                onClick={() => setTab('coins')}
+              >
+                <ReceiptText size={15} /> Coin transactions
+              </button>
+            </div>
+          </div>
+        </section>
+
         {/* tabs */}
         <nav className="mt-5 flex gap-1.5 px-5" aria-label="Wallet sections">
           {(
             [
               ['overview', 'Overview'],
+              ['coins', 'Coins'],
               ['gifts', 'Gifts received'],
               ['ledger', 'Transactions'],
               ['withdraw', 'Withdraw'],
@@ -240,6 +295,97 @@ export function WalletScreen({ onClose }: { onClose: () => void }) {
         </nav>
 
         <main className="px-5 pt-4">
+          {/* ============ COINS ============ */}
+          {tab === 'coins' && (
+            <div className="space-y-3">
+              <div className="overflow-hidden rounded-[22px] border border-amber-200 bg-white">
+                <div className="flex items-center justify-between border-b border-cline bg-amber-50/60 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Coins size={16} className="text-amber-500" />
+                    <span className="text-[13px] font-extrabold text-cink">Coin balance</span>
+                  </div>
+                  <button
+                    className="flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-[11.5px] font-bold text-white"
+                    onClick={() => setOverlay('coin-store')}
+                  >
+                    <ShoppingBag size={12} /> Coin Store
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-cline text-center">
+                  <div className="px-2 py-3">
+                    <ShoppingBag size={14} className="mx-auto text-amber-500" />
+                    <div className="mt-1 text-[14px] font-extrabold text-cink">
+                      {(coinWallet?.totalPurchased ?? 0).toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-semibold text-cmut">Purchased</div>
+                  </div>
+                  <div className="px-2 py-3">
+                    <ArrowLeftRight size={14} className="mx-auto text-amber-500" />
+                    <div className="mt-1 text-[14px] font-extrabold text-cink">
+                      {(coinWallet?.totalConverted ?? 0).toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-semibold text-cmut">Converted</div>
+                  </div>
+                  <div className="px-2 py-3">
+                    <Gift size={14} className="mx-auto text-amber-500" />
+                    <div className="mt-1 text-[14px] font-extrabold text-cink">
+                      {(coinWallet?.totalSpent ?? 0).toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-semibold text-cmut">Spent</div>
+                  </div>
+                </div>
+                <div className="border-t border-cline bg-csoft px-4 py-3">
+                  <button
+                    className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-amber-500 h-11 text-[13.5px] font-extrabold text-white transition hover:bg-amber-600 active:scale-[.98]"
+                    onClick={() => setOverlay('coin-store')}
+                  >
+                    <Sparkles size={15} /> Buy coins or convert USD earnings
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-[22px] border border-cline bg-white">
+                <div className="border-b border-cline px-4 py-3 text-[13px] font-extrabold text-cink">
+                  Coin transactions
+                </div>
+                {coinLedger.length === 0 ? (
+                  <EmptyState
+                    icon={Coins}
+                    title="No coin transactions yet"
+                    note="Purchases, conversions, and gifts sent with coins will all appear here."
+                  />
+                ) : (
+                  <ul className="max-h-[52vh] divide-y divide-cline overflow-y-auto app-scroll">
+                    {coinLedger.map((l) => {
+                      const credit = l.direction === 'credit'
+                      return (
+                        <li key={l.id} className="flex items-center gap-3 px-4 py-3">
+                          <span
+                            className={`flex h-9 w-9 flex-none items-center justify-center rounded-full ${
+                              credit ? 'bg-amber-50 text-amber-600' : 'bg-[#FEF1F0] text-cred'
+                            }`}
+                          >
+                            {credit ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[13.5px] font-bold text-cink">{l.note || l.kind}</div>
+                            <div className="text-[11.5px] text-cmut">
+                              {timeAgo(l.createdAt)} · balance {l.coinsAfter.toLocaleString()} coins
+                            </div>
+                          </div>
+                          <div className={`text-[14px] font-extrabold ${credit ? 'text-amber-600' : 'text-cred'}`}>
+                            {credit ? '+' : '−'}
+                            {l.amount.toLocaleString()}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ============ OVERVIEW ============ */}
           {tab === 'overview' && (
             <div className="space-y-3">

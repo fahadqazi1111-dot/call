@@ -38,6 +38,7 @@ model User {
   stories          Story[]        @relation("UserStories")
   storyViews       StoryView[]    @relation("UserStoryViews")
   wallet           Wallet?
+  coinWallet       CoinWallet?
   bankAccounts     BankAccount[]
   payments         Payment[]      @relation("UserPayments")
   giftSent         GiftSend[]     @relation("GiftSender")
@@ -242,7 +243,43 @@ model LedgerEntry {
 }
 
 /**
- * Payments — every real-money checkout (gift, room entry, ad campaign).
+ * ==================== COIN WALLET (in-app currency) ====================
+ * Coins are bought with USD (coin packs) or converted from USD gift earnings.
+ * Coins are spent to send gifts. They are NOT withdrawable (only USD earnings are).
+ * This is a parallel ledger to Wallet/LedgerEntry — kept separate for type safety
+ * and so the USD withdrawal flow is never affected by coin balances.
+ */
+model CoinWallet {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coins           Int      @default(0) // spendable coin balance
+  totalPurchased  Int      @default(0) // lifetime coins bought with USD
+  totalConverted  Int      @default(0) // lifetime coins converted from USD earnings
+  totalSpent      Int      @default(0) // lifetime coins spent on gifts
+  totalReceived   Int      @default(0) // lifetime coins received as gifts (if enabled)
+  updatedAt       DateTime @updatedAt
+}
+
+/** Append-only coin ledger — every coin balance change. */
+model CoinLedgerEntry {
+  id             String   @id @default(cuid())
+  userId         String
+  kind           String @db.Text // coin_purchase | coin_spend | coin_convert_in | coin_convert_out | admin_adjustment | coin_refund | coin_gift_received
+  direction      String @db.Text // credit | debit
+  amount         Int // coin amount (always positive integer)
+  coinsAfter     Int // balance after this entry
+  refType        String? @db.Text // gift_send | payment | conversion | admin
+  refId          String? @db.Text
+  note           String   @default("") @db.Text
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/**
+ * Payments — every real-money checkout (gift, room entry, ad campaign, coin topup).
  * status: pending | successful | failed | cancelled | refunded
  * provider: stripe | sandbox (sandbox = clearly-labeled test mode, isTest=true)
  */
@@ -280,7 +317,8 @@ model Gift {
   animKind    String @db.Text // rose | heart | flower | crown | car | rocket | dragon | lion | superlion | fireworks | castle | generic
   sound       String  @default("gift") @db.Text // soundKit key
   category    String  @default("both") @db.Text // room | live | both
-  priceUsd    Float // real money price
+  priceUsd    Float // real money price (for card/wallet payment)
+  priceCoins  Int    @default(0) // coin price (0 = not purchasable with coins)
   currency    String  @default("USD") @db.Text
   platformMap String? @db.Text // JSON platform product mapping: { android: "gift_rose", ios: "gift_rose" }
   durationMs  Int     @default(2200)
@@ -290,26 +328,28 @@ model Gift {
 }
 
 model GiftSend {
-  id           String   @id @default(cuid())
-  giftId       String
-  gift         Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
-  senderId     String
-  sender       User     @relation("GiftSender", fields: [senderId], references: [id], onDelete: Cascade)
-  recipientId  String
-  recipient    User     @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  context      String @db.Text // room | live | battle
-  roomId       String?
-  liveId       String?
-  battleId     String? @db.Text
-  battleSide   Int?
-  grossAmount  Float // verified payment value
-  commission   Float    @default(0) // platform share
-  feeAmount    Float    @default(0) // payment processing fee
-  netAmount    Float    @default(0) // credited to creator
-  currency     String   @default("USD") @db.Text
-  paymentId    String? @db.Text
-  isTest       Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  giftId        String
+  gift          Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  senderId      String
+  sender        User     @relation("GiftSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId   String
+  recipient     User     @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  context       String @db.Text // room | live | battle
+  roomId        String?
+  liveId        String?
+  battleId      String? @db.Text
+  battleSide    Int?
+  grossAmount   Float // verified payment value in USD
+  grossCoins    Int     @default(0) // coins spent (if paid with coins)
+  commission    Float    @default(0) // platform share in USD
+  feeAmount     Float    @default(0) // payment processing fee
+  netAmount     Float    @default(0) // credited to creator in USD
+  currency      String   @default("USD") @db.Text
+  paymentMethod String   @default("card") @db.Text // card | wallet | coins
+  paymentId     String? @db.Text
+  isTest        Boolean  @default(false)
+  createdAt     DateTime @default(now())
 
   @@index([recipientId, createdAt])
   @@index([senderId, createdAt])
