@@ -206,6 +206,40 @@ CREATE TABLE `LedgerEntry` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `CoinWallet` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `coins` INTEGER NOT NULL DEFAULT 0,
+    `totalPurchased` INTEGER NOT NULL DEFAULT 0,
+    `totalConverted` INTEGER NOT NULL DEFAULT 0,
+    `totalSpent` INTEGER NOT NULL DEFAULT 0,
+    `totalReceived` INTEGER NOT NULL DEFAULT 0,
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `CoinWallet_userId_key`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `CoinLedgerEntry` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `kind` TEXT NOT NULL,
+    `direction` TEXT NOT NULL,
+    `amount` INTEGER NOT NULL,
+    `coinsAfter` INTEGER NOT NULL,
+    `refType` TEXT NULL,
+    `refId` TEXT NULL,
+    `note` TEXT NOT NULL DEFAULT '',
+    `idempotencyKey` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `CoinLedgerEntry_idempotencyKey_key`(`idempotencyKey`),
+    INDEX `CoinLedgerEntry_userId_createdAt_idx`(`userId`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `Payment` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
@@ -239,6 +273,7 @@ CREATE TABLE `Gift` (
     `sound` TEXT NOT NULL DEFAULT 'gift',
     `category` TEXT NOT NULL DEFAULT 'both',
     `priceUsd` DOUBLE NOT NULL,
+    `priceCoins` INTEGER NOT NULL DEFAULT 0,
     `currency` TEXT NOT NULL DEFAULT 'USD',
     `platformMap` TEXT NULL,
     `durationMs` INTEGER NOT NULL DEFAULT 2200,
@@ -260,10 +295,12 @@ CREATE TABLE `GiftSend` (
     `battleId` TEXT NULL,
     `battleSide` INTEGER NULL,
     `grossAmount` DOUBLE NOT NULL,
+    `grossCoins` INTEGER NOT NULL DEFAULT 0,
     `commission` DOUBLE NOT NULL DEFAULT 0,
     `feeAmount` DOUBLE NOT NULL DEFAULT 0,
     `netAmount` DOUBLE NOT NULL DEFAULT 0,
     `currency` TEXT NOT NULL DEFAULT 'USD',
+    `paymentMethod` TEXT NOT NULL DEFAULT 'card',
     `paymentId` TEXT NULL,
     `isTest` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -677,6 +714,8 @@ CREATE TABLE `BroadcastDelivery` (
     UNIQUE INDEX `BroadcastDelivery_broadcastId_userId_key`(`broadcastId`, `userId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- AddForeignKey
 
 -- AddForeignKey
 
