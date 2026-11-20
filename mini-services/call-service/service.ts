@@ -1,17 +1,19 @@
-import { createServer, type IncomingMessage, type Server as HttpServer } from 'http'
+import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'http'
 import { Server, type Socket } from 'socket.io'
 
 /**
  * How the CALL signaling service is hosted:
  *
  * - Dev (sandbox): `bun index.ts` self-hosts an internal http server on port
- *   3003 (socket.io path '/') + the internal relay on 127.0.0.1:3004.
- *   The gateway routes `/?XTransformPort=3003` here.
+ *   3003 (socket.io path '/'). The internal relay is mounted on THAT SAME
+ *   server at /internal/* (no second port needed) AND optionally also on
+ *   127.0.0.1:3004 for legacy callers. The gateway routes `/?XTransformPort=3003`.
  * - Production: the platform runs ONE node process (deploy/production-server.js)
- *   hosting BOTH Next.js and this service on the same port — socket.io is
- *   attached to the Next http server at '/socket.io/' and the internal relay
- *   stays on 127.0.0.1:3004. All realtime logic below is byte-for-byte the
- *   same in both modes.
+ *   hosting BOTH Next.js and this service on ONE port — socket.io is attached
+ *   to the Next http server at '/socket.io/' and the internal relay is mounted
+ *   on the SAME server at /internal/* (Hostinger shared hosting only allows
+ *   ONE port per process). All realtime logic below is byte-for-byte the same
+ *   in both modes.
  */
 export interface CreateCallServiceOptions {
   /** Attach socket.io to an EXISTING http server (production single-port mode). */
@@ -32,10 +34,16 @@ export function createCallService(opts: CreateCallServiceOptions = {}): void {
  * (gift delivered after a verified payment), broadcasts and other server-side
  * events POST here with the shared secret:
  *   POST /internal/relay  { targets: ['user:<id>'|'room:<id>'|'live:<id>'|'all'], event, data }
+ *   POST /internal/relay  { event, payload, roomId? }   (simplified single-event form)
  *
- * NOTE: this runs on a SEPARATE internal-only port (3004) because socket.io
- * is attached to the main server with path '/' and would otherwise swallow
- * every HTTP request. Port 3004 is never exposed by the gateway.
+ * IMPORTANT (Hostinger shared "Node.js" hosting): a process can only listen on
+ * ONE port. So we mount this handler on the MAIN http server at /internal/* —
+ * the same server that serves Next.js + socket.io. A separate relay port
+ * (3004) is ONLY opened when `opts.relayPort` is explicitly set (dev mode).
+ *
+ * Auth: the handler accepts EITHER header for backward compatibility:
+ *   - x-relay-secret     (canonical name)
+ *   - x-internal-secret  (legacy name, used by existing Next API callers)
  */
 const RELAY_SECRET = 'call-internal-relay-v1'
 
@@ -48,13 +56,17 @@ function readBody(req: IncomingMessage, cb: (raw: string) => void) {
   req.on('end', () => cb(raw))
 }
 
-const relayServer = createServer((req, res) => {
+function isRelayAuthorized(req: IncomingMessage): boolean {
+  return req.headers['x-relay-secret'] === RELAY_SECRET || req.headers['x-internal-secret'] === RELAY_SECRET
+}
+
+const relayHandler = (req: IncomingMessage, res: ServerResponse) => {
   // ---- internal GET endpoint: which live sessions currently have a CONNECTED
   // host socket. The backend uses this to auto-end ghost broadcasts (host
   // closed the tab / camera failed) so viewers never hang on an endless
   // preloader for a dead stream.
   if (req.url && req.url.startsWith('/internal/live-hosts')) {
-    if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+    if (!isRelayAuthorized(req)) {
       res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
       return
     }
@@ -67,7 +79,7 @@ const relayServer = createServer((req, res) => {
     return
   }
   if (req.url && req.url.startsWith('/internal/live-viewers')) {
-    if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+    if (!isRelayAuthorized(req)) {
       res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
       return
     }
@@ -83,13 +95,34 @@ const relayServer = createServer((req, res) => {
     res.writeHead(404).end()
     return
   }
-  if (req.headers['x-internal-secret'] !== RELAY_SECRET) {
+  if (req.method && req.method.toUpperCase() !== 'POST') {
+    res.writeHead(405, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'method_not_allowed' }))
+    return
+  }
+  if (!isRelayAuthorized(req)) {
     res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: 'forbidden' }))
     return
   }
   readBody(req, (raw) => {
     try {
-      const body = JSON.parse(raw || '{}') as { targets?: string[]; event?: string; data?: unknown }
+      const body = JSON.parse(raw || '{}') as {
+        targets?: string[]
+        event?: string
+        data?: unknown
+        payload?: unknown
+        roomId?: string
+      }
+      // Simplified single-event form: { event, payload, roomId? }
+      // Lets external callers (curl, admin scripts) push one event without
+      // having to construct a `targets` array.
+      if (body.targets === undefined && body.event) {
+        const event = String(body.event)
+        if (body.roomId) io.to(body.roomId).emit(event, body.payload)
+        else io.emit(event, body.payload)
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, reached: 1 }))
+        return
+      }
+      // Original fan-out form: { targets, event, data }
       const targets = Array.isArray(body.targets) ? body.targets : []
       const event = String(body.event || '')
       if (!targets.length || !event) {
@@ -157,17 +190,7 @@ const relayServer = createServer((req, res) => {
       }
     }
   })
-})
-  if (opts.relayPort !== null) {
-    const relayPort = opts.relayPort ?? 3004
-    // never crash the whole server over the relay port — just report
-    relayServer.on('error', (e) =>
-      console.error(`CALL relay listen failed on 127.0.0.1:${relayPort}:`, (e as Error).message)
-    )
-    relayServer.listen(relayPort, '127.0.0.1', () =>
-      console.log(`CALL internal relay on 127.0.0.1:${relayPort}`)
-    )
-  }
+}
 
 /* ================= server-side role verification =================
  * The socket service has no DB access, so it verifies every privileged
@@ -206,6 +229,45 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
   pingInterval: 25000,
 })
+
+// ---- Mount the relay on the MAIN http server at /internal/* -----------------
+// Hostinger shared "Node.js" hosting only allows ONE port per process, so
+// the relay CANNOT bind a second port (3004). Instead we intercept every
+// /internal/* request on the main server (the same one serving Next.js and
+// socket.io) and route it to `relayHandler`. Non-/internal/* requests fall
+// through to the original listeners (Next.js handler).
+//
+// We grab the existing listeners, remove them, then add a wrapping listener
+// that dispatches to relayHandler for /internal/* and re-invokes the original
+// listeners for everything else. This preserves Next.js routing 1:1.
+const originalListeners = httpServer.listeners('request') as Array<(req: IncomingMessage, res: ServerResponse) => void>
+httpServer.removeAllListeners('request')
+httpServer.on('request', (req, res) => {
+  if (req.url && req.url.split('?')[0].startsWith('/internal/')) {
+    return relayHandler(req, res)
+  }
+  for (const listener of originalListeners) {
+    listener(req, res)
+  }
+})
+
+// ---- Optional: also listen on a SEPARATE relay port (dev mode only) ---------
+// In production `opts.relayPort` is null — no second port is opened. In dev
+// (mini-services/call-service/index.ts calls createCallService() with no opts,
+// so relayPort defaults to 3004) we ALSO listen on 127.0.0.1:3004 so legacy
+// callers (and direct curl tests) work without going through the main server.
+let relayServer: HttpServer | null = null
+if (opts.relayPort !== null && opts.relayPort !== undefined) {
+  const relayPort = opts.relayPort
+  relayServer = createServer((req, res) => relayHandler(req, res))
+  // never crash the whole server over the relay port — just report
+  relayServer.on('error', (e) =>
+    console.error(`CALL relay listen failed on 127.0.0.1:${relayPort}:`, (e as Error).message)
+  )
+  relayServer.listen(relayPort, '127.0.0.1', () =>
+    console.log(`CALL internal relay on 127.0.0.1:${relayPort}`)
+  )
+}
 
 /**
  * CALL signaling + presence + realtime push service.
@@ -1046,7 +1108,7 @@ io.on('connection', (socket: Socket) => {
     // would leave a zombie that blocks the respawn) — force-exit after 2s
     const stop = () => {
       httpServer.close(() => process.exit(0))
-      relayServer.close(() => process.exit(0))
+      relayServer?.close(() => process.exit(0))
       setTimeout(() => process.exit(0), 2000).unref()
     }
     process.on('SIGTERM', stop)

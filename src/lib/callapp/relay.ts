@@ -7,7 +7,13 @@
  */
 
 const RELAY_SECRET = 'call-internal-relay-v1'
-const RELAY_URL = process.env.CALL_RELAY_URL || 'http://127.0.0.1:3004/internal/relay'
+// Default to the MAIN server's relay path (http://127.0.0.1:${PORT}/internal/relay).
+// In production PORT is the single port the whole process listens on (the relay
+// is mounted on the same http server as Next.js + socket.io — Hostinger shared
+// hosting only allows ONE port per process). When CALL_RELAY_URL is set
+// explicitly (dev mode -> call-service on 3003), that takes precedence.
+const RELAY_URL =
+  process.env.CALL_RELAY_URL || `http://127.0.0.1:${process.env.PORT || '3000'}/internal/relay`
 
 /** targets: ['user:<id>', 'room:<id>', 'live:<id>', 'all'] */
 export async function relaySend(targets: string[], event: string, data: unknown): Promise<boolean> {

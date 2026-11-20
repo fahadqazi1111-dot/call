@@ -115,11 +115,19 @@ export const api = {
       body: JSON.stringify({ phone, code, name, username, email }),
     }),
   /** Pre-registration phone OTP check — validates the code WITHOUT creating an account. */
-  verifyPhoneOtp: (phone: string, code: string) =>
-    request<{ ok: boolean; verified: boolean; phone: string; verifiedAt: string }>(
-      '/api/auth/otp/verify',
-      { method: 'POST', body: JSON.stringify({ phone, code }) }
-    ),
+  verifyPhoneOtp: (phone: string, code: string, googlePendingToken?: string) =>
+    request<{
+      ok: boolean
+      verified?: boolean
+      created?: boolean
+      phone?: string
+      verifiedAt?: string
+      token?: string
+      user?: Me
+    }>('/api/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ phone, code, googlePendingToken }),
+    }),
   usernameCheck: (username: string) =>
     request<{ ok: boolean; available: boolean; reason?: string; mine?: boolean }>(
       `/api/auth/username/check?u=${encodeURIComponent(username)}`
@@ -202,7 +210,14 @@ export const api = {
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
   googleSignIn: (credential: string) =>
-    request<{ ok: boolean; token: string; user: Me }>('/api/auth/google', {
+    request<{
+      ok: boolean
+      token?: string
+      user?: Me
+      googlePending?: boolean
+      googlePendingToken?: string
+      googleInfo?: { name: string; email: string; avatarUrl?: string | null }
+    }>('/api/auth/google', {
       method: 'POST',
       body: JSON.stringify({ credential }),
     }),

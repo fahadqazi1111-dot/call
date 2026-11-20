@@ -20059,9 +20059,12 @@ function createCallService(opts = {}) {
     });
     req.on("end", () => cb(raw));
   }
-  const relayServer = import_http.createServer((req, res) => {
+  function isRelayAuthorized(req) {
+    return req.headers["x-relay-secret"] === RELAY_SECRET || req.headers["x-internal-secret"] === RELAY_SECRET;
+  }
+  const relayHandler = (req, res) => {
     if (req.url && req.url.startsWith("/internal/live-hosts")) {
-      if (req.headers["x-internal-secret"] !== RELAY_SECRET) {
+      if (!isRelayAuthorized(req)) {
         res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, error: "forbidden" }));
         return;
       }
@@ -20074,7 +20077,7 @@ function createCallService(opts = {}) {
       return;
     }
     if (req.url && req.url.startsWith("/internal/live-viewers")) {
-      if (req.headers["x-internal-secret"] !== RELAY_SECRET) {
+      if (!isRelayAuthorized(req)) {
         res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, error: "forbidden" }));
         return;
       }
@@ -20088,13 +20091,26 @@ function createCallService(opts = {}) {
       res.writeHead(404).end();
       return;
     }
-    if (req.headers["x-internal-secret"] !== RELAY_SECRET) {
+    if (req.method && req.method.toUpperCase() !== "POST") {
+      res.writeHead(405, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, error: "method_not_allowed" }));
+      return;
+    }
+    if (!isRelayAuthorized(req)) {
       res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, error: "forbidden" }));
       return;
     }
     readBody(req, (raw) => {
       try {
         const body = JSON.parse(raw || "{}");
+        if (body.targets === undefined && body.event) {
+          const event2 = String(body.event);
+          if (body.roomId)
+            io2.to(body.roomId).emit(event2, body.payload);
+          else
+            io2.emit(event2, body.payload);
+          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, reached: 1 }));
+          return;
+        }
         const targets = Array.isArray(body.targets) ? body.targets : [];
         const event = String(body.event || "");
         if (!targets.length || !event) {
@@ -20162,12 +20178,7 @@ function createCallService(opts = {}) {
         }
       }
     });
-  });
-  if (opts.relayPort !== null) {
-    const relayPort = opts.relayPort ?? 3004;
-    relayServer.on("error", (e) => console.error(`CALL relay listen failed on 127.0.0.1:${relayPort}:`, e.message));
-    relayServer.listen(relayPort, "127.0.0.1", () => console.log(`CALL internal relay on 127.0.0.1:${relayPort}`));
-  }
+  };
   const VERIFY_URL = process.env.CALL_APP_URL || "http://127.0.0.1:3000";
   const verifyCache = new Map;
   async function verify(kind, id, userId) {
@@ -20199,6 +20210,23 @@ function createCallService(opts = {}) {
     pingTimeout: 60000,
     pingInterval: 25000
   });
+  const originalListeners = httpServer.listeners("request");
+  httpServer.removeAllListeners("request");
+  httpServer.on("request", (req, res) => {
+    if (req.url && req.url.split("?")[0].startsWith("/internal/")) {
+      return relayHandler(req, res);
+    }
+    for (const listener of originalListeners) {
+      listener(req, res);
+    }
+  });
+  let relayServer = null;
+  if (opts.relayPort !== null && opts.relayPort !== undefined) {
+    const relayPort = opts.relayPort;
+    relayServer = import_http.createServer((req, res) => relayHandler(req, res));
+    relayServer.on("error", (e) => console.error(`CALL relay listen failed on 127.0.0.1:${relayPort}:`, e.message));
+    relayServer.listen(relayPort, "127.0.0.1", () => console.log(`CALL internal relay on 127.0.0.1:${relayPort}`));
+  }
   const presence = new Map;
   const names = new Map;
   const roomMembers = new Map;
@@ -20919,7 +20947,7 @@ function createCallService(opts = {}) {
     httpServer.listen(port, () => console.log(`CALL signaling service on port ${port}`));
     const stop = () => {
       httpServer.close(() => process.exit(0));
-      relayServer.close(() => process.exit(0));
+      relayServer?.close(() => process.exit(0));
       setTimeout(() => process.exit(0), 2000).unref();
     };
     process.on("SIGTERM", stop);

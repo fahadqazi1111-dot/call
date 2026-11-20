@@ -18,6 +18,63 @@ export function readToken(token?: string | null): string | null {
   return sig === expect ? userId : null
 }
 
+/* ---------------- Google signup pending token ----------------
+ * When a new user signs in with Google, we do NOT create their account
+ * immediately — phone verification must happen first. Instead we mint a
+ * short-lived (10-minute) token carrying the verified Google identity
+ * (googleId, email, name, emailVerified). The client then completes phone
+ * OTP and sends both the code and this pending token to /api/auth/otp/verify,
+ * which creates the User row with the real phone number.
+ *
+ * Signed with the same HMAC secret as the login token, so no new config.
+ */
+
+const GOOGLE_PENDING_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+export interface GooglePendingPayload {
+  googleId: string
+  email: string
+  name: string
+  emailVerified: boolean
+  avatarUrl?: string | null
+  exp: number
+}
+
+export function signGooglePendingToken(payload: Omit<GooglePendingPayload, 'exp'>): string {
+  const exp = Date.now() + GOOGLE_PENDING_TTL_MS
+  const body = JSON.stringify({ ...payload, exp })
+  const sig = crypto.createHmac('sha256', SECRET).update(body).digest('hex').slice(0, 32)
+  return Buffer.from(body).toString('base64url') + '.' + sig
+}
+
+export function verifyGooglePendingToken(token: string | null | undefined): GooglePendingPayload | null {
+  if (!token) return null
+  const dot = token.indexOf('.')
+  if (dot < 1) return null
+  const bodyB64 = token.slice(0, dot)
+  const sig = token.slice(dot + 1)
+  let body: string
+  try {
+    body = Buffer.from(bodyB64, 'base64url').toString('utf8')
+  } catch {
+    return null
+  }
+  const expect = crypto.createHmac('sha256', SECRET).update(body).digest('hex').slice(0, 32)
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expect))) return null
+  } catch {
+    return null
+  }
+  try {
+    const payload = JSON.parse(body) as GooglePendingPayload
+    if (!payload.exp || payload.exp < Date.now()) return null
+    if (!payload.googleId || !payload.email) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
 export async function requireUser(req: Request) {
   const userId = readToken(req.headers.get('x-auth-token'))
   if (!userId) return null

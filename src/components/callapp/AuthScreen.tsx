@@ -26,8 +26,14 @@ import {
 import { api, setToken } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 
-type Step = 'start' | 'otp' | 'forgot' | 'reset' | 'google'
+type Step = 'start' | 'otp' | 'forgot' | 'reset' | 'google' | 'google_phone' | 'google_otp'
 type Mode = 'login' | 'signup'
+
+interface GoogleInfo {
+  name: string
+  email: string
+  avatarUrl?: string | null
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -284,6 +290,17 @@ export function AuthScreen() {
   const [resetDelivered, setResetDelivered] = useState(false)
   const [resetResendIn, setResetResendIn] = useState(0)
 
+  // google signup (deferred): Google identity is verified, but a real phone
+  // number + OTP must still be collected BEFORE the account is created.
+  const [googlePendingToken, setGooglePendingToken] = useState('')
+  const [googleInfo, setGoogleInfo] = useState<GoogleInfo | undefined>(undefined)
+  const [googlePhone, setGooglePhone] = useState('')
+  const [googleCode, setGoogleCode] = useState('')
+  const [googleDevCode, setGoogleDevCode] = useState('')
+  const [googleSandbox, setGoogleSandbox] = useState(false)
+  const [googleSent, setGoogleSent] = useState(false)
+  const [googleResendIn, setGoogleResendIn] = useState(0)
+
   const googleHostRef = useRef<HTMLDivElement>(null)
 
   // shared countdown timer for login OTP
@@ -316,9 +333,17 @@ export function AuthScreen() {
     return () => window.clearTimeout(t)
   }, [resetResendIn])
 
+  // countdown for google signup phone resend
+  useEffect(() => {
+    if (googleResendIn <= 0) return
+    const t = window.setTimeout(() => setGoogleResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [googleResendIn])
+
   const signupPhone = () => `${country}${phone.replace(/\D/g, '')}`
   const loginPhone = () => `${country}${idDigits}`
   const activePhone = mode === 'signup' ? signupPhone() : loginPhone()
+  const googleFullPhone = () => `${country}${googlePhone.replace(/\D/g, '')}`
 
   const goStart = () => {
     setError('')
@@ -567,7 +592,25 @@ export function AuthScreen() {
       setError('')
       try {
         const res = await api.googleSignIn(credential)
-        loginSuccess(res.token, res.user)
+        if (res.googlePending) {
+          // New Google user — needs phone OTP before account creation.
+          // Stash the signed pending token + Google profile, route to phone step.
+          setGooglePendingToken(res.googlePendingToken || '')
+          setGoogleInfo(res.googleInfo)
+          setGooglePhone('')
+          setGoogleCode('')
+          setGoogleDevCode('')
+          setGoogleSandbox(false)
+          setGoogleSent(false)
+          setGoogleResendIn(0)
+          setStep('google_phone')
+        } else if (res.token && res.user) {
+          // Returning user — already has an account, log in immediately.
+          loginSuccess(res.token, res.user)
+        } else {
+          setError('Google sign-in could not be completed. Please try again.')
+          setStep('start')
+        }
       } catch (e) {
         setError((e as Error).message)
         setStep('start')
@@ -577,6 +620,82 @@ export function AuthScreen() {
     },
     [loginSuccess]
   )
+
+  /* ---------- google signup: phone OTP ---------- */
+  // The Google identity is verified, but the account is NOT created until
+  // the user proves control of a real phone number. The signed
+  // `googlePendingToken` is sent alongside the OTP code to
+  // /api/auth/otp/verify, which creates the User row server-side.
+
+  const sendGooglePhoneCode = async () => {
+    const p = googleFullPhone()
+    if (p.replace(/\D/g, '').length < 7) {
+      toast.error('Enter a valid phone number first')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.requestOtp(p)
+      setGoogleDevCode(res.devCode || '')
+      setGoogleSandbox(Boolean(res.sandbox))
+      setGoogleSent(true)
+      setGoogleCode('')
+      setGoogleResendIn(60)
+      setStep('google_otp')
+      if (res.sandbox) {
+        toast.info('Sandbox mode — phone code is shown below.')
+      } else {
+        toast.success(`Code sent to ${p}`)
+      }
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const verifyGooglePhoneCode = async () => {
+    if (googleCode.length !== 6) {
+      toast.error('Enter the 6-digit code')
+      return
+    }
+    if (!googlePendingToken) {
+      toast.error('Your Google session expired. Please sign in with Google again.')
+      setStep('google')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.verifyPhoneOtp(googleFullPhone(), googleCode, googlePendingToken)
+      if (res.created && res.token && res.user) {
+        loginSuccess(res.token, res.user)
+      } else if (res.verified) {
+        // Verified but no account created — shouldn't happen here, but guard.
+        toast.success('Phone verified')
+      } else {
+        setError('Could not complete signup. Please try again.')
+      }
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelGoogleSignup = () => {
+    setGooglePendingToken('')
+    setGoogleInfo(undefined)
+    setGooglePhone('')
+    setGoogleCode('')
+    setGoogleDevCode('')
+    setGoogleSandbox(false)
+    setGoogleSent(false)
+    setGoogleResendIn(0)
+    setError('')
+    setStep('start')
+  }
 
   useEffect(() => {
     if (step !== 'google') return
@@ -648,6 +767,16 @@ export function AuthScreen() {
       }
     if (step === 'google')
       return { t: 'Continue with Google', s: 'A unique username is created from your Google name automatically.' }
+    if (step === 'google_phone')
+      return {
+        t: 'Verify your phone',
+        s: 'Finishing your Google sign-up — enter your phone to receive a code.',
+      }
+    if (step === 'google_otp')
+      return {
+        t: 'Enter the code',
+        s: `We sent a code to ${country} ${googleFullPhone().replace(country, '')}.`,
+      }
     return mode === 'login'
       ? { t: 'Welcome back', s: 'Log in with your email or phone number.' }
       : { t: 'Create your account', s: 'Verify your phone (and email) with one-time codes, then pick a password.' }
@@ -671,6 +800,8 @@ export function AuthScreen() {
   const back = () => {
     setError('')
     if (step === 'reset') setStep('forgot')
+    else if (step === 'google_otp') setStep('google_phone')
+    else if (step === 'google_phone' || step === 'google') cancelGoogleSignup()
     else goStart()
   }
 
@@ -1261,6 +1392,131 @@ export function AuthScreen() {
                     Auth). Until then, use phone or email.
                   </span>
                 </div>
+              </div>
+            )}
+
+            {/* ================= google_phone (deferred signup) ================= */}
+            {step === 'google_phone' && (
+              <div className="mt-6">
+                {/* Google identity summary */}
+                {googleInfo && (
+                  <div className="mb-4 flex items-center gap-3 rounded-2xl border border-cline bg-[#FBFCFE] p-3.5">
+                    {googleInfo.avatarUrl ? (
+                      <img
+                        src={googleInfo.avatarUrl}
+                        alt=""
+                        className="h-10 w-10 flex-none rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-white shadow-sm">
+                        <GoogleG size={20} />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-[13.5px] font-bold text-cink">{googleInfo.name}</p>
+                      <p className="truncate text-[12px] text-cmut">{googleInfo.email}</p>
+                    </div>
+                    <span className="ml-auto flex-none">
+                      <VerifiedPill label="Google verified" />
+                    </span>
+                  </div>
+                )}
+
+                <FieldLabel>
+                  Phone number <span className="font-normal text-cmut">(required to finish sign-up)</span>
+                </FieldLabel>
+                <div className="flex gap-2.5">
+                  <CountryPicker value={country} onChange={setCountry} />
+                  <div className="relative min-w-0 flex-1">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                      <Smartphone size={18} />
+                    </span>
+                    <input
+                      className="app-input w-full has-icon"
+                      inputMode="tel"
+                      placeholder="3XX 1234567"
+                      value={googlePhone}
+                      autoFocus
+                      onChange={(e) => setGooglePhone(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !busy && googlePhone.replace(/\D/g, '').length >= 7) {
+                          void sendGooglePhoneCode()
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-4 text-[#9AA8C7]">
+                  We never create an account from Google alone — your phone proves you&apos;re real and lets
+                  contacts find you.
+                </p>
+
+                <button
+                  className="btn-p mt-4 w-full disabled:opacity-50"
+                  disabled={busy || googlePhone.replace(/\D/g, '').length < 7}
+                  onClick={() => void sendGooglePhoneCode()}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Sending…
+                    </>
+                  ) : (
+                    <>
+                      <Phone size={18} /> Send code
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="mt-3 w-full text-center text-[12.5px] font-semibold text-cmut transition hover:text-cink"
+                  onClick={cancelGoogleSignup}
+                >
+                  Use a different account
+                </button>
+              </div>
+            )}
+
+            {/* ================= google_otp (deferred signup) ================= */}
+            {step === 'google_otp' && (
+              <div className="mt-6">
+                {googleSandbox && googleDevCode && (
+                  <SandboxBanner
+                    code={googleDevCode}
+                    channel="phone"
+                    onFill={() => setGoogleCode(googleDevCode)}
+                  />
+                )}
+                <OtpSlots value={googleCode} onChange={setGoogleCode} />
+                <button
+                  className="btn-p mt-6 w-full disabled:opacity-50"
+                  disabled={busy || googleCode.length < 6}
+                  onClick={() => void verifyGooglePhoneCode()}
+                >
+                  <ShieldCheck size={18} /> {busy ? 'Creating account…' : 'Verify & create account'}
+                </button>
+                <div className="mt-4 text-center text-sm text-cmut">
+                  {googleResendIn > 0 ? (
+                    <span>
+                      Resend code in <b className="text-cbrand">{googleResendIn}s</b>
+                    </span>
+                  ) : (
+                    <button
+                      className="font-semibold text-cbrand"
+                      disabled={busy}
+                      onClick={() => void sendGooglePhoneCode()}
+                    >
+                      Resend code
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="mt-3 w-full text-center text-[12.5px] font-semibold text-cmut transition hover:text-cink"
+                  onClick={cancelGoogleSignup}
+                >
+                  Use a different account
+                </button>
               </div>
             )}
 

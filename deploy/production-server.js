@@ -7,9 +7,13 @@
  *   PORT=3000 node .next/standalone/production-server.js
  *
  * What runs where (production):
- *   - Next.js pages/API          -> same http server (every path except /socket.io/)
+ *   - Next.js pages/API          -> same http server (every path except /socket.io/
+ *                                  and /internal/*)
  *   - socket.io realtime layer   -> /socket.io/ on the SAME server/port
- *   - internal relay (3004)      -> 127.0.0.1 only, never exposed
+ *   - internal relay             -> /internal/* on the SAME server/port
+ *                                  (Hostinger shared hosting only allows ONE
+ *                                   port per process — the relay can no longer
+ *                                   bind a second loopback port like 3004)
  *
  * The realtime logic is the exact same code that runs in dev
  * (mini-services/call-service/service.ts), bundled to socket-service-bundle.cjs
@@ -30,9 +34,11 @@ const hostname = process.env.HOSTNAME || '0.0.0.0'
 // default it to THIS process's own loopback URL so it works on any assigned port.
 process.env.CALL_APP_URL = process.env.CALL_APP_URL || `http://127.0.0.1:${port}`
 // Internal relay used by Next API routes to push realtime events (gifts,
-// broadcasts, ghost-live cleanup). The relay binds 127.0.0.1:3004.
+// broadcasts, ghost-live cleanup). The relay is now mounted on the MAIN http
+// server at /internal/* (no second port) — required by Hostinger shared
+// hosting where a process can only listen on ONE port.
 process.env.CALL_RELAY_URL =
-  process.env.CALL_RELAY_URL || `http://127.0.0.1:${process.env.CALL_RELAY_PORT || 3004}/internal/relay`
+  process.env.CALL_RELAY_URL || `http://127.0.0.1:${port}/internal/relay`
 
 const app = next({ dev: false, dir: __dirname })
 const handle = app.getRequestHandler()
@@ -44,11 +50,12 @@ app
 
     // Attach the CALL realtime service to the same http server:
     //  - socket.io at /socket.io/ (client: NEXT_PUBLIC_SOCKET_URL="/")
-    //  - internal HTTP relay on 127.0.0.1:3004 (loopback only)
+    //  - internal HTTP relay at /internal/* on this same server (NO second
+    //    port — Hostinger shared hosting only allows ONE port per process)
     createCallService({
       httpServer: server,
       socketPath: '/socket.io/',
-      relayPort: process.env.CALL_RELAY_PORT ? parseInt(process.env.CALL_RELAY_PORT, 10) : 3004,
+      relayPort: null,
     })
 
     server.listen(port, hostname, () => {
