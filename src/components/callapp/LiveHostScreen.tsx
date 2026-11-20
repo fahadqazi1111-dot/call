@@ -44,6 +44,8 @@ export function LiveHostScreen({
   const me = useApp((s) => s.me)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [lm, setLm] = useState<LiveManagerState | null>(null)
+  /** bound into FullFrameVideo — the full-frame (non-zoomed) self-view */
+  const [hostStream, setHostStream] = useState<MediaStream | null>(null)
   const [comments, setComments] = useState<LiveComment[]>([])
   const [commentInput, setCommentInput] = useState('')
   const [anims, setAnims] = useState<GiftAnim[]>([])
@@ -122,10 +124,8 @@ export function LiveHostScreen({
         avatarUrl: me?.avatarUrl ?? null,
       })
       setCamError(null)
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        void videoRef.current.play().catch(() => {})
-      }
+      // FullFrameVideo binds + plays this stream (blurred fill + object-contain)
+      setHostStream(stream)
       unsubRef.current = liveManager.subscribe((s) => setLm(s))
       // comments history
       try {
@@ -315,6 +315,14 @@ export function LiveHostScreen({
         window.clearInterval(tick)
         setCountdown(null)
         const endsAt = Date.now() + 120_000
+        // mark the battle LIVE in the DB FIRST — /api/battles/tap refuses
+        // every double-tap while the row is still 'countdown' (the score bug)
+        void api
+          .battleStart(battleId)
+          .then((res) => {
+            setBattle((b) => (b ? { ...b, sideScores: res.sideScores } : b))
+          })
+          .catch(() => {})
         battleManager.startLive(battleId, endsAt, participants)
         socketClient.emit('battle:start', {
           liveId,
@@ -431,7 +439,7 @@ export function LiveHostScreen({
           winnerSide={battle.winnerSide}
         />
       ) : (
-        <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+        <FullFrameVideo stream={hostStream} videoRef={videoRef} startMuted />
       )}
 
       {/* ===== camera/mic failure panel (never a bare alert) ===== */}
@@ -725,6 +733,65 @@ export function TeamAvatars({ participants, size = 26 }: { participants: BattleP
       {participants.map((p) => (
         <Avatar key={p.userId} name={p.name} avatarKey={p.avatarKey} size={size} src={p.avatarUrl} />
       ))}
+    </div>
+  )
+}
+
+/**
+ * Full-frame live video — fixes the "camera too zoomed" complaint.
+ * `object-cover` was massively cropping landscape webcam feeds on portrait
+ * screens (~2.4× zoom on 1280×720). Now a blurred copy of the same stream
+ * fills the frame as the backdrop and the sharp copy uses `object-contain`,
+ * so the FULL camera frame is always visible with no black-bar ugliness.
+ */
+export function FullFrameVideo({
+  stream,
+  videoRef,
+  mirrored = false,
+  startMuted = false,
+  onAutoplayFail,
+}: {
+  stream: MediaStream | null
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  mirrored?: boolean
+  /** host self-view starts muted; viewers try unmuted autoplay first */
+  startMuted?: boolean
+  /** unmuted autoplay refused — fall back to muted + tap-for-sound chip */
+  onAutoplayFail?: (el: HTMLVideoElement) => void
+}) {
+  const backRef = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const main = videoRef.current
+    const back = backRef.current
+    if (main && main.srcObject !== stream) {
+      main.srcObject = stream
+      main.muted = startMuted
+      if (stream) {
+        void main.play().catch(() => {
+          if (!startMuted) onAutoplayFail?.(main)
+        })
+      }
+    }
+    if (back && back.srcObject !== stream) {
+      back.srcObject = stream
+      void back.play().catch(() => {})
+    }
+  }, [stream, videoRef, startMuted, onAutoplayFail])
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-black">
+      <video
+        ref={backRef}
+        autoPlay
+        playsInline
+        muted
+        className={`absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-lg brightness-75 ${mirrored ? 'scale-x-[-1.1]' : ''}`}
+      />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className={`absolute inset-0 h-full w-full object-contain ${mirrored ? 'scale-x-[-1]' : ''}`}
+      />
     </div>
   )
 }

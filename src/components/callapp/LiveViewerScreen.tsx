@@ -11,7 +11,7 @@ import { soundKit } from '@/lib/callapp/sound'
 import { preloadGiftMedia } from '@/lib/callapp/giftMedia'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
-import { BattleVideoLayout } from './LiveHostScreen'
+import { BattleVideoLayout, FullFrameVideo } from './LiveHostScreen'
 import type { LiveComment, LiveSessionItem, BattleParticipantInfo } from '@/lib/callapp/types'
 
 const REACTION_EMOJIS = ['❤️', '😂', '😮', '🔥', '👏', '🎉', '💯', '😢']
@@ -38,6 +38,8 @@ interface HeartBurst {
 export function LiveViewerScreen({ session, onClose, embedded = false }: { session: LiveSessionItem; onClose: () => void; embedded?: boolean }) {
   const me = useApp((s) => s.me)
   const videoRef = useRef<HTMLVideoElement>(null)
+  /** bound into FullFrameVideo — full-frame view, never over-zoomed */
+  const [viewerStream, setViewerStream] = useState<MediaStream | null>(null)
   const [comments, setComments] = useState<LiveComment[]>([])
   const [commentInput, setCommentInput] = useState('')
   const [viewers, setViewers] = useState(session.viewerCount)
@@ -67,6 +69,13 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
   const [battleReqSent, setBattleReqSent] = useState(false)
   const floatKey = useRef(0)
   const lastTapRef = useRef<{ t: number; x: number }>({ t: 0, x: 0 })
+
+  /** unmuted autoplay refused → start muted and offer the sound chip */
+  const handleAutoplayFail = useCallback((el: HTMLVideoElement) => {
+    el.muted = true
+    void el.play().catch(() => {})
+    setTapForSound(true)
+  }, [])
 
   const pushReaction = useCallback((emoji: string, mine: boolean) => {
     const key = ++floatKey.current
@@ -116,23 +125,39 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     void liveManager.joinAsViewer(session.id, me)
     unsub = liveManager.subscribe((s) => {
       setViewers(s.viewers)
-      // bind the first publisher's stream to the video element
+      // hand the first publisher's stream to FullFrameVideo (bind + play there)
       const first = Object.values(s.publisherStreams)[0]
-      if (first && videoRef.current && videoRef.current.srcObject !== first) {
-        const el = videoRef.current
-        el.srcObject = first
-        void el.play().catch(() => {
-          // unmuted autoplay refused — fall back to muted, offer sound later
-          el.muted = true
-          void el.play().catch(() => {})
-          setTapForSound(true)
-        })
+      if (first) {
         setStreamReady(true)
+        setViewerStream((cur) => (cur && cur === first ? cur : first))
       }
     })
     void api
       .liveComments(session.id)
       .then((res) => setComments(res.comments))
+      .catch(() => {})
+    // late-join catch-up: if a battle is ALREADY running (or counting down)
+    // seed the real battleId + participants + team scores — otherwise a viewer
+    // who joins mid-battle sits at 0—0 and their taps can never score
+    void api
+      .battleForLive(session.id)
+      .then((res) => {
+        const b = res.battle
+        if (!b) return
+        setBattle((cur) =>
+          cur.id
+            ? cur
+            : {
+                id: b.id,
+                phase: b.status === 'live' ? 'live' : 'countdown',
+                participants: b.participants,
+                endsAt: b.endsAt,
+                sideScores: b.sideScores,
+                winnerSide: null,
+                remaining: null,
+              },
+        )
+      })
       .catch(() => {})
     return () => {
       window.clearTimeout(warmT)
@@ -268,7 +293,9 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     pushReaction(emoji, true)
   }
 
-  /** TikTok double-tap: hearts always; during a live battle each tap scores a team */
+  /** TikTok double-tap: hearts ALWAYS (everyone sees them float), and during
+   *  a live battle each tap also scores the nearest team (+1, gifts are the
+   *  heavy booster — price × 100). */
   const handleVideoTap = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = ((e.clientX - rect.left) / rect.width) * 100
@@ -278,8 +305,11 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
     lastTapRef.current = { t: now, x }
     if (!isDouble) return
     const side = x < 50 ? 0 : 1
-    pushHeart(Math.min(88, Math.max(12, x)), Math.min(80, Math.max(12, y)), battle.phase === 'live' ? (side === 0 ? '🔵' : '🔴') : '❤️')
-    if (battle.phase === 'live' && battle.id) {
+    const inBattle = battle.phase === 'live' && !!battle.id
+    pushHeart(Math.min(88, Math.max(12, x)), Math.min(80, Math.max(12, y)), inBattle ? (side === 0 ? '🔵' : '🔴') : '❤️')
+    // everyone in the live sees the love reaction float up (not just me)
+    socketClient.emit('live:react', { liveId: session.id, emoji: '❤️', from: { id: me?.id, name: me?.name } })
+    if (inBattle) {
       void api
         .battleTap(battle.id, side)
         .then((res) => {
@@ -372,7 +402,7 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
           winnerSide={battle.winnerSide}
         />
       ) : (
-        <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline autoPlay />
+        <FullFrameVideo stream={viewerStream} videoRef={videoRef} onAutoplayFail={handleAutoplayFail} />
       )}
       {!battleLive && !streamReady && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">

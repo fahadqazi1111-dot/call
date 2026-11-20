@@ -13,6 +13,7 @@ const GIFT_SFX: Record<string, string> = {
   heart: '/sounds/gifts/heart.mp3',
   rose: '/sounds/gifts/rose.mp3',
   flower: '/sounds/gifts/rose.mp3',
+  galaxy: '/sounds/gifts/galaxy.mp3',
   generic: '/sounds/gifts/generic.mp3',
 }
 
@@ -22,6 +23,7 @@ import { getSelectedRingtone } from './ringtones'
 const SFX_VOLUME: Record<string, number> = {
   lion: 1,
   superlion: 1,
+  galaxy: 1,
   dragon: 0.95,
   car: 0.9,
   fireworks: 0.9,
@@ -427,7 +429,6 @@ class SoundKit {
         this.beep(1319, 620, 0.07, 680)
         break
       case 'superlion':
-      case 'galaxy':
         // cosmic roar + shimmering sweep — even heavier
         this.sweep(170, 42, 1500, 0.2, 0, 'sawtooth')
         this.sweep(95, 30, 1600, 0.2, 40, 'sine')
@@ -436,6 +437,16 @@ class SoundKit {
         this.beep(1047, 300, 0.05, 700)
         this.beep(1319, 300, 0.05, 830)
         this.beep(1568, 420, 0.06, 960)
+        break
+      case 'galaxy':
+        // ethereal cosmic warp — shimmering riser + bell shimmer, NO roar
+        this.sweep(180, 2400, 1100, 0.07, 0, 'sine')
+        this.sweep(90, 34, 1300, 0.12, 0, 'sine')
+        this.noise(1200, 0.06, 5200, 60, 'highpass')
+        this.beep(880, 260, 0.05, 420)
+        this.beep(1175, 260, 0.05, 560)
+        this.beep(1568, 340, 0.055, 700)
+        this.beep(2093, 460, 0.05, 860)
         break
       default:
         this.gift(1)

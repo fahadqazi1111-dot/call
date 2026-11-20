@@ -641,3 +641,24 @@ html[data-splash-off='1'] .splash-shell {
 .castle-sparkle { animation: sparkleTw 1.4s ease-in-out infinite; }
 
 /* profile-tiles */
+
+/* GALAXY — cosmic spiral spins open + star bursts + shooting stars */
+@keyframes galaxyOpen {
+  0%   { transform: scale(0.1) rotate(-160deg); opacity: 0; }
+  26%  { transform: scale(0.9) rotate(-40deg); opacity: 1; }
+  55%  { transform: scale(1.06) rotate(10deg); }
+  80%  { transform: scale(1.12) rotate(30deg); opacity: 1; }
+  100% { transform: scale(1.3) rotate(50deg); opacity: 0; }
+}
+@keyframes galaxySpin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes galaxyShoot {
+  0%   { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  18%  { opacity: 1; }
+  100% { transform: translate(var(--sx, 30vw), var(--sy, -24vh)) scale(1); opacity: 0; }
+}
+.galaxy-in    { animation: galaxyOpen 3.2s cubic-bezier(0.2,1.1,0.4,1) forwards; }
+.galaxy-spin  { animation: galaxySpin 7s linear infinite; }
+.galaxy-shoot { animation: galaxyShoot 1.5s ease-out forwards; opacity: 0; }

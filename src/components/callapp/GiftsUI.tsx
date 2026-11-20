@@ -42,7 +42,7 @@ export interface GiftAnim {
  */
 export function giftDelayMs(kind: string, priceUsd = 0): number {
   if (!GIFT_VIDEOS[kind]) return 0
-  if (kind === 'lion' || kind === 'superlion') return 2500
+  if (kind === 'lion' || kind === 'superlion' || kind === 'galaxy') return 2500
   if (priceUsd >= 5) return 1800
   return 700
 }
@@ -106,6 +106,54 @@ function GiftScene({ g }: { g: GiftAnim }) {
         {g.emoji}
       </span>
     )
+
+  if (kind === 'galaxy') {
+    // cosmic spiral opens + shooting stars — the flagship gift, NO lion art
+    return (
+      <div className="absolute inset-0 overflow-hidden">
+        {/* deep-space vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(20,8,60,0.5),transparent_75%)]" />
+        {/* pulsing nebula glow behind the spiral */}
+        <div className="absolute left-1/2 top-[42%] h-[60vw] w-[60vw] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(168,85,247,0.4),rgba(59,7,100,0.18)_55%,transparent_72%)] galaxy-spin" />
+        {/* THE GALAXY — generated spiral artwork */}
+        <div className="absolute left-1/2 top-[42%] -translate-x-1/2 -translate-y-1/2">
+          {art('galaxy-in w-[min(110vw,780px)] max-w-none', `galaxy-in ${emojiSize}`)}
+        </div>
+        {/* star bursts radiating from the core */}
+        {parts(14).map((i) => (
+          <span
+            key={i}
+            className="fw-burst absolute text-[18px]"
+            style={{
+              // @ts-expect-error css custom property
+              '--a': `${(i / 14) * 360}deg`,
+              '--d': `${80 + seeded(i + 5) * 130}px`,
+              animationDelay: `${seeded(i) * 260}ms`,
+            }}
+          >
+            {['⭐', '✨', '🌟', '💫'][i % 4]}
+          </span>
+        ))}
+        {/* shooting stars streaking outward */}
+        {parts(6).map((i) => (
+          <span
+            key={`s${i}`}
+            className="galaxy-shoot absolute text-[20px]"
+            style={{
+              left: `${20 + seeded(i + 2) * 60}%`,
+              top: `${18 + seeded(i + 9) * 40}%`,
+              // @ts-expect-error css custom properties
+              '--sx': `${seeded(i) < 0.5 ? '' : '-'}${18 + seeded(i + 4) * 26}vw`,
+              '--sy': `${seeded(i + 6) < 0.5 ? '-' : ''}${10 + seeded(i + 8) * 22}vh`,
+              animationDelay: `${300 + i * 260}ms`,
+            }}
+          >
+            ☄️
+          </span>
+        ))}
+      </div>
+    )
+  }
 
   if (kind === 'lion' || kind === 'superlion') {
     // TikTok-style roar: the lion surges up from the bottom, occupies the

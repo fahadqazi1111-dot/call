@@ -22,6 +22,7 @@
 export const GIFT_VIDEOS: Record<string, string> = {
   lion: '/gifts/videos/lion.mp4',
   superlion: '/gifts/videos/superlion.mp4',
+  galaxy: '/gifts/videos/galaxy.mp4',
   car: '/gifts/videos/car.mp4',
   dragon: '/gifts/videos/dragon.mp4',
   rocket: '/gifts/videos/rocket.mp4',
@@ -76,7 +77,7 @@ export function ensureGiftVideo(kind: string): Promise<string> {
 }
 
 /** Most-used clips first so the warm-up helps the common gifts earliest. */
-const WARM_ORDER = ['lion', 'rose', 'heart', 'fireworks', 'car', 'crown', 'dragon', 'rocket', 'castle', 'superlion']
+const WARM_ORDER = ['lion', 'galaxy', 'rose', 'heart', 'fireworks', 'car', 'crown', 'dragon', 'rocket', 'castle', 'superlion']
 
 let warmStarted = false
 

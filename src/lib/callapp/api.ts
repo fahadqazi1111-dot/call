@@ -24,6 +24,7 @@ import type {
   GiftSessionStats,
   GroupItem,
   GroupMessageItem,
+  BattleParticipantInfo,
   LedgerEntryItem,
   LiveComment,
   LiveSessionItem,
@@ -397,6 +398,16 @@ export const api = {
     }),
   battleHistory: () => request<{ battles: BattleHistoryItem[] }>('/api/battles'),
   battleDetail: (battleId: string) => request<{ battle: BattleInfo }>('/api/battles', { method: 'POST', body: JSON.stringify({ battleId }) }),
+  battleStart: (battleId: string) =>
+    request<{ ok: boolean; battleId: string; sideScores: number[] }>('/api/battles/start', {
+      method: 'POST',
+      body: JSON.stringify({ battleId }),
+    }),
+  /** active battle for a live — late-join catch-up (real scores on join) */
+  battleForLive: (liveId: string) =>
+    request<{ battle: { id: string; status: string; mode: string; endsAt: number | null; sideScores: number[]; participants: BattleParticipantInfo[] } | null }>(
+      `/api/battles/live?liveId=${encodeURIComponent(liveId)}`
+    ),
   battleTap: (battleId: string, side: number) =>
     request<{ ok: boolean; side: number; total: number }>('/api/battles/tap', {
       method: 'POST',

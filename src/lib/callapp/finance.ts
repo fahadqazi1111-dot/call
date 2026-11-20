@@ -293,27 +293,42 @@ async function deliverGift(args: {
   // battle scoring — TikTok-style TEAM points: gifts are the heavy booster
   // (price × 100 points), double-taps add 1 each (see /api/battles/tap).
   // participant.score stays in $ for per-person gift stats.
+  // The side comes from the CLIENT when present, but viewers often omit it —
+  // then it is resolved from the recipient's battle seat so scoring NEVER
+  // silently skips (this was the "battle score doesn't move" bug).
   let battleTotal: number | null = null
   let battleAdded = 0
-  if (context === 'battle' && args.battleId && typeof args.battleSide === 'number') {
-    const part = await db.battleParticipant.findFirst({
-      where: { battleId: String(args.battleId), side: args.battleSide, userId: recipient.id },
-    })
-    if (part) {
-      await db.battleParticipant.update({
-        where: { id: part.id },
-        data: { score: { increment: gross } },
+  if (context === 'battle' && args.battleId) {
+    let side = typeof args.battleSide === 'number' ? args.battleSide : null
+    if (side === null || side === undefined) {
+      const seat = await db.battleParticipant.findFirst({
+        where: { battleId: String(args.battleId), userId: recipient.id },
+        select: { side: true },
       })
-      const giftPoints = Math.max(1, Math.round(gross * 100))
-      battleAdded = giftPoints
-      const pointsField = args.battleSide === 0 ? 'sideAPoints' : 'sideBPoints'
-      const updatedBattle = await db.battle.update({
-        where: { id: String(args.battleId) },
-        data: { [pointsField]: { increment: giftPoints } },
+      side = seat?.side ?? null
+    }
+    if (side !== null) {
+      const part = await db.battleParticipant.findFirst({
+        where: { battleId: String(args.battleId), side, userId: recipient.id },
       })
-      battleTotal = Math.round(
-        (args.battleSide === 0 ? updatedBattle.sideAPoints : updatedBattle.sideBPoints)
-      )
+      if (part) {
+        await db.battleParticipant.update({
+          where: { id: part.id },
+          data: { score: { increment: gross } },
+        })
+        const giftPoints = Math.max(1, Math.round(gross * 100))
+        battleAdded = giftPoints
+        const pointsField = side === 0 ? 'sideAPoints' : 'sideBPoints'
+        const updatedBattle = await db.battle.update({
+          where: { id: String(args.battleId) },
+          data: { [pointsField]: { increment: giftPoints } },
+        })
+        battleTotal = Math.round(
+          (side === 0 ? updatedBattle.sideAPoints : updatedBattle.sideBPoints)
+        )
+        // the resolved side wins over the client-supplied one for the relay
+        args.battleSide = side
+      }
     }
   }
 
