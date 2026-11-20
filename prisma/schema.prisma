@@ -553,14 +553,17 @@ model Group {
 }
 
 model GroupMember {
-  id         String   @id @default(cuid())
-  groupId    String
-  group      Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation("GroupMembership", fields: [userId], references: [id], onDelete: Cascade)
-  role       String   @default("member") // owner | admin | member
-  lastReadAt DateTime @default(now())
-  joinedAt   DateTime @default(now())
+  id              String    @id @default(cuid())
+  groupId         String
+  group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation("GroupMembership", fields: [userId], references: [id], onDelete: Cascade)
+  role            String    @default("member") // owner | admin | member
+  lastReadAt      DateTime  @default(now())
+  joinedAt        DateTime  @default(now())
+  // per-user chat state (WhatsApp semantics — only affects this member)
+  clearedBeforeAt DateTime? // "Clear chat": hide messages older than this for me only
+  deletedAt       DateTime? // "Delete chat": hide the group from my list until a new message arrives
 
   @@unique([groupId, userId])
   @@index([userId])

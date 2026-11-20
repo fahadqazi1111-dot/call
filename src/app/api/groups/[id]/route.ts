@@ -28,7 +28,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const [group, messages] = await Promise.all([
     db.group.findUnique({ where: { id }, include: MEMBER_INCLUDE }),
     db.groupMessage.findMany({
-      where: { groupId: id },
+      where: {
+        groupId: id,
+        // "Clear chat" is per-user: hide everything sent before my clear moment
+        ...(membership.clearedBeforeAt ? { createdAt: { gt: membership.clearedBeforeAt } } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 60,
       include: { sender: { select: { id: true, name: true, avatarKey: true, avatarUrl: true } } },

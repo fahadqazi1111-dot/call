@@ -17,12 +17,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params
   const membership = await db.groupMember.findUnique({
     where: { groupId_userId: { groupId: id, userId: me.id } },
-    select: { id: true },
+    select: { id: true, clearedBeforeAt: true },
   })
   if (!membership) return NextResponse.json({ error: 'Not a member' }, { status: 403 })
   const before = new URL(req.url).searchParams.get('before')
   const messages = await db.groupMessage.findMany({
-    where: { groupId: id, ...(before ? { createdAt: { lt: new Date(before) } } : {}) },
+    where: {
+      groupId: id,
+      // per-user "Clear chat" — hide everything sent before my clear moment
+      ...(membership.clearedBeforeAt ? { createdAt: { gt: membership.clearedBeforeAt } } : {}),
+      ...(before ? { createdAt: { lt: new Date(before) } } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: 60,
     include: { sender: { select: { id: true, name: true, avatarKey: true, avatarUrl: true } } },

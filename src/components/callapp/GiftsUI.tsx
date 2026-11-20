@@ -1103,7 +1103,7 @@ export function AdBanner({ placement }: { placement: 'chats' | 'rooms' | 'profil
         role="button"
         tabIndex={0}
         aria-label={`Sponsored: ${ad.title}. Tap for details.`}
-        className="mx-2 mb-2 flex cursor-pointer items-center gap-3 overflow-hidden rounded-[18px] border border-cline bg-white px-3.5 py-2.5 text-left transition hover:bg-cbg"
+        className="mx-4 mb-3 mt-1 flex cursor-pointer items-center gap-3 overflow-hidden rounded-[18px] border border-cline bg-white px-3.5 py-2.5 text-left transition hover:bg-cbg"
         onClick={() => setDetail(true)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {

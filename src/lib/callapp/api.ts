@@ -427,6 +427,12 @@ export const api = {
     request<{ ok: boolean; role: string }>(`/api/groups/${id}/members`, { method: 'PATCH', body: JSON.stringify({ userId, role }) }),
   groupLeave: (id: string) =>
     request<{ ok: boolean; dissolved: boolean; newOwner?: string }>(`/api/groups/${id}`, { method: 'DELETE' }),
+  /** per-user chat state — WhatsApp style, only affects the caller's own view */
+  groupChatState: (id: string, action: 'clear' | 'delete') =>
+    request<{ ok: boolean; action: string }>(`/api/groups/${id}/chat-state`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
 
   /* ---------- notifications ---------- */
   notifications: (unreadOnly?: boolean) =>

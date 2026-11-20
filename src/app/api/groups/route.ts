@@ -75,21 +75,45 @@ export async function GET(req: Request) {
     },
   })
 
+  // WhatsApp semantics: a deleted chat stays hidden until a NEW message
+  // arrives after the delete moment; cleared messages never come back.
+  const visible: typeof memberships = []
+  for (const m of memberships) {
+    const last = m.group.messages[0] ?? null
+    if (m.deletedAt && (!last || last.createdAt <= m.deletedAt)) continue
+    visible.push(m)
+  }
+
   // unread counts for groups that have a newer message than my lastReadAt
+  // (messages sent before my "clear chat" moment never count)
   const unreadPairs = await Promise.all(
-    memberships.map((m) => {
+    visible.map((m) => {
       const last = m.group.messages[0]
-      const hasNew = last && last.senderId !== me.id && last.createdAt > m.lastReadAt
+      const since = m.clearedBeforeAt && m.clearedBeforeAt > m.lastReadAt ? m.clearedBeforeAt : m.lastReadAt
+      const hasNew = last && last.senderId !== me.id && last.createdAt > since
       return hasNew
-        ? db.groupMessage.count({ where: { groupId: m.groupId, createdAt: { gt: m.lastReadAt }, senderId: { not: me.id } } })
+        ? db.groupMessage.count({ where: { groupId: m.groupId, createdAt: { gt: since }, senderId: { not: me.id } } })
         : Promise.resolve(0)
     })
   )
 
-  const groups = memberships
+  // for cleared chats the latest VISIBLE message may differ from the latest one
+  const lastRows = await Promise.all(
+    visible.map((m) => {
+      const last = m.group.messages[0] ?? null
+      if (!m.clearedBeforeAt || (last && last.createdAt > m.clearedBeforeAt)) return Promise.resolve(last)
+      return db.groupMessage.findFirst({
+        where: { groupId: m.groupId, createdAt: { gt: m.clearedBeforeAt } },
+        orderBy: { createdAt: 'desc' },
+        include: { sender: { select: { name: true } } },
+      })
+    })
+  )
+
+  const groups = visible
     .map((m, i) => {
       const g = m.group
-      const lastRow = g.messages[0] ?? null
+      const lastRow = lastRows[i] ?? null
       const last = lastRow
         ? {
             id: lastRow.id,

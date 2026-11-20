@@ -377,10 +377,11 @@ export function LiveViewerScreen({ session, onClose, embedded = false }: { sessi
         </div>
       )}
 
-      {/* bottom interaction bar — embedded mode lifts it above the fixed TabBar */}
+      {/* bottom interaction bar — the reels area already ends above the
+          in-flow TabBar, so the bar sits flush at the container's bottom edge */}
       <div
         className={`absolute inset-x-0 z-30 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pt-16 ${
-          embedded ? 'bottom-[calc(65px+env(safe-area-inset-bottom))] pb-3' : 'bottom-0 pb-5'
+          embedded ? 'bottom-0 pb-3' : 'bottom-0 pb-5'
         }`}
       >
         <div className="mb-3 max-h-[150px] space-y-1.5 overflow-y-auto app-scroll">

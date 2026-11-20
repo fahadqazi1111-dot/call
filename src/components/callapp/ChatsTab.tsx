@@ -330,16 +330,21 @@ export function ChatsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
     )
   }
 
-  /* mobile: ONE full-page scroller — header, search, chips, stories and list all scroll together */
+  /* mobile: header + search stay pinned at the top; chips, stories, ad, groups
+     and the chat list scroll together as ONE full page (nothing else sticks) */
   return (
-    <div className="app-scroll flex h-full flex-col overflow-y-auto pb-[calc(84px+max(env(safe-area-inset-bottom),12px))]">
-      {headerNode}
-      {searchNode}
-      {chipsNode}
-      <StoriesTray variant={variant} />
-      <AdBanner placement="chats" />
-      <GroupsSection variant={variant} />
-      {listNode}
+    <div className="flex h-full flex-col">
+      <div className="z-20 flex-none bg-white pb-1">
+        {headerNode}
+        {searchNode}
+      </div>
+      <div className="app-scroll flex-1 overflow-y-auto pb-4">
+        {chipsNode}
+        <StoriesTray variant={variant} />
+        <AdBanner placement="chats" />
+        <GroupsSection variant={variant} />
+        {listNode}
+      </div>
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   X, Send, Users, Search, Loader2, ArrowLeft, MoreVertical, LogOut, UserPlus,
-  Check, Crown, UsersRound, Mic, Plus, ImageIcon, Film, ShieldCheck, Trash2, Camera,
+  Check, Crown, UsersRound, Mic, Plus, ImageIcon, Film, ShieldCheck, Trash2, Camera, Eraser,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, uploadFile } from '@/lib/callapp/api'
@@ -12,6 +12,7 @@ import { socketClient } from '@/lib/callapp/socket'
 import { Avatar } from './Avatar'
 import { VoiceBubble } from './VoiceBubble'
 import { MediaComposer, type ComposedMedia } from './MediaComposer'
+import { SponsoredAdCard, type ServedAd } from './GiftsUI'
 import { getMediaUrl } from '@/lib/callapp/media'
 import { useRecorder } from './useRecorder'
 import { fmtChatListTime, fmtDuration } from '@/lib/callapp/utils'
@@ -507,6 +508,58 @@ export function GroupChatScreen({ group, desk, onClose }: { group: GroupItem; de
   const videoInputRef = useRef<HTMLInputElement | null>(null)
   const recorder = useRecorder()
 
+  /* ---------- in-conversation sponsored ads (same engine as 1:1 chats) ---------- */
+  const [adCfg, setAdCfg] = useState({ firstAfter: 10, interval: 20 })
+  const [chatAds, setChatAds] = useState<ServedAd[]>([])
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await api.ads('chats')
+        if (!alive) return
+        if (res.chatAd) setAdCfg(res.chatAd)
+        if (res.ads[0]) setChatAds([res.ads[0]])
+      } catch {}
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+  // an ad slot number is attached to the message index it follows — after the
+  // first N (non-system) messages, then after every M further messages
+  const adSlots = useMemo(() => {
+    const map: Record<number, number> = {}
+    let count = 0
+    let slot = 0
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].type === 'system') continue
+      count++
+      if (
+        count === adCfg.firstAfter ||
+        (count > adCfg.firstAfter && (count - adCfg.firstAfter) % adCfg.interval === 0)
+      ) {
+        map[i] = slot++
+      }
+    }
+    return map
+  }, [messages, adCfg])
+  const slotCount = Object.keys(adSlots).length
+  useEffect(() => {
+    // fetch a different rotated ad for each additional slot
+    if (slotCount <= chatAds.length) return
+    let alive = true
+    void (async () => {
+      try {
+        const exclude = chatAds.map((a) => a.id)
+        const res = await api.ads('chats', exclude)
+        if (alive && res.ads[0]) setChatAds((cur) => [...cur, res.ads[0]])
+      } catch {}
+    })()
+    return () => {
+      alive = false
+    }
+  }, [slotCount, chatAds.length])
+
   /* load details + history */
   useEffect(() => {
     let alive = true
@@ -630,6 +683,31 @@ export function GroupChatScreen({ group, desk, onClose }: { group: GroupItem; de
     }
   }
 
+  /** WhatsApp-style per-user clear — other members still see everything */
+  const clearChat = async () => {
+    if (!confirm('Clear all messages in this group for you? Other members will still see them.')) return
+    try {
+      await api.groupChatState(group.id, 'clear')
+      setMessages([])
+      setInfoOpen(false)
+      toast.success('Chat cleared for you')
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not clear the chat')
+    }
+  }
+
+  /** WhatsApp-style per-user delete — hidden from my list until a new message arrives */
+  const deleteChat = async () => {
+    if (!confirm('Delete this group chat for you? It will re-appear if someone sends a new message.')) return
+    try {
+      await api.groupChatState(group.id, 'delete')
+      toast.success('Chat deleted for you')
+      onClose()
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not delete the chat')
+    }
+  }
+
   const addMembers = async (userIds: string[]) => {
     try {
       const res = await api.groupAddMembers(group.id, userIds)
@@ -672,8 +750,15 @@ export function GroupChatScreen({ group, desk, onClose }: { group: GroupItem; de
           <p className="pt-10 text-center text-sm text-cmut">No messages yet — say salam to the group!</p>
         ) : (
           <div className="space-y-2">
-            {messages.map((m) => (
-              <GroupMessageRow key={m.id} m={m} meId={me?.id ?? ''} onOpenLightbox={setLightbox} />
+            {messages.map((m, i) => (
+              <div key={m.id}>
+                <GroupMessageRow m={m} meId={me?.id ?? ''} onOpenLightbox={setLightbox} />
+                {adSlots[i] !== undefined && chatAds[adSlots[i]] && (
+                  <div className="pt-1.5">
+                    <SponsoredAdCard ad={chatAds[adSlots[i]]} />
+                  </div>
+                )}
+              </div>
             ))}
             <div ref={bottomRef} />
           </div>
@@ -816,6 +901,8 @@ export function GroupChatScreen({ group, desk, onClose }: { group: GroupItem; de
           desk={desk}
           onClose={() => setInfoOpen(false)}
           onLeave={() => void leave()}
+          onClearChat={() => void clearChat()}
+          onDeleteChat={() => void deleteChat()}
           onAddMembers={(ids) => void addMembers(ids)}
           onMeta={(g) => setMeta(g)}
         />
@@ -922,6 +1009,8 @@ function GroupInfoSheet({
   desk,
   onClose,
   onLeave,
+  onClearChat,
+  onDeleteChat,
   onAddMembers,
   onMeta,
 }: {
@@ -931,6 +1020,8 @@ function GroupInfoSheet({
   desk: boolean
   onClose: () => void
   onLeave: () => void
+  onClearChat: () => void
+  onDeleteChat: () => void
   onAddMembers: (ids: string[]) => void
   onMeta: (g: GroupItem) => void
 }) {
@@ -1052,6 +1143,18 @@ function GroupInfoSheet({
               <UserPlus size={17} /> Add members
             </button>
           )}
+          <button
+            className="mb-2 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-csoft text-[14.5px] font-bold text-cink"
+            onClick={onClearChat}
+          >
+            <Eraser size={17} /> Clear chat (for me)
+          </button>
+          <button
+            className="mb-2 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#FEF1F0] text-[14.5px] font-bold text-cred"
+            onClick={onDeleteChat}
+          >
+            <Trash2 size={17} /> Delete chat (for me)
+          </button>
           <button
             className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#FEF1F0] text-[14.5px] font-bold text-cred"
             onClick={onLeave}
