@@ -1,0 +1,7 @@
+{
+  "name": "postcss-legacy-compat",
+  "version": "1.0.0",
+  "description": "CALL legacy browser compatibility pass for PostCSS. Downlevels lab()/lch()/oklab()/oklch(), color-mix(), translate:/scale:/rotate: and dvh/svh/lvh so old Android WebViews render the exact same UI (no banner).",
+  "main": "index.cjs",
+  "private": true
+}

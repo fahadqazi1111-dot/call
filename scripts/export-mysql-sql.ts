@@ -56,7 +56,62 @@ for (const l of lines) {
     { stdio: 'inherit', cwd: process.cwd() }
   )
 }
-const ddl = readFileSync(DDL_FILE, 'utf8')
+const ddlRaw = readFileSync(DDL_FILE, 'utf8')
+
+/**
+ * Shared-hosting import safety (phpMyAdmin on Hostinger = MariaDB):
+ *
+ * prisma migrate diff emits the foreign keys as trailing
+ *   ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ...
+ * statements. On MariaDB servers those ADD CONSTRAINT statements can fail
+ * even with FOREIGN_KEY_CHECKS = 0 (e.g. "#1825 - Failed to add the foreign
+ * key constraint. Missing index for constraint ... in the referenced table"
+ * — a structural check that the wrapping SET cannot disable, plus charset/
+ * collation and version quirks on shared DBs).
+ *
+ * The application never depends on DB-level FK enforcement (Prisma resolves
+ * relations in its own queries), so the import files ship WITHOUT foreign
+ * keys — that eliminates the whole class of #1825/#1452/#3780/#1215 import
+ * errors. The constraints are exported separately to deploy/call-mysql-fks.sql
+ * for hosts that accept them (import optionally AFTER the main dump).
+ */
+const isFkStatement = (l: string) =>
+  /ALTER TABLE `\w+` ADD CONSTRAINT `\w+` FOREIGN KEY/i.test(l)
+const fkStatements = ddlRaw.split('\n').filter(isFkStatement)
+const ddl = ddlRaw
+  .split('\n')
+  .filter((l) => !isFkStatement(l))
+  .join('\n')
+
+writeFileSync(
+  'deploy/call-mysql-fks.sql',
+  [
+    '-- ============================================================',
+    '-- CALL — optional foreign-key constraints',
+    '-- Import this file AFTER call-mysql-full.sql has imported cleanly.',
+    '--',
+    '-- OPTIONAL: the app does not need DB-level foreign keys (Prisma resolves',
+    '-- relations in its own queries). This file exists so hosts that accept',
+    '-- them (MySQL 8, current MariaDB) can still enforce referential integrity.',
+    '-- If importing this file fails on your shared host (phpMyAdmin/MariaDB',
+    '-- can reject ADD CONSTRAINT with #1825 even with FOREIGN_KEY_CHECKS = 0),',
+    '-- simply skip it — everything else works identically.',
+    '-- ============================================================',
+    '',
+    'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;',
+    'SET FOREIGN_KEY_CHECKS = 0;',
+    '',
+    fkStatements.join('\n'),
+    '',
+    'SET FOREIGN_KEY_CHECKS = 1;',
+    '',
+  ].join('\n')
+)
+if (fkStatements.length) {
+  console.log(`Wrote deploy/call-mysql-fks.sql — ${fkStatements.length} foreign keys (optional import)`)
+}
+// Keep the schema-only artifact FK-free as well
+writeFileSync(DDL_FILE, ddl)
 
 // Re-import safety: drop existing tables before creating them, so the dump
 // can be imported repeatedly over a previous (partial) import without
