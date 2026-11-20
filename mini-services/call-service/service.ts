@@ -243,8 +243,19 @@ const io = new Server(httpServer, {
 const originalListeners = httpServer.listeners('request') as Array<(req: IncomingMessage, res: ServerResponse) => void>
 httpServer.removeAllListeners('request')
 httpServer.on('request', (req, res) => {
-  if (req.url && req.url.split('?')[0].startsWith('/internal/')) {
+  const url = req.url || ''
+  const pathOnly = url.split('?')[0]
+  // Relay routes
+  if (pathOnly.startsWith('/internal/')) {
     return relayHandler(req, res)
+  }
+  // Fix: socket.io client sometimes requests /socket.io?EIO=4&transport=polling
+  // (no trailing slash). The socket.io server only matches /socket.io/ (WITH
+  // trailing slash), so /socket.io?... falls through to Next.js → 404.
+  // Rewrite /socket.io → /socket.io/ so socket.io picks it up.
+  // This fixes the "xhr poll error" 404 on Hostinger.
+  if (pathOnly === '/socket.io') {
+    req.url = '/socket.io/' + url.substring('/socket.io'.length)
   }
   for (const listener of originalListeners) {
     listener(req, res)

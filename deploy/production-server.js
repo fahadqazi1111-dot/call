@@ -58,6 +58,11 @@ app
       relayPort: null,
     })
 
+    // Mark socket.io as attached so /api/health can report it. This lets the
+    // user verify they're running the right start command (production-server.js
+    // vs next start — the latter has NO socket.io so calls/live/rooms break).
+    process.env.CALL_REALTIME_ATTACHED = '1'
+
     server.listen(port, hostname, () => {
       console.log(`> CALL ready on http://${hostname}:${port} — Next.js + realtime in one process`)
     })

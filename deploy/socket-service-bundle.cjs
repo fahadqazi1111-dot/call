@@ -20213,8 +20213,13 @@ function createCallService(opts = {}) {
   const originalListeners = httpServer.listeners("request");
   httpServer.removeAllListeners("request");
   httpServer.on("request", (req, res) => {
-    if (req.url && req.url.split("?")[0].startsWith("/internal/")) {
+    const url = req.url || "";
+    const pathOnly = url.split("?")[0];
+    if (pathOnly.startsWith("/internal/")) {
       return relayHandler(req, res);
+    }
+    if (pathOnly === "/socket.io") {
+      req.url = "/socket.io/" + url.substring("/socket.io".length);
     }
     for (const listener of originalListeners) {
       listener(req, res);
