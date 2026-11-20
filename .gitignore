@@ -65,7 +65,8 @@ agent-ctx/
 
 # pid files
 *.pid
-upload/*.png
+# private user uploads (never deploy or commit)
+upload/
 
 # Generated download artifacts (user downloads via chat, not git)
 download/call-deploy.zip
