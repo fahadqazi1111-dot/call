@@ -3,8 +3,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { db } from '@/lib/db'
 import { verifyMediaToken } from '@/lib/callapp/server'
-
-const UPLOAD_DIR = '/home/z/my-project/db/uploads'
+import { getUploadDir } from '@/lib/callapp/uploadDir'
 
 const MIME_BY_EXT: Record<string, string> = {
   webm: 'audio/webm',
@@ -37,6 +36,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
+  const UPLOAD_DIR = getUploadDir()
   let filePath: string | null = null
   let mime = 'application/octet-stream'
   for (const ext of EXT_LIST) {

@@ -40,6 +40,8 @@ import {
   Music4,
   Play,
   Square,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react'
 import { RINGTONE_OPTIONS, getSelectedRingtone, setRingtone } from '@/lib/callapp/ringtones'
 
@@ -141,6 +143,15 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const [showConf, setShowConf] = useState(false)
   const [ringtoneOpen, setRingtoneOpen] = useState(false)
   const markPasswordSet = useApp((s) => s.markPasswordSet)
+
+  // delete account dialog state
+  const [showDelete, setShowDelete] = useState(false)
+  const [delPwd, setDelPwd] = useState('')
+  const [delConfirmText, setDelConfirmText] = useState('')
+  const [delAck, setDelAck] = useState(false)
+  const [delBusy, setDelBusy] = useState(false)
+  const [showDelPwd, setShowDelPwd] = useState(false)
+  const deleteAccount = useApp((s) => s.deleteAccount)
 
   useEffect(() => {
     if (!showUsername) return
@@ -280,6 +291,40 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     setShowNew(false)
     setShowConf(false)
     setShowPwd(true)
+  }
+
+  const openDelete = () => {
+    setDelPwd('')
+    setDelConfirmText('')
+    setDelAck(false)
+    setShowDelPwd(false)
+    setDelBusy(false)
+    setShowDelete(true)
+  }
+
+  const confirmDelete = async () => {
+    if (hasPwd && !delPwd) {
+      toast.error('Enter your password to confirm')
+      return
+    }
+    if (!delAck) {
+      toast.error('Please acknowledge the consequences')
+      return
+    }
+    if (delConfirmText.trim().toUpperCase() !== 'DELETE') {
+      toast.error('Type DELETE to confirm')
+      return
+    }
+    setDelBusy(true)
+    try {
+      await deleteAccount(hasPwd ? delPwd : null)
+      toast.success('Your account has been deleted')
+      setShowDelete(false)
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not delete your account. Please try again.')
+    } finally {
+      setDelBusy(false)
+    }
   }
 
   const savePassword = async () => {
@@ -519,6 +564,14 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
           <LogOut size={18} /> Log out
         </button>
 
+        {/* ============ delete account (App Store / Play Store compliance) ============ */}
+        <button
+          className="mt-3 flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] border border-[#F0B9B3] bg-[#FEF1EF] text-[14.5px] font-bold text-cred shadow-[0_1px_3px_rgba(16,32,72,0.04)] transition hover:bg-[#FCE6E2]"
+          onClick={openDelete}
+        >
+          <Trash2 size={17} /> Delete my account
+        </button>
+
         <div className="mt-7 flex flex-col items-center gap-1.5 pb-2">
           <div className="flex items-center gap-2 text-cmut">
             <CallLogoMark size={24} />
@@ -603,7 +656,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
             <div className="relative mt-5">
               <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] font-bold text-cmut">@</span>
               <input
-                className="app-input pl-9 pr-10"
+                className="app-input w-full has-icon has-trailing"
                 value={uname}
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -736,6 +789,172 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
             >
               {pwdBusy ? 'Saving…' : hasPwd ? 'Update password' : 'Set password'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- delete account dialog (App Store / Play Store compliance) ---------- */}
+      {showDelete && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/55 sm:items-center sm:p-6"
+          onClick={() => !delBusy && setShowDelete(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Delete account"
+        >
+          <div
+            className={`w-full bg-white shadow-2xl ${
+              desk ? 'max-w-md rounded-[24px]' : 'rounded-t-[28px]'
+            } p-6 pb-[max(env(safe-area-inset-bottom),24px)]`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 flex-none items-center justify-center rounded-[14px] bg-[#FCE4E1] text-cred">
+                <AlertTriangle size={20} />
+              </span>
+              <div>
+                <h2 className="text-xl font-extrabold text-cred">Delete my account</h2>
+                <p className="mt-0.5 text-[12.5px] text-cmut">This action is permanent and cannot be undone.</p>
+              </div>
+            </div>
+
+            {/* consequences */}
+            <div className="mt-5 space-y-2 rounded-2xl border border-[#F0B9B3] bg-[#FEF5F4] p-4">
+              <p className="text-[13px] font-bold text-cred">You will permanently lose:</p>
+              <ul className="space-y-1.5 text-[12.5px] leading-5 text-cink">
+                <li className="flex gap-2">
+                  <span className="mt-[2px] text-cred">•</span>
+                  Your profile, @{me.username}, phone number and avatar
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-[2px] text-cred">•</span>
+                  All chats, voice notes, photos, videos and call history
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-[2px] text-cred">•</span>
+                  Contacts, stories, group memberships and notifications
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-[2px] text-cred">•</span>
+                  <span>
+                    Your <b>wallet balance of ${(wallet?.available ?? 0).toFixed(2)}</b>
+                    {wallet && wallet.reserved > 0 ? ` (plus $${wallet.reserved.toFixed(2)} reserved in withdrawals)` : ''} —
+                    any unredeemed balance is forfeited.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-[2px] text-cred">•</span>
+                  Access to CALL on this phone number — you would need to sign up again.
+                </li>
+              </ul>
+              <p className="mt-2 border-t border-[#F0B9B3] pt-2 text-[11.5px] leading-5 text-cmut">
+                Financial records required for legal/audit purposes are retained in anonymized form
+                (with all personal identifiers stripped) as required by law.
+              </p>
+            </div>
+
+            {/* password (only when the user has one) */}
+            {hasPwd && (
+              <div className="mt-4">
+                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                  Confirm your password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showDelPwd ? 'text' : 'password'}
+                    className="app-input w-full has-trailing"
+                    autoComplete="current-password"
+                    placeholder="Your account password"
+                    value={delPwd}
+                    disabled={delBusy}
+                    onChange={(e) => setDelPwd(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && delConfirmText.trim().toUpperCase() === 'DELETE' && delAck && !delBusy) {
+                        void confirmDelete()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showDelPwd ? 'Hide password' : 'Show password'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cmut hover:text-cink"
+                    onClick={() => setShowDelPwd((v) => !v)}
+                  >
+                    {showDelPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* type DELETE to confirm */}
+            <div className="mt-4">
+              <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                Type <span className="font-extrabold text-cred">DELETE</span> to confirm
+              </label>
+              <input
+                className="app-input w-full font-bold tracking-wider"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="DELETE"
+                value={delConfirmText}
+                disabled={delBusy}
+                onChange={(e) => setDelConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && delConfirmText.trim().toUpperCase() === 'DELETE' && delAck && !delBusy) {
+                    void confirmDelete()
+                  }
+                }}
+              />
+            </div>
+
+            {/* acknowledge checkbox */}
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-2xl bg-csoft p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-[18px] w-[18px] flex-none accent-cred"
+                checked={delAck}
+                disabled={delBusy}
+                onChange={(e) => setDelAck(e.target.checked)}
+              />
+              <span className="text-[12.5px] leading-5 text-cink">
+                I understand this is <b>irreversible</b> and that my data, including my wallet balance,
+                will be permanently erased.
+              </span>
+            </label>
+
+            {/* actions */}
+            <div className="mt-5 flex gap-3">
+              <button
+                className="flex-1 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14.5px] font-bold text-cink transition hover:bg-cbg disabled:opacity-50"
+                onClick={() => setShowDelete(false)}
+                disabled={delBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-cred px-4 py-3 text-[14.5px] font-extrabold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={
+                  delBusy ||
+                  !delAck ||
+                  delConfirmText.trim().toUpperCase() !== 'DELETE' ||
+                  (hasPwd && !delPwd)
+                }
+                onClick={() => void confirmDelete()}
+              >
+                {delBusy ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Deleting…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} /> Delete my account
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -942,7 +1161,7 @@ function PwdField({
       <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">{label}</label>
       <div className="relative">
         <input
-          className="app-input pr-12"
+          className="app-input w-full has-trailing"
           type={show ? 'text' : 'password'}
           value={value}
           onChange={(e) => setValue(e.target.value)}

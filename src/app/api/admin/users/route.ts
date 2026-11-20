@@ -22,6 +22,11 @@ export async function GET(req: Request) {
       username: u.username,
       phone: u.phone,
       email: u.email,
+      emailVerified: u.emailVerified,
+      // phoneVerified: a real User row is only created after phone OTP, so any
+      // valid phone (>= 7 digits) is treated as verified. Admin-created users
+      // skip OTP and are trusted by definition.
+      phoneVerified: u.phone.replace(/\D/g, '').length >= 7,
       role: u.role,
       blocked: u.blocked,
       createdAt: u.createdAt.toISOString(),

@@ -1,22 +1,11 @@
 'use client'
 
 import { socketClient } from './socket'
+import { getIceConfig } from './ice'
 import type { BattleParticipantInfo } from './types'
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turn:openrelay.metered.ca:80?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
+function iceConfig(): RTCConfiguration {
+  return getIceConfig()
 }
 
 export interface LiveManagerState {
@@ -221,7 +210,7 @@ class LiveManager {
       } catch {}
       this.sendPCs.delete(viewerId)
     }
-    const pc = new RTCPeerConnection(ICE_CONFIG)
+    const pc = new RTCPeerConnection(iceConfig())
     this.sendPCs.set(viewerId, pc)
     this.state.viewerIds = Array.from(this.sendPCs.keys())
     this.emit()
@@ -248,6 +237,13 @@ class LiveManager {
         this.emit()
       }
     }
+    // Granular ICE-layer monitoring — host→viewer PC logs for troubleshooting.
+    // The host has many send PCs (one per viewer); toasts would be too noisy,
+    // so we just log to the console.
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState
+      console.info('[callapp] live host→viewer ICE state for', viewerId, ':', st)
+    }
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     socketClient.emit('live:signal', {
@@ -261,6 +257,12 @@ class LiveManager {
     if (p.liveId !== this.state.liveId) return
     const pc = this.sendPCs.get(p.viewerId)
     if (pc) {
+      // Detach handlers BEFORE close() so the synthetic `closed` event
+      // doesn't double-fire onconnectionstatechange on the dropped PC.
+      pc.ontrack = null
+      pc.onicecandidate = null
+      pc.onconnectionstatechange = null
+      pc.oniceconnectionstatechange = null
       try {
         pc.close()
       } catch {}
@@ -280,12 +282,18 @@ class LiveManager {
       // a publisher is offering us their stream
       const old = this.recvPCs.get(p.from)
       if (old) {
+        // Detach handlers BEFORE close() so the synthetic `closed` event
+        // doesn't double-fire on the stale PC we're about to drop.
+        old.ontrack = null
+        old.onicecandidate = null
+        old.onconnectionstatechange = null
+        old.oniceconnectionstatechange = null
         try {
           old.close()
         } catch {}
         this.recvPCs.delete(p.from)
       }
-      const pc = new RTCPeerConnection(ICE_CONFIG)
+      const pc = new RTCPeerConnection(iceConfig())
       this.recvPCs.set(p.from, pc)
       const remote = new MediaStream()
       this.state.publisherStreams = { ...this.state.publisherStreams, [p.from]: remote }
@@ -313,6 +321,13 @@ class LiveManager {
           } catch {}
           if (this.recvPCs.get(p.from) === pc) this.recvPCs.delete(p.from)
         }
+      }
+      // Granular ICE-layer monitoring for the viewer's recv PC. This is the
+      // stream the viewer actually watches — failures here mean the player
+      // freezes, so we log them prominently for debugging.
+      pc.oniceconnectionstatechange = () => {
+        const st = pc.iceConnectionState
+        console.info('[callapp] live viewer recv ICE state for', p.from, ':', st)
       }
       await pc.setRemoteDescription(new RTCSessionDescription(payload as RTCSessionDescriptionInit))
       const answer = await pc.createAnswer()
@@ -405,11 +420,25 @@ class LiveManager {
 
   async leave(silent = false) {
     const liveId = this.state.liveId
-    this.sendPCs.forEach((pc) => pc.close())
+    // Detach handlers BEFORE close() so the synthetic `closed` event during
+    // teardown doesn't double-fire onconnectionstatechange on every PC and
+    // try to mutate state we're about to wipe.
+    const detach = (pc: RTCPeerConnection) => {
+      pc.ontrack = null
+      pc.onicecandidate = null
+      pc.onconnectionstatechange = null
+      pc.oniceconnectionstatechange = null
+      try {
+        pc.close()
+      } catch {}
+    }
+    this.sendPCs.forEach(detach)
     this.sendPCs.clear()
-    this.recvPCs.forEach((pc) => pc.close())
+    this.recvPCs.forEach(detach)
     this.recvPCs.clear()
     if (this.state.role !== 'viewer') {
+      // Stop every local track — failing to do this leaves the camera/mic
+      // indicator light ON after the broadcast ends (a real bug).
       this.camStream?.getTracks().forEach((t) => t.stop())
     }
     this.camStream = null

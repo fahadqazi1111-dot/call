@@ -1,22 +1,11 @@
 'use client'
 
 import { socketClient } from './socket'
+import { getIceConfig } from './ice'
 import type { RoomState, RoomUserState } from './types'
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turn:openrelay.metered.ca:80?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
+function iceConfig(): RTCConfiguration {
+  return getIceConfig()
 }
 
 const SPEAKING_ROLES = new Set(['host', 'cohost', 'speaker'])
@@ -142,7 +131,15 @@ class RoomManager {
     for (const [uid, pc] of Array.from(this.peers)) {
       const stillThere = speakers.some((s) => s.userId === uid) || listeners.some((l) => l.userId === uid)
       if (!stillThere) {
-        pc.close()
+        // Detach handlers BEFORE close() so the synthetic `closed` event
+        // doesn't double-fire and try to mutate state mid-iteration.
+        pc.ontrack = null
+        pc.onicecandidate = null
+        pc.onconnectionstatechange = null
+        pc.oniceconnectionstatechange = null
+        try {
+          pc.close()
+        } catch {}
         this.peers.delete(uid)
         const streams = { ...this.state.streams }
         delete streams[uid]
@@ -183,7 +180,7 @@ class RoomManager {
   private async ensurePeer(otherId: string, iSpeak: boolean, otherSpeaks: boolean) {
     let pc = this.peers.get(otherId)
     if (!pc) {
-      pc = new RTCPeerConnection(ICE_CONFIG)
+      pc = new RTCPeerConnection(iceConfig())
       this.peers.set(otherId, pc)
       const remote = new MediaStream()
       const streams = { ...this.state.streams, [otherId]: remote }
@@ -210,6 +207,15 @@ class RoomManager {
           pc!.close()
           if (this.peers.get(otherId) === pc) this.peers.delete(otherId)
         }
+      }
+      // Granular ICE-layer monitoring — surfaces a per-peer "Reconnecting…"
+      // log so troubleshooting a flaky mic-stage connection is easier.
+      // Room audio is mostly transient (people come and go), so we don't
+      // toast here — the connectionstatechange handler above already drops
+      // the PC on failure and syncPeers() recreates it from room:state.
+      pc.oniceconnectionstatechange = () => {
+        const st = pc!.iceConnectionState
+        console.info('[callapp] room ICE state for', otherId, ':', st)
       }
 
       if (iSpeak && this.state.me) {
@@ -299,7 +305,7 @@ class RoomManager {
 
   /** Create a peer connection WITHOUT offering (used when the remote side initiates). */
   private async ensurePeerRaw(otherId: string, iSpeak: boolean, otherSpeaks: boolean) {
-    const pc = new RTCPeerConnection(ICE_CONFIG)
+    const pc = new RTCPeerConnection(iceConfig())
     this.peers.set(otherId, pc)
     const remote = new MediaStream()
     const streams = { ...this.state.streams, [otherId]: remote }
@@ -325,6 +331,11 @@ class RoomManager {
         pc.close()
         if (this.peers.get(otherId) === pc) this.peers.delete(otherId)
       }
+    }
+    // Granular ICE-layer logging (matches ensurePeer — see comment there).
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState
+      console.info('[callapp] room ICE state for', otherId, ':', st)
     }
     if (iSpeak && this.state.me) {
       try {
@@ -526,7 +537,18 @@ class RoomManager {
       this.leaveTimer = null
     }
     const roomId = this.state.roomId
-    this.peers.forEach((pc) => pc.close())
+    // Detach handlers BEFORE close() so the synthetic `closed` event during
+    // teardown doesn't double-fire onconnectionstatechange and try to mutate
+    // state we're about to wipe.
+    this.peers.forEach((pc) => {
+      pc.ontrack = null
+      pc.onicecandidate = null
+      pc.onconnectionstatechange = null
+      pc.oniceconnectionstatechange = null
+      try {
+        pc.close()
+      } catch {}
+    })
     this.peers.clear()
     if (!this.preMic) {
       // only stop tracks we own — an injected FX stream belongs to the caller

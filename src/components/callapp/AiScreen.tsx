@@ -327,7 +327,7 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
         }
       }, 8000)
     } catch {
-      alert('Microphone permission needed')
+      toast.error('Microphone permission needed')
     }
   }
 
@@ -337,7 +337,7 @@ export function AiScreen({ onClose }: { onClose: () => void }) {
       setAttachedImage({ id: up.id, preview: URL.createObjectURL(file) })
       setImageMode('ask')
     } catch {
-      alert('Upload failed')
+      toast.error('Upload failed')
     }
   }
 

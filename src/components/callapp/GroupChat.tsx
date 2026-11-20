@@ -301,7 +301,7 @@ export function GroupCreateSheet({
     const t = window.setTimeout(async () => {
       try {
         const res = await api.searchUsers(needle)
-        setSearchRes(res.users)
+        setSearchRes(res)
       } catch {
         setSearchRes([])
       } finally {
@@ -1211,7 +1211,7 @@ function AddMembersSheet({
     const t = window.setTimeout(async () => {
       try {
         const res = await api.searchUsers(needle)
-        setSearchRes(res.users.filter((u) => !existing.includes(u.id)))
+        setSearchRes(res.filter((u) => !existing.includes(u.id)))
       } catch {
         setSearchRes([])
       }

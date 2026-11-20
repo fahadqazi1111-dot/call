@@ -3,8 +3,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { requireUser, rateLimit } from '@/lib/callapp/server'
+import { ensureUploadDir, mediaPath } from '@/lib/callapp/uploadDir'
 
-const UPLOAD_DIR = '/home/z/my-project/db/uploads'
 const MAX_BYTES = 80 * 1024 * 1024 // 80MB — allows story video clips
 const MAX_BYTES_AVATAR = 10 * 1024 * 1024
 
@@ -48,11 +48,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `File too large (max ${isAvatar ? 10 : 80}MB)` }, { status: 400 })
     }
     const id = crypto.randomUUID().replace(/-/g, '')
-    await fs.mkdir(UPLOAD_DIR, { recursive: true })
+    await ensureUploadDir()
     const buf = Buffer.from(await file.arrayBuffer())
-    await fs.writeFile(path.join(UPLOAD_DIR, `${id}.${ext}`), buf)
+    await fs.writeFile(mediaPath(id, ext), buf)
     return NextResponse.json({ ok: true, id, mime, size: buf.length })
-  } catch {
-    return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
+  } catch (e) {
+    // Log the real cause — previously this was a silent catch that made
+    // every upload failure (missing dir, disk full, permission denied)
+    // look like an opaque 500 with no diagnostics.
+    console.error('[upload] failed:', e instanceof Error ? e.stack || e.message : e)
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return NextResponse.json({ error: 'Upload failed: ' + msg }, { status: 500 })
   }
 }

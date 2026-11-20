@@ -21,9 +21,14 @@ import {
   ShieldCheck,
   Zap,
   Users,
+  Check,
+  MoreVertical,
+  Trash2,
+  AtSign,
 } from 'lucide-react'
 import { useApp } from '@/lib/callapp/store'
 import { toast } from 'sonner'
+import { api } from '@/lib/callapp/api'
 import { shareInvite } from '@/lib/callapp/invite'
 import { parseContactsSource, parseContactFile, type ParsedContact } from '@/lib/callapp/importContacts'
 
@@ -39,13 +44,27 @@ const pickerSupported = (): boolean => {
   return typeof nav.contacts?.select === 'function'
 }
 
+/** A row returned by GET /api/users/search (registered CALL users only). */
+interface SearchHit {
+  id: string
+  name: string
+  username: string
+  avatarKey: number
+  avatarUrl: string | null
+  phone: string
+  about: string
+  isOfficial: boolean
+}
+
 export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop' }) {
   const contacts = useApp((s) => s.contacts)
   const online = useApp((s) => s.online)
   const openChat = useApp((s) => s.openChat)
   const startCall = useApp((s) => s.startCall)
   const addContact = useApp((s) => s.addContact)
+  const addContactByUsername = useApp((s) => s.addContactByUsername)
   const syncDeviceContacts = useApp((s) => s.syncDeviceContacts)
+  const deleteContact = useApp((s) => s.deleteContact)
   const setTab = useApp((s) => s.setTab)
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -66,6 +85,19 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
   const fileRef = useRef<HTMLInputElement>(null)
   const desk = variant === 'desktop'
 
+  /* ---------- "Find by username or phone" search sheet ---------- */
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQ, setSearchQ] = useState('')
+  const [hits, setHits] = useState<SearchHit[]>([])
+  const [searching, setSearching] = useState(false)
+  const [addingId, setAddingId] = useState<string | null>(null)
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
+
+  /* ---------- per-row overflow + remove-contact confirm ---------- */
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(null)
+  const [removing, setRemoving] = useState(false)
+
   /** Open a conversation and land on the chats section (required by the desktop shell). */
   const messageUser = (id: string) => {
     openChat(id)
@@ -79,6 +111,118 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
     window.addEventListener('call:open-add-contact', open)
     return () => window.removeEventListener('call:open-add-contact', open)
   }, [desk])
+
+  /** Phone-suffix set: lets the search sheet mark a hit as "already a contact"
+   *  without needing a server round-trip on every keystroke. */
+  const myContactPhones = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of contacts) set.add(c.phone.replace(/\D/g, ''))
+    return set
+  }, [contacts])
+
+  /** Two contact rows are "the same person" when their last 9 digits match —
+   *  the same trick the backend uses via phoneSuffixKey. Keeps the Add button
+   *  honest when the saved contact is in national format but the hit is E.164. */
+  const isAlreadyContact = (hit: SearchHit): boolean => {
+    if (addedIds.has(hit.id)) return true
+    const d = hit.phone.replace(/\D/g, '')
+    if (myContactPhones.has(d)) return true
+    if (d.length >= 9) {
+      const suffix = d.slice(-9)
+      for (const p of myContactPhones) if (p.length >= 9 && p.slice(-9) === suffix) return true
+    }
+    return false
+  }
+
+  /** Debounced user search (300 ms). Backend ignores queries shorter than 3
+   *  normalised chars (or 7 phone digits), so we mirror that here to avoid
+   *  wasted calls on the first keystroke. */
+  useEffect(() => {
+    const needle = searchQ.trim()
+    if (!needle) {
+      setHits([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.searchUsers(needle)
+        setHits(res)
+      } catch {
+        setHits([])
+      } finally {
+        setSearching(false)
+      }
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [searchQ])
+
+  /** Close the per-row overflow menu on any outside click / Escape. */
+  useEffect(() => {
+    if (!menuId) return
+    const onDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null
+      if (!el?.closest('[data-contact-menu]')) setMenuId(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuId(null)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menuId])
+
+  /** Reset the search sheet every time it closes so reopening is clean. */
+  const openSearch = () => {
+    setSearchQ('')
+    setHits([])
+    setSearching(false)
+    setAddingId(null)
+    setAddedIds(new Set())
+    setShowSearch(true)
+  }
+  const closeSearch = () => {
+    setShowSearch(false)
+    setSearchQ('')
+    setHits([])
+    setSearching(false)
+  }
+
+  /** Add a hit by @username (the most stable identifier the user typed). */
+  const addHit = async (hit: SearchHit) => {
+    setAddingId(hit.id)
+    try {
+      const ok = await addContactByUsername(hit.username)
+      if (ok) {
+        setAddedIds((s) => new Set(s).add(hit.id))
+        toast.success(`${hit.name} added to contacts`)
+      } else {
+        toast.error('Could not add contact')
+      }
+    } finally {
+      setAddingId(null)
+    }
+  }
+
+  /** Confirm + run contact removal. */
+  const confirmRemove = async () => {
+    if (!confirmTarget) return
+    setRemoving(true)
+    try {
+      await deleteContact(confirmTarget.id)
+      toast.success(`${confirmTarget.name} removed`)
+      setConfirmTarget(null)
+      setMenuId(null)
+    } catch {
+      toast.error('Could not remove contact')
+    } finally {
+      setRemoving(false)
+    }
+  }
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -290,6 +434,18 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           </button>
           <button
             className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
+            onClick={openSearch}
+          >
+            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cbrand">
+              <AtSign size={24} />
+            </span>
+            <div>
+              <div className="text-[16px] font-bold text-cink">Find by username or phone</div>
+              <div className="mt-0.5 text-sm text-[#4A5568]">Search everyone on CALL by @handle</div>
+            </div>
+          </button>
+          <button
+            className="flex w-full items-center gap-3.5 rounded-2xl p-2.5 text-left transition-colors hover:bg-cbg"
             onClick={() => void shareInvite()}
           >
             <span className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-csoft text-cgreen">
@@ -331,7 +487,10 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
             <div key={letter}>
               <div className={`pb-1 pt-3 text-xs font-bold text-cbrand ${desk ? 'px-4' : 'px-6'}`}>{letter}</div>
               {arr.map((c) => (
-                <div key={c.id} className={`flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-4' : 'px-6'}`}>
+                <div
+                  key={c.id}
+                  className={`relative flex items-center gap-3 py-2.5 transition-colors hover:bg-cbg ${desk ? 'px-4' : 'px-6'}`}
+                >
                   {c.user?.isOfficial ? (
                     <OfficialAvatar size={desk ? 42 : 46} online={online[c.user.id]} />
                   ) : (
@@ -396,6 +555,39 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
                       <Share2 size={14} /> Invite
                     </button>
                   )}
+                  {/* per-row overflow menu (Remove contact) */}
+                  <div className="relative flex-none" data-contact-menu>
+                    <button
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-cmut hover:bg-csoft hover:text-cink"
+                      aria-label={`More options for ${c.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuId === c.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuId((cur) => (cur === c.id ? null : c.id))
+                      }}
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+                    {menuId === c.id && (
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-9 z-30 min-w-[180px] overflow-hidden rounded-[14px] border border-cline bg-white shadow-xl"
+                      >
+                        <button
+                          role="menuitem"
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[14px] font-semibold text-[#C13B3B] transition hover:bg-[#FDECEC]"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setMenuId(null)
+                            setConfirmTarget({ id: c.id, name: c.name })
+                          }}
+                        >
+                          <Trash2 size={16} /> Remove contact
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -664,6 +856,191 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
               {busy ? <Loader2 size={18} className="animate-spin" /> : <UserPlus size={18} />}
               {busy ? 'Importing…' : parsed.length ? `Import ${parsed.length} contacts` : 'Import contacts'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Find by username or phone (search sheet) ---------- */}
+      {showSearch && (
+        <div
+          className={`inset-0 z-50 flex bg-black/45 ${desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'}`}
+          onClick={closeSearch}
+        >
+          <div
+            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} flex max-h-[85vh] flex-col bg-white shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Find by username or phone"
+          >
+            {!desk && <div className="mx-auto mb-3 mt-3 h-1.5 w-12 flex-none rounded-full bg-cline" />}
+            <div className="flex items-start justify-between gap-3 px-6 pt-5">
+              <div>
+                <h2 className="text-xl font-extrabold text-cink">Find on CALL</h2>
+                <p className="mt-1 text-sm text-cmut">Search by @username or phone number.</p>
+              </div>
+              <button
+                className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-cbg text-cmut hover:bg-csoft"
+                aria-label="Close search"
+                onClick={closeSearch}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="px-6 pt-4">
+              <div
+                className={`flex h-[46px] items-center gap-2.5 rounded-[14px] bg-[#F0F3FA] px-3.5 text-[#7A8499]`}
+              >
+                <Search size={19} className="flex-none" />
+                <input
+                  className="min-w-0 flex-1 bg-transparent text-[15px] text-cink outline-none placeholder:text-[#7A8499]"
+                  placeholder="username or phone"
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  autoFocus
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-label="Search by username or phone"
+                />
+                {searchQ && (
+                  <button
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-cmut hover:bg-csoft hover:text-cink"
+                    aria-label="Clear search"
+                    onClick={() => setSearchQ('')}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="app-scroll mt-2 flex-1 overflow-y-auto px-3 pb-[max(env(safe-area-inset-bottom),16px)] pt-2">
+              {searching && (
+                <div className="flex items-center justify-center gap-2 py-8 text-cmut">
+                  <Loader2 size={18} className="animate-spin" />
+                  <span className="text-sm">Searching everyone on CALL…</span>
+                </div>
+              )}
+              {!searching && searchQ.trim() && hits.length === 0 && (
+                <div className="flex flex-col items-center py-10 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-csoft text-cbrand">
+                    <AtSign size={26} />
+                  </div>
+                  <p className="mt-3 text-sm font-bold text-cink">No users found</p>
+                  <p className="mt-1 px-6 text-[13px] text-cmut">
+                    Usernames are 3–20 lowercase letters, numbers or _. Try the full handle or phone.
+                  </p>
+                </div>
+              )}
+              {!searching && !searchQ.trim() && (
+                <div className="flex flex-col items-center py-10 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-csoft text-cbrand">
+                    <AtSign size={26} />
+                  </div>
+                  <p className="mt-3 text-sm font-bold text-cink">Search every CALL user</p>
+                  <p className="mt-1 px-6 text-[13px] text-cmut">
+                    Type a @username or phone number — friends appear here with an Add button.
+                  </p>
+                </div>
+              )}
+              {!searching &&
+                hits.map((hit) => {
+                  const added = isAlreadyContact(hit)
+                  return (
+                    <div
+                      key={hit.id}
+                      className="flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-colors hover:bg-cbg"
+                    >
+                      {hit.isOfficial ? (
+                        <OfficialAvatar size={46} />
+                      ) : (
+                        <Avatar
+                          name={hit.name}
+                          avatarKey={hit.avatarKey}
+                          size={46}
+                          src={hit.avatarUrl}
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-[15px] font-bold text-cink">
+                          <span className="truncate">{hit.name}</span>
+                          {hit.isOfficial && <StaffTick role="team" isOfficial size={14} />}
+                        </div>
+                        <div className="mt-0.5 truncate text-[13px] text-[#4A5568]">@{hit.username}</div>
+                        {hit.about && (
+                          <div className="mt-0.5 truncate text-[12px] text-cmut">{hit.about}</div>
+                        )}
+                      </div>
+                      <button
+                        className={`flex h-9 flex-none items-center gap-1.5 rounded-full px-4 text-[13px] font-bold transition ${
+                          added
+                            ? 'cursor-default bg-[#DFF3E7] text-[#0B8A46]'
+                            : 'bg-cbrand text-white hover:bg-cbrand-deep'
+                        } disabled:opacity-70`}
+                        disabled={added || addingId === hit.id}
+                        onClick={() => void addHit(hit)}
+                        aria-label={added ? `${hit.name} is already in contacts` : `Add ${hit.name} to contacts`}
+                      >
+                        {addingId === hit.id ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : added ? (
+                          <Check size={14} />
+                        ) : (
+                          <Plus size={14} />
+                        )}
+                        {added ? 'Added' : 'Add'}
+                      </button>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Remove contact confirmation ---------- */}
+      {confirmTarget && (
+        <div
+          className={`inset-0 z-[60] flex bg-black/50 ${desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'}`}
+          onClick={() => !removing && setConfirmTarget(null)}
+        >
+          <div
+            className={`${desk ? 'w-full max-w-sm rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-7 shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-label="Remove contact"
+          >
+            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+            <div className="flex items-start gap-3">
+              <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-[#FDECEC] text-[#C13B3B]">
+                <Trash2 size={20} />
+              </span>
+              <div>
+                <h2 className="text-lg font-extrabold text-cink">Remove contact?</h2>
+                <p className="mt-1 text-[13.5px] leading-6 text-cmut">
+                  <span className="font-bold text-cink">{confirmTarget.name}</span> will be removed from
+                  your contact book. You can add them again anytime by username or phone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2.5">
+              <button
+                className="flex-1 rounded-full bg-cbg py-3 text-[14px] font-bold text-cink transition hover:bg-csoft disabled:opacity-50"
+                disabled={removing}
+                onClick={() => setConfirmTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="flex-1 rounded-full bg-[#C13B3B] py-3 text-[14px] font-bold text-white transition hover:bg-[#A82E2E] disabled:opacity-50"
+                disabled={removing}
+                onClick={() => void confirmRemove()}
+              >
+                {removing ? <Loader2 size={16} className="mx-auto animate-spin" /> : 'Remove'}
+              </button>
+            </div>
           </div>
         </div>
       )}

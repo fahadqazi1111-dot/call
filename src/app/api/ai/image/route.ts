@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
-import path from 'path'
 import crypto from 'crypto'
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { requireUser, getSetting, rateLimit } from '@/lib/callapp/server'
-
-const UPLOAD_DIR = '/home/z/my-project/db/uploads'
+import { ensureUploadDir, mediaPath } from '@/lib/callapp/uploadDir'
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
@@ -46,8 +44,8 @@ export async function POST(req: Request) {
     if (!base64) return NextResponse.json({ error: 'Generation returned no image' }, { status: 500 })
 
     const id = crypto.randomUUID().replace(/-/g, '')
-    await fs.mkdir(UPLOAD_DIR, { recursive: true })
-    await fs.writeFile(path.join(UPLOAD_DIR, `${id}.png`), Buffer.from(base64, 'base64'))
+    await ensureUploadDir()
+    await fs.writeFile(mediaPath(id, 'png'), Buffer.from(base64, 'base64'))
 
     await db.aiUsage.update({
       where: { userId_day: { userId: me.id, day: today() } },

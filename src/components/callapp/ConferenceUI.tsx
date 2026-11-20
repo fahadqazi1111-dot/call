@@ -148,7 +148,7 @@ function ComposerSheetInner({ type }: { type: 'voice' | 'video' }) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50"
+      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 sm:items-center"
       onClick={() => !busy && closeConferenceComposer()}
       role="dialog"
       aria-modal="true"

@@ -3,25 +3,19 @@
 import { socketClient } from './socket'
 import { soundKit } from './sound'
 import { api } from './api'
+import { getIceConfig, describeMediaError } from './ice'
 import type { CallState, CallPhase } from './types'
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    {
-      // Free public TURN relays (Metered openrelay) so calls also connect
-      // behind strict NATs and firewalls. 100% free tier, no API keys.
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turn:openrelay.metered.ca:80?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
-  iceCandidatePoolSize: 4,
+/** Toast severity — the AppRoot/store binding maps each to a Sonner variant. */
+export type ToastKind = 'info' | 'error' | 'warning'
+
+/**
+ * ICE servers are resolved lazily through `getIceConfig()` so env var changes
+ * (NEXT_PUBLIC_CALL_ICE_SERVERS) are picked up at module load without each
+ * call site needing to know about the cache.
+ */
+function iceConfig(): RTCConfiguration {
+  return getIceConfig()
 }
 
 type Listener = (s: CallState) => void
@@ -57,7 +51,7 @@ class CallManager {
   private restartAttempted = false
   private endReason: string | undefined
   private listeners = new Set<Listener>()
-  private toastFn: ((msg: string) => void) | null = null
+  private toastFn: ((msg: string, opts?: { kind?: ToastKind; description?: string }) => void) | null = null
   private refreshFn: (() => void) | null = null
   private msgFn: ((peerId: string, message: unknown) => void) | null = null
 
@@ -73,7 +67,7 @@ class CallManager {
     }
   }
 
-  setToast(fn: (msg: string) => void) {
+  setToast(fn: (msg: string, opts?: { kind?: ToastKind; description?: string }) => void) {
     this.toastFn = fn
   }
 
@@ -119,8 +113,8 @@ class CallManager {
     })
   }
 
-  private toast(msg: string) {
-    this.toastFn?.(msg)
+  private toast(msg: string, opts?: { kind?: ToastKind; description?: string }) {
+    this.toastFn?.(msg, opts)
   }
 
   // ---------- media helpers ----------
@@ -132,7 +126,27 @@ class CallManager {
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
         }
       : { audio: { echoCancellation: true, noiseSuppression: true }, video: false }
-    return navigator.mediaDevices.getUserMedia(constraints)
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (e) {
+      // Surface a clear, actionable error toast — never a silent fail. The
+      // caller decides whether to roll back the call (startCall) or to
+      // decline the incoming call (acceptCall).
+      const kind = withVideo ? 'video' : 'audio'
+      const described = describeMediaError(e, kind)
+      if (described) {
+        this.toast(described.title, { kind: 'error', description: described.hint })
+      } else {
+        this.toast(
+          withVideo ? 'Camera and microphone are needed for video calls' : 'Microphone permission is needed for calls',
+          {
+            kind: 'error',
+            description: 'Tap the padlock icon in the address bar to grant access, then try again.',
+          },
+        )
+      }
+      throw e
+    }
   }
 
   // ---------- starting an outgoing call ----------
@@ -164,8 +178,8 @@ class CallManager {
     try {
       this.localStream = await this.getMedia(this.cameraOn)
     } catch {
+      // getMedia() already surfaced a clear, actionable toast — just unwind.
       this.reset()
-      this.toast(type === 'video' ? 'Camera and microphone are needed for video calls' : 'Microphone permission is needed for calls')
       return
     }
     this.phase = 'outgoing'
@@ -219,9 +233,10 @@ class CallManager {
       this.localStream = await this.getMedia(this.type === 'video')
       this.cameraOn = this.type === 'video'
     } catch {
+      // getMedia() already surfaced a clear, actionable toast — politely
+      // decline the incoming call so the caller isn't left ringing forever.
       socketClient.emit('call:respond', { callId: this.callId, to: this.peerId, action: 'decline' })
       this.reset()
-      this.toast('Microphone/camera permission is needed for calls')
       return
     }
     soundKit.stopRing()
@@ -247,7 +262,7 @@ class CallManager {
 
   private async setupPeer() {
     if (!this.peerId || this.pc) return
-    const pc = new RTCPeerConnection(ICE_CONFIG)
+    const pc = new RTCPeerConnection(iceConfig())
     this.pc = pc
     this.remoteStream = new MediaStream()
     this.emit()
@@ -305,6 +320,25 @@ class CallManager {
           }
         }, 8000)
       }
+    }
+
+    // Granular ICE-layer monitoring (orthogonal to the aggregate state above).
+    // Fires on every ICE agent transition — surfaces the now-standard
+    // "Reconnecting…" / "Call failed" UX that users expect from WhatsApp/Meet.
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState
+      console.info('[callapp] 1:1 ICE state:', st)
+      if (st === 'disconnected') {
+        // Don't fire-and-forget the toast on every transient blip — only
+        // surface it once the state actually lands on disconnected. The
+        // 8s grace in onconnectionstatechange handles actual recovery.
+        this.toast('Reconnecting…', { kind: 'warning' })
+      } else if (st === 'failed') {
+        this.toast('Call failed', { kind: 'error', description: 'The peer-to-peer connection could not be re-established. The call will end.' })
+        // handleConnectionFailed() in onconnectionstatechange owns the actual hang-up;
+        // we only surface the user-visible message here so we don't double-finish.
+      }
+      // 'closed' is expected when we tear the PC down in reset() — nothing to do.
     }
 
     // Tracks on transceivers.
@@ -512,8 +546,9 @@ class CallManager {
         const cam = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
         videoTrack = cam.getVideoTracks()[0]
         this.localStream?.addTrack(videoTrack)
-      } catch {
-        this.toast('Camera not available')
+      } catch (e) {
+        const d = describeMediaError(e, 'video') ?? { title: 'Camera not available', hint: undefined }
+        this.toast(d.title, { kind: 'error', description: d.hint })
         return
       }
     } else {
@@ -549,8 +584,9 @@ class CallManager {
         this.localStream?.removeTrack(current)
       }
       this.emit()
-    } catch {
-      this.toast('Could not switch camera')
+    } catch (e) {
+      const d = describeMediaError(e, 'video') ?? { title: 'Could not switch camera', hint: undefined }
+      this.toast(d.title, { kind: 'error', description: d.hint })
     }
   }
 
@@ -569,8 +605,9 @@ class CallManager {
       })
       videoTrack = cam.getVideoTracks()[0]
       this.localStream?.addTrack(videoTrack)
-    } catch {
-      this.toast('Camera not available')
+    } catch (e) {
+      const d = describeMediaError(e, 'video') ?? { title: 'Camera not available', hint: undefined }
+      this.toast(d.title, { kind: 'error', description: d.hint })
       return
     }
     const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video')
@@ -730,11 +767,24 @@ class CallManager {
     this.stopDuration()
     if (this.resetTimer) window.clearTimeout(this.resetTimer)
     this.resetTimer = null
+    // Tear down the peer connection BEFORE stopping local tracks — closing
+    // the PC fires `iceconnectionstatechange` -> `closed` (which we ignore)
+    // and cleanly drops the SRTP / DTLS / ICE layers in one go.
+    if (this.pc) {
+      // Detach handlers so the synthetic `closed` event during teardown does
+      // not double-fire toasts or trigger another handleConnectionFailed().
+      this.pc.ontrack = null
+      this.pc.onicecandidate = null
+      this.pc.onconnectionstatechange = null
+      this.pc.oniceconnectionstatechange = null
+      try {
+        this.pc.close()
+      } catch {}
+      this.pc = null
+    }
+    // Stop every local track — failing to do this leaves the camera/mic
+    // indicator light ON after the call ends (a real bug the task calls out).
     this.localStream?.getTracks().forEach((t) => t.stop())
-    try {
-      this.pc?.close()
-    } catch {}
-    this.pc = null
     this.localStream = null
     this.remoteStream = null
     this.callId = null

@@ -395,7 +395,7 @@ function CreateCampaignSheet({
         <div className="mt-4 space-y-3">
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wide text-cmut">Title *</label>
-            <input className="app-input mt-1 h-12 w-full" value={title} maxLength={60} onChange={(e) => setTitle(e.target.value)} placeholder="Headline of your ad" />
+            <input className="app-input mt-1 w-full" value={title} maxLength={60} onChange={(e) => setTitle(e.target.value)} placeholder="Headline of your ad" />
           </div>
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wide text-cmut">Description</label>
@@ -405,7 +405,7 @@ function CreateCampaignSheet({
             <label className="text-[11px] font-bold uppercase tracking-wide text-cmut">Destination URL</label>
             <div className="relative mt-1">
               <Link2 size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-cmut" />
-              <input className="app-input h-12 w-full pl-10" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://your-site.com" />
+              <input className="app-input w-full has-icon" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://your-site.com" />
             </div>
           </div>
           <div>
@@ -472,7 +472,7 @@ function CreateCampaignSheet({
           {pkg && pkg.minBudget > 0 && (
             <div>
               <label className="text-[11px] font-bold uppercase tracking-wide text-cmut">Campaign budget (USD, min ${pkg.minBudget})</label>
-              <input type="number" min={pkg.minBudget} className="app-input mt-1 h-12 w-full" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={String(pkg.minBudget)} />
+              <input type="number" min={pkg.minBudget} className="app-input mt-1 w-full" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={String(pkg.minBudget)} />
             </div>
           )}
 

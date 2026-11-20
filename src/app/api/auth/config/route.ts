@@ -1,20 +1,60 @@
 import { NextResponse } from 'next/server'
 import { getSetting } from '@/lib/callapp/server'
+import { getOtpConfig, maskOtpConfig } from '@/lib/callapp/otpDelivery'
+import type { AuthPolicy } from '@/lib/callapp/authPolicy'
+import { DEFAULT_AUTH_POLICY } from '@/lib/callapp/authPolicy'
 
 /**
  * GET /api/auth/config — public auth configuration for the sign-in screen.
- * Only exposes non-secret values: the Google OAuth *client ID* (public by
- * design in Google Identity Services) so the client can render the GSI
- * button. Nothing else about credentials is ever exposed here.
+ *
+ * Only exposes non-secret values:
+ *   - The Google OAuth *client ID* (public by design in Google Identity
+ *     Services) so the client can render the GSI button.
+ *   - The auth policy flags (require phone / email verification, allow
+ *     phone-only or email-only registration) so the AuthScreen can adapt
+ *     its UI to admin settings.
+ *   - Whether an SMS provider / SMTP is configured (boolean only, never the
+ *     credentials themselves) so the UI can decide whether to show the
+ *     "sandbox mode" banner up front.
+ *
+ * Nothing about credentials is ever exposed here.
  */
 export async function GET() {
   try {
-    const authCfg = await getSetting<{ googleClientId?: string }>('auth', {})
+    const authCfg = await getSetting<Partial<AuthPolicy>>('auth', {})
+    const policy: AuthPolicy = {
+      requirePhoneVerification: authCfg.requirePhoneVerification ?? DEFAULT_AUTH_POLICY.requirePhoneVerification,
+      requireEmailVerification: authCfg.requireEmailVerification ?? DEFAULT_AUTH_POLICY.requireEmailVerification,
+      allowEmailOnlyRegistration: authCfg.allowEmailOnlyRegistration ?? DEFAULT_AUTH_POLICY.allowEmailOnlyRegistration,
+      allowPhoneOnlyRegistration: authCfg.allowPhoneOnlyRegistration ?? DEFAULT_AUTH_POLICY.allowPhoneOnlyRegistration,
+      googleClientId: authCfg.googleClientId,
+    }
+    // Surface which delivery channels are actually configured (no secrets).
+    const otp = maskOtpConfig(await getOtpConfig())
+    const smsConfigured =
+      (otp.smsProvider === 'twilio' &&
+        !!(otp.twilioAccountSid && otp.twilioAuthToken && otp.twilioFromNumber)) ||
+      (otp.smsProvider === 'vonage' &&
+        !!(otp.vonageApiKey && otp.vonageApiSecret && otp.vonageFromNumber))
+    const whatsappConfigured = !!(otp.whatsappApiKey && otp.whatsappPhoneNumberId)
     return NextResponse.json({
       googleClientId: authCfg.googleClientId || null,
       googleEnabled: Boolean(authCfg.googleClientId),
+      policy,
+      delivery: {
+        sms: smsConfigured,
+        whatsapp: whatsappConfigured,
+        // SMTP presence is checked by the /api/auth/email/* routes; the client
+        // just reads `delivered` / `sandbox` from each request-code response.
+        email: false,
+      },
     })
   } catch {
-    return NextResponse.json({ googleClientId: null, googleEnabled: false })
+    return NextResponse.json({
+      googleClientId: null,
+      googleEnabled: false,
+      policy: DEFAULT_AUTH_POLICY,
+      delivery: { sms: false, whatsapp: false, email: false },
+    })
   }
 }

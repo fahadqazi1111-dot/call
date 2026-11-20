@@ -761,7 +761,7 @@ export function GiftPickerSheet({ context, preselectedRecipientId, extra, onSent
 
   return (
     <>
-      <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50" onClick={onClose} role="dialog" aria-modal="true" aria-label="Send a gift">
+      <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 sm:items-center" onClick={onClose} role="dialog" aria-modal="true" aria-label="Send a gift">
         <div
           className="w-full max-w-[560px] rounded-t-[24px] bg-white pb-[max(env(safe-area-inset-bottom),14px)] shadow-2xl sm:mb-4 sm:rounded-[24px]"
           onClick={(e) => e.stopPropagation()}

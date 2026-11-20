@@ -7,15 +7,16 @@ import {
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
   Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall, Sparkles,
-  Download, Package, Database, FileJson,
+  MessageSquare,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { AI_PROVIDERS, type AiProviderMeta } from '@/lib/callapp/aiProvidersShared'
 import { StaffTick } from './StaffTick'
+import { ConfirmDialog, InputDialog, FormDialog } from './admin/AdminDialogs'
 import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp' | 'auth'
 
 interface StaffMember {
   id: string
@@ -81,6 +82,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
       { id: 'app', label: 'App experience', Icon: Sparkles, adminOnly: true },
       { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
       { id: 'broadcast', label: 'Messages', Icon: Megaphone, adminOnly: true },
+      { id: 'auth', label: 'Authentication', Icon: ShieldCheck, adminOnly: true },
       { id: 'smtp', label: 'Email / SMTP', Icon: Mail, adminOnly: true },
     ] as const
   ).filter((item) => isAdmin || !item.adminOnly)
@@ -150,6 +152,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'app' && isAdmin && <AppSection />}
           {section === 'ads' && <AdsSection />}
           {section === 'broadcast' && isAdmin && <BroadcastSection />}
+          {section === 'auth' && isAdmin && <AuthSection />}
           {section === 'smtp' && isAdmin && <SmtpSection />}
         </div>
       </div>
@@ -231,61 +234,6 @@ function OverviewSection() {
       <p className="pt-4 text-[12px] text-cmut">
         Use the sections on the left to manage the finance ledger, users, gifts, withdrawals, moderation, the CALL AI, ads and broadcasts.
       </p>
-      <DeploymentDownloadsCard />
-    </div>
-  )
-}
-
-/** One-click downloads of the ready-to-deploy ZIP + MySQL import file (admin only, files live in /public/downloads). */
-function DeploymentDownloadsCard() {
-  const items = [
-    {
-      href: '/downloads/call-deploy.zip',
-      file: 'call-deploy.zip',
-      Icon: Package,
-      title: 'Deploy ZIP (complete app)',
-      sub: 'Full source, assets, MySQL schema, production server + guide',
-    },
-    {
-      href: '/downloads/call-mysql.sql',
-      file: 'call-mysql.sql',
-      Icon: Database,
-      title: 'MySQL import file (phpMyAdmin)',
-      sub: '41 tables + all current data, UTC timestamps',
-    },
-    {
-      href: '/downloads/call-mysql-schema-only.sql',
-      file: 'call-mysql-schema-only.sql',
-      Icon: FileJson,
-      title: 'MySQL schema only (empty DB)',
-      sub: 'Same tables, no data — for a fresh start',
-    },
-  ]
-  return (
-    <div className="mt-5 rounded-[16px] border border-cline bg-white p-4">
-      <div className="flex items-center gap-2">
-        <Download size={17} className="text-cbrand" />
-        <h4 className="text-[13.5px] font-extrabold text-cink">Deployment package — download for your hosting</h4>
-      </div>
-      <p className="pt-1 text-[11.5px] leading-relaxed text-cmut">
-        Import the MySQL file via phpMyAdmin, upload the ZIP, then follow README-DEPLOY.md inside it. After the site is live, send the URL back so the Android/iOS app can be built.
-      </p>
-      <div className="grid gap-3 pt-3 sm:grid-cols-3">
-        {items.map(({ href, file, Icon, title, sub }) => (
-          <a
-            key={file}
-            href={href}
-            download={file}
-            className="flex items-start gap-3 rounded-[14px] border border-cline bg-[#F8FAFC] p-3 transition-colors hover:border-cbrand hover:bg-[#EFF6FF]"
-          >
-            <Icon size={18} className="mt-0.5 shrink-0 text-cbrand" />
-            <span className="min-w-0">
-              <span className="block text-[12.5px] font-bold text-cink">{title}</span>
-              <span className="block text-[11px] leading-snug text-cmut">{sub}</span>
-            </span>
-          </a>
-        ))}
-      </div>
     </div>
   )
 }
@@ -293,9 +241,17 @@ function DeploymentDownloadsCard() {
 function UsersSection() {
   const me = useApp((s) => s.me)
   const isAdmin = me?.role === 'admin'
-  const [users, setUsers] = useState<Array<{ id: string; name: string; username: string; phone: string; email: string | null; role: string; blocked: boolean; available: number; reserved: number; totalEarned: number; totalWithdrawn: number }>>([])
+  const [users, setUsers] = useState<Array<{ id: string; name: string; username: string; phone: string; email: string | null; emailVerified: boolean; phoneVerified: boolean; role: string; blocked: boolean; available: number; reserved: number; totalEarned: number; totalWithdrawn: number }>>([])
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
+
+  // ---- adjust-balance modal (replaces two sequential prompt() calls) ----
+  const [balanceOpen, setBalanceOpen] = useState(false)
+  const [balanceBusy, setBalanceBusy] = useState(false)
+  const [balanceUser, setBalanceUser] = useState<{ id: string; name: string } | null>(null)
+  // ---- create-user modal ----
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
 
   const load = async (query = '') => {
     setLoading(true)
@@ -320,21 +276,65 @@ function UsersSection() {
   }
 
   const adjustBalance = (u: { id: string; name: string }) => {
-    const raw = prompt(`Adjust balance for ${u.name}\nPositive = credit, negative = debit (USD):`, '10')
-    if (!raw) return
-    const amount = Number(raw)
+    setBalanceUser(u)
+    setBalanceOpen(true)
+  }
+
+  const submitBalance = async (values: Record<string, string>) => {
+    if (!balanceUser) return
+    const amount = Number(values.amount)
     if (!amount || isNaN(amount)) {
       toast.error('Invalid amount')
       return
     }
-    const note = prompt('Reason / note (recorded in the ledger):', 'Support adjustment') || 'Admin adjustment'
-    void act(u.id, 'adjust_balance', amount, note)
+    const note = (values.note || '').trim() || 'Admin adjustment'
+    setBalanceBusy(true)
+    try {
+      await api.adminUserAction(balanceUser.id, 'adjust_balance', amount, note)
+      await load(q)
+      toast.success(`Balance updated for ${balanceUser.name}`)
+      setBalanceOpen(false)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBalanceBusy(false)
+    }
+  }
+
+  const submitCreate = async (values: Record<string, string>) => {
+    setCreateBusy(true)
+    try {
+      const role = (values.role || 'user') as 'user' | 'team' | 'admin'
+      await api.adminUserCreate({
+        name: values.name.trim(),
+        username: values.username?.trim() || undefined,
+        phone: values.phone.trim(),
+        email: values.email?.trim() || undefined,
+        password: values.password,
+        role,
+      })
+      toast.success('User created')
+      setCreateOpen(false)
+      await load(q)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCreateBusy(false)
+    }
   }
 
   return (
     <div>
       <div className="flex items-center gap-2 pb-3">
         <h3 className="flex-1 text-[15px] font-extrabold text-cink">Users</h3>
+        {isAdmin && (
+          <button
+            className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus size={14} /> Create user
+          </button>
+        )}
         <input
           className="h-10 w-48 min-w-0 rounded-[12px] bg-[#F0F3FA] px-3 text-[13px] outline-none"
           placeholder="Search name/phone/email/@user"
@@ -358,6 +358,24 @@ function UsersSection() {
               </p>
               <p className="text-[11px] text-cmut">
                 {u.email ? `${u.email} · ` : ''}+{u.phone} · @{u.username}
+              </p>
+              <p className="mt-0.5 flex items-center gap-2 text-[10.5px] text-cmut">
+                <span className="inline-flex items-center gap-0.5">
+                  {u.emailVerified ? (
+                    <span className="inline-flex items-center gap-0.5 text-[#067647]"><Check size={11} /> Email</span>
+                  ) : u.email ? (
+                    <span className="inline-flex items-center gap-0.5 text-cred"><Flag size={10} /> Email</span>
+                  ) : (
+                    <span className="text-[#9AA8C7]">No email</span>
+                  )}
+                </span>
+                <span className="inline-flex items-center gap-0.5">
+                  {u.phoneVerified ? (
+                    <span className="inline-flex items-center gap-0.5 text-[#067647]"><Check size={11} /> Phone</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-0.5 text-cred"><Flag size={10} /> Phone</span>
+                  )}
+                </span>
               </p>
             </div>
             <div className="rounded-[12px] bg-cbg px-3 py-1.5 text-right">
@@ -403,6 +421,40 @@ function UsersSection() {
           </div>
         ))}
       </div>
+
+      {/* adjust balance — FormDialog with amount + note (replaces 2 prompts) */}
+      <FormDialog
+        open={balanceOpen}
+        onOpenChange={(o) => { setBalanceOpen(o); if (!o) setBalanceUser(null) }}
+        title={`Adjust balance${balanceUser ? ` — ${balanceUser.name}` : ''}`}
+        description="Positive = credit, negative = debit (USD). The note is recorded in the ledger."
+        fields={[
+          { key: 'amount', label: 'Amount (USD)', placeholder: '10', defaultValue: '10', type: 'number' as const, required: true },
+          { key: 'note', label: 'Reason / note', placeholder: 'Support adjustment', defaultValue: 'Support adjustment' },
+        ]}
+        confirmLabel="Apply adjustment"
+        loading={balanceBusy}
+        onConfirm={(v) => void submitBalance(v)}
+      />
+
+      {/* create user — FormDialog with name, username, phone, email, password, role */}
+      <FormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Create user"
+        description="Provision a new account manually — no OTP required. A wallet is created automatically."
+        fields={[
+          { key: 'name', label: 'Full name', placeholder: 'Jane Doe', required: true },
+          { key: 'username', label: 'Username (optional, auto-generated if blank)', placeholder: 'janedoe' },
+          { key: 'phone', label: 'Phone number', placeholder: '14155550123', required: true },
+          { key: 'email', label: 'Email (optional)', placeholder: 'jane@example.com', type: 'text' as const },
+          { key: 'password', label: 'Password (min 8 characters)', placeholder: '••••••••', required: true },
+          { key: 'role', label: 'Role', defaultValue: 'user' },
+        ]}
+        confirmLabel="Create user"
+        loading={createBusy}
+        onConfirm={(v) => void submitCreate(v)}
+      />
     </div>
   )
 }
@@ -410,6 +462,17 @@ function UsersSection() {
 function GiftsSection() {
   const [gifts, setGifts] = useState<GiftItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  // ---- create-gift modal (replaces 3 prompts) ----
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  // ---- edit-price modal (replaces 1 prompt) ----
+  const [editing, setEditing] = useState<GiftItem | null>(null)
+  const [priceBusy, setPriceBusy] = useState(false)
+  // ---- delete-gift confirm (replaces confirm()) ----
+  const [deleting, setDeleting] = useState<GiftItem | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
   const load = async () => {
     setLoading(true)
     try {
@@ -422,32 +485,69 @@ function GiftsSection() {
     queueMicrotask(() => void load())
   }, [])
 
-  const create = async () => {
-    const name = prompt('Gift name:')
-    if (!name) return
-    const emoji = prompt('Emoji (e.g. 🎁):') || '🎁'
-    const priceUsd = Number(prompt('Price in USD (real money, e.g. 0.60):') || '1')
+  const submitCreate = async (values: Record<string, string>) => {
+    const name = (values.name || '').trim()
+    if (!name) {
+      toast.error('Gift name is required')
+      return
+    }
+    const emoji = (values.emoji || '').trim() || '🎁'
+    const priceUsd = Number(values.priceUsd)
     if (!priceUsd || priceUsd <= 0) {
       toast.error('Invalid price')
       return
     }
-    await api.adminGiftCreate({ name, emoji, priceUsd, category: 'both' })
-    queueMicrotask(() => void load())
+    setCreateBusy(true)
+    try {
+      await api.adminGiftCreate({ name, emoji, priceUsd, category: 'both' })
+      toast.success('Gift created')
+      setCreateOpen(false)
+      await load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCreateBusy(false)
+    }
   }
-  const update = async (g: GiftItem) => {
-    const price = Number(prompt(`New USD price for ${g.name} (current $${g.priceUsd.toFixed(2)}):`, String(g.priceUsd)))
-    if (!price || price <= 0) return
-    await api.adminGiftUpdate(g.id, { priceUsd: price })
-    queueMicrotask(() => void load())
+
+  const submitPrice = async (priceStr: string) => {
+    if (!editing) return
+    const price = Number(priceStr)
+    if (!price || price <= 0) {
+      toast.error('Invalid price')
+      return
+    }
+    setPriceBusy(true)
+    try {
+      await api.adminGiftUpdate(editing.id, { priceUsd: price })
+      toast.success(`Price updated for ${editing.name}`)
+      setEditing(null)
+      await load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPriceBusy(false)
+    }
   }
+
   const toggle = async (g: GiftItem) => {
     await api.adminGiftUpdate(g.id, { active: !g.active })
     queueMicrotask(() => void load())
   }
-  const remove = async (g: GiftItem) => {
-    if (!confirm(`Delete gift ${g.name}?`)) return
-    await api.adminGiftDelete(g.id)
-    queueMicrotask(() => void load())
+
+  const submitDelete = async () => {
+    if (!deleting) return
+    setDeleteBusy(true)
+    try {
+      await api.adminGiftDelete(deleting.id)
+      toast.success(`Deleted ${deleting.name}`)
+      setDeleting(null)
+      await load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   if (loading) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
@@ -455,7 +555,7 @@ function GiftsSection() {
     <div>
       <div className="flex items-center gap-2 pb-2">
         <h3 className="flex-1 text-[15px] font-extrabold text-cink">Gifts & pricing (real money)</h3>
-        <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void create()}>
+        <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => setCreateOpen(true)}>
           <Plus size={14} /> New gift
         </button>
       </div>
@@ -471,19 +571,62 @@ function GiftsSection() {
             <p className="text-[13px] font-extrabold text-[#D6336C]">${g.priceUsd.toFixed(2)}</p>
             <p className="text-[10px] text-cmut">{g.category}</p>
             <div className="flex justify-center gap-1.5 pt-2">
-              <button className="rounded-full bg-csoft px-2.5 py-1 text-[10px] font-bold text-cbrand" onClick={() => void update(g)}>
+              <button className="rounded-full bg-csoft px-2.5 py-1 text-[10px] font-bold text-cbrand" onClick={() => setEditing(g)}>
                 Price
               </button>
               <button className="rounded-full bg-cbg px-2.5 py-1 text-[10px] font-bold text-cmut" onClick={() => void toggle(g)}>
                 {g.active ? 'Disable' : 'Enable'}
               </button>
-              <button className="rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-bold text-cred" onClick={() => void remove(g)}>
+              <button className="rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-bold text-cred" onClick={() => setDeleting(g)}>
                 <Trash2 size={11} />
               </button>
             </div>
           </div>
         ))}
       </div>
+
+      {/* create gift — FormDialog with name, emoji, price (replaces 3 prompts) */}
+      <FormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="New gift"
+        description="Set the gift name, emoji and real-money price. Defaults to 🎁 if the emoji is blank."
+        fields={[
+          { key: 'name', label: 'Gift name', placeholder: 'Super Sticker', required: true },
+          { key: 'emoji', label: 'Emoji', placeholder: '🎁', defaultValue: '🎁' },
+          { key: 'priceUsd', label: 'Price in USD (real money)', placeholder: '0.60', defaultValue: '1', type: 'number' as const, required: true },
+        ]}
+        confirmLabel="Create gift"
+        loading={createBusy}
+        onConfirm={(v) => void submitCreate(v)}
+      />
+
+      {/* edit price — InputDialog (replaces prompt) */}
+      <InputDialog
+        open={!!editing}
+        onOpenChange={(o) => { if (!o) setEditing(null) }}
+        title={editing ? `Edit price — ${editing.name}` : 'Edit price'}
+        description={editing ? `Current price is $${editing.priceUsd.toFixed(2)}. Enter the new USD price.` : undefined}
+        label="New USD price"
+        placeholder="0.60"
+        defaultValue={editing ? String(editing.priceUsd) : ''}
+        confirmLabel="Update price"
+        loading={priceBusy}
+        onConfirm={(v) => void submitPrice(v)}
+      />
+
+      {/* delete confirm — ConfirmDialog (replaces confirm) */}
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => { if (!o) setDeleting(null) }}
+        title={deleting ? `Delete ${deleting.name}?` : 'Delete gift?'}
+        description="This permanently removes the gift. Existing gift transactions are preserved in the ledger."
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        variant="destructive"
+        loading={deleteBusy}
+        onConfirm={() => void submitDelete()}
+      />
     </div>
   )
 }
@@ -650,6 +793,13 @@ function WithdrawalsSection() {
   const [items, setItems] = useState<AdminWithdrawalRow[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
+  // ---- reject modal (replaces prompt) ----
+  const [rejecting, setRejecting] = useState<AdminWithdrawalRow | null>(null)
+  const [rejectBusy, setRejectBusy] = useState(false)
+  // ---- mark-paid modal (replaces prompt) ----
+  const [paying, setPaying] = useState<AdminWithdrawalRow | null>(null)
+  const [payBusy, setPayBusy] = useState(false)
+
   const load = async (status = statusFilter) => {
     setLoading(true)
     try {
@@ -661,24 +811,49 @@ function WithdrawalsSection() {
   useEffect(() => {
     queueMicrotask(() => void load())
   }, [])
-  const act = async (w: AdminWithdrawalRow, action: 'under_review' | 'approve' | 'reject' | 'paid') => {
+
+  // Direct actions that don't need a prompt (under_review / approve).
+  const act = async (w: AdminWithdrawalRow, action: 'under_review' | 'approve') => {
     try {
-      if (action === 'reject') {
-        const note = prompt('Rejection note (the reserved amount is released back to the creator):') || ''
-        await api.adminWithdrawalReview(w.id, 'reject', note)
-      } else if (action === 'paid') {
-        const ref = prompt('Bank transfer reference (required, recorded in the audit trail):')
-        if (!ref) return
-        await api.adminWithdrawalReview(w.id, 'paid', undefined, ref)
-      } else if (action === 'approve') {
-        await api.adminWithdrawalReview(w.id, 'approve')
-      } else {
-        await api.adminWithdrawalReview(w.id, 'under_review')
-      }
-      toast.success(`Marked ${action === 'paid' ? 'paid' : action.replace('_', ' ')}`)
+      await api.adminWithdrawalReview(w.id, action)
+      toast.success(`Marked ${action.replace('_', ' ')}`)
       void load()
     } catch (e) {
       toast.error((e as Error).message)
+    }
+  }
+
+  const submitReject = async (note: string) => {
+    if (!rejecting) return
+    setRejectBusy(true)
+    try {
+      await api.adminWithdrawalReview(rejecting.id, 'reject', note.trim() || 'Rejected by admin')
+      toast.success('Withdrawal rejected — funds released')
+      setRejecting(null)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setRejectBusy(false)
+    }
+  }
+
+  const submitPaid = async (ref: string) => {
+    if (!paying) return
+    if (!ref.trim()) {
+      toast.error('Transfer reference is required')
+      return
+    }
+    setPayBusy(true)
+    try {
+      await api.adminWithdrawalReview(paying.id, 'paid', undefined, ref.trim())
+      toast.success('Marked paid')
+      setPaying(null)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPayBusy(false)
     }
   }
   const STATUS_CLS: Record<string, string> = {
@@ -736,12 +911,12 @@ function WithdrawalsSection() {
                 </button>
               )}
               {w.status === 'approved' && (
-                <button className="rounded-full bg-brand-grad px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(w, 'paid')}>
+                <button className="rounded-full bg-brand-grad px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => setPaying(w)}>
                   Mark paid
                 </button>
               )}
               {!['paid', 'rejected'].includes(w.status) && (
-                <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(w, 'reject')}>
+                <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => setRejecting(w)}>
                   Reject
                 </button>
               )}
@@ -756,6 +931,34 @@ function WithdrawalsSection() {
           </div>
         ))}
       </div>
+
+      {/* reject withdrawal — InputDialog (replaces prompt) */}
+      <InputDialog
+        open={!!rejecting}
+        onOpenChange={(o) => { if (!o) setRejecting(null) }}
+        title={rejecting ? `Reject withdrawal — ${rejecting.user.name}` : 'Reject withdrawal'}
+        description={rejecting ? `$${rejecting.amount.toFixed(2)} via ${rejecting.method.toUpperCase()}. The reserved amount is released back to the creator.` : undefined}
+        label="Rejection note"
+        placeholder="Optional reason — shown to the creator"
+        confirmLabel="Reject & release"
+        variant="destructive"
+        loading={rejectBusy}
+        onConfirm={(v) => void submitReject(v)}
+      />
+
+      {/* mark paid — InputDialog (replaces prompt) */}
+      <InputDialog
+        open={!!paying}
+        onOpenChange={(o) => { if (!o) setPaying(null) }}
+        title={paying ? `Mark paid — ${paying.user.name}` : 'Mark paid'}
+        description={paying ? `Confirm the bank transfer of $${paying.amount.toFixed(2)} was completed.` : undefined}
+        label="Bank transfer reference"
+        placeholder="Bank slip / transaction id"
+        confirmLabel="Confirm paid"
+        loading={payBusy}
+        validate={(v) => (v.trim() ? null : 'Transfer reference is required')}
+        onConfirm={(v) => void submitPaid(v)}
+      />
     </div>
   )
 }
@@ -1207,9 +1410,9 @@ function CallsSection() {
       const clamped = Math.min(12, Math.max(2, Math.floor(maxParticipants || 5)))
       await api.adminSaveSettings('calls', { maxConferenceParticipants: clamped })
       setMaxParticipants(clamped)
-      alert('Conference settings saved — new conferences will use this limit')
+      toast.success('Conference settings saved')
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message || 'Failed to save settings')
     } finally {
       setSaving(false)
     }
@@ -1271,6 +1474,20 @@ function AdsSection() {
   const [packages, setPackages] = useState<Array<{ id: string; name: string; description: string; priceUsd: number; durationDays: number; placements: string; minBudget: number; order: number; active: boolean }>>([])
   const [loading, setLoading] = useState(true)
 
+  // ---- reject ad modal (replaces prompt) ----
+  const [rejectingAd, setRejectingAd] = useState<{ id: string; title: string } | null>(null)
+  const [rejectAdBusy, setRejectAdBusy] = useState(false)
+  // ---- create house-ad modal (replaces 3 prompts) ----
+  const [houseAdOpen, setHouseAdOpen] = useState(false)
+  const [houseAdBusy, setHouseAdBusy] = useState(false)
+  // ---- create ad package modal (replaces 4 prompts) ----
+  const [pkgOpen, setPkgOpen] = useState(false)
+  const [pkgBusy, setPkgBusy] = useState(false)
+  // ---- delete confirm (replaces confirm()) ----
+  const [deletingAd, setDeletingAd] = useState<{ id: string; title: string } | null>(null)
+  const [deletingPkg, setDeletingPkg] = useState<{ id: string; name: string } | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
   const load = async () => {
     setLoading(true)
     try {
@@ -1284,32 +1501,120 @@ function AdsSection() {
     queueMicrotask(() => void load())
   }, [])
 
-  const act = async (id: string, action: 'approve' | 'reject' | 'activate' | 'pause' | 'complete') => {
+  // Direct actions that don't need a prompt (approve / activate / pause / complete).
+  const act = async (id: string, action: 'approve' | 'activate' | 'pause' | 'complete') => {
     try {
-      const reason = action === 'reject' ? prompt('Rejection reason (shown to the advertiser):') || 'Does not meet content guidelines' : undefined
-      await api.adminAdAction(id, action, reason)
+      await api.adminAdAction(id, action)
       toast.success(`Campaign ${action}d`)
       void load()
     } catch (e) {
       toast.error((e as Error).message)
     }
   }
-  const createHouseAd = async () => {
-    const title = prompt('Ad title:')
-    if (!title) return
-    const body = prompt('Ad body:') || ''
-    const linkUrl = prompt('Link URL (optional):') || undefined
-    await api.adminAdCreate({ title, body, linkUrl, placements: ['chats', 'rooms'] })
-    void load()
+
+  const submitRejectAd = async (reason: string) => {
+    if (!rejectingAd) return
+    setRejectAdBusy(true)
+    try {
+      await api.adminAdAction(rejectingAd.id, 'reject', reason.trim() || 'Does not meet content guidelines')
+      toast.success('Campaign rejected')
+      setRejectingAd(null)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setRejectAdBusy(false)
+    }
   }
-  const createPackage = async () => {
-    const name = prompt('Package name:')
-    if (!name) return
-    const priceUsd = Number(prompt('Price USD:', '15') || '15')
-    const durationDays = Number(prompt('Duration (days):', '7') || '7')
-    const minBudget = Number(prompt('Minimum budget USD (0 = none):', '0') || '0')
-    await api.adminAdPackageCreate({ name, priceUsd, durationDays, minBudget, placements: 'chats,rooms,profile' })
-    void load()
+
+  const submitHouseAd = async (values: Record<string, string>) => {
+    const title = (values.title || '').trim()
+    if (!title) {
+      toast.error('Ad title is required')
+      return
+    }
+    setHouseAdBusy(true)
+    try {
+      await api.adminAdCreate({
+        title,
+        body: (values.body || '').trim(),
+        linkUrl: (values.linkUrl || '').trim() || undefined,
+        placements: ['chats', 'rooms'],
+      })
+      toast.success('House ad created')
+      setHouseAdOpen(false)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setHouseAdBusy(false)
+    }
+  }
+
+  const submitPackage = async (values: Record<string, string>) => {
+    const name = (values.name || '').trim()
+    if (!name) {
+      toast.error('Package name is required')
+      return
+    }
+    const priceUsd = Number(values.priceUsd)
+    const durationDays = Number(values.durationDays)
+    const minBudget = Number(values.minBudget)
+    if (!priceUsd || priceUsd <= 0) {
+      toast.error('Invalid price')
+      return
+    }
+    if (!durationDays || durationDays <= 0) {
+      toast.error('Invalid duration')
+      return
+    }
+    setPkgBusy(true)
+    try {
+      await api.adminAdPackageCreate({
+        name,
+        priceUsd,
+        durationDays,
+        minBudget: isNaN(minBudget) ? 0 : Math.max(0, minBudget),
+        placements: 'chats,rooms,profile',
+      })
+      toast.success('Ad package created')
+      setPkgOpen(false)
+      void load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPkgBusy(false)
+    }
+  }
+
+  const submitDelete = async () => {
+    if (deletingAd) {
+      setDeleteBusy(true)
+      try {
+        await api.adminAdDelete(deletingAd.id)
+        toast.success('Ad deleted')
+        setDeletingAd(null)
+        void load()
+      } catch (e) {
+        toast.error((e as Error).message)
+      } finally {
+        setDeleteBusy(false)
+      }
+      return
+    }
+    if (deletingPkg) {
+      setDeleteBusy(true)
+      try {
+        await api.adminAdPackageDelete(deletingPkg.id)
+        toast.success(`Package ${deletingPkg.name} deleted`)
+        setDeletingPkg(null)
+        void load()
+      } catch (e) {
+        toast.error((e as Error).message)
+      } finally {
+        setDeleteBusy(false)
+      }
+    }
   }
 
   /* ---------- serving settings (chat ad frequency, placements, CPM) ---------- */
@@ -1374,11 +1679,11 @@ function AdsSection() {
         </div>
         <div className="flex-1" />
         {tab === 'campaigns' ? (
-          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void createHouseAd()}>
+          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => setHouseAdOpen(true)}>
             <Plus size={14} /> New house ad
           </button>
         ) : (
-          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => void createPackage()}>
+          <button className="flex items-center gap-1.5 rounded-full bg-cbrand px-3.5 py-2 text-[12px] font-bold text-white" onClick={() => setPkgOpen(true)}>
             <Plus size={14} /> New package
           </button>
         )}
@@ -1484,7 +1789,7 @@ function AdsSection() {
                     <button className="rounded-full bg-green-600 px-3.5 py-1.5 text-[11px] font-bold text-white" onClick={() => void act(a.id, 'approve')}>
                       Approve & activate
                     </button>
-                    <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => void act(a.id, 'reject')}>
+                    <button className="rounded-full bg-red-50 px-3.5 py-1.5 text-[11px] font-bold text-cred" onClick={() => setRejectingAd({ id: a.id, title: a.title })}>
                       Reject
                     </button>
                   </>
@@ -1507,11 +1812,7 @@ function AdsSection() {
                 {!a.isUserAd && (
                   <button
                     className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
-                    onClick={async () => {
-                      if (!confirm('Delete this ad?')) return
-                      await api.adminAdDelete(a.id)
-                      void load()
-                    }}
+                    onClick={() => setDeletingAd({ id: a.id, title: a.title })}
                   >
                     <Trash2 size={12} />
                   </button>
@@ -1541,11 +1842,7 @@ function AdsSection() {
               </button>
               <button
                 className="rounded-full bg-red-50 px-3 py-1.5 text-[11px] font-bold text-cred"
-                onClick={async () => {
-                  if (!confirm(`Delete package ${p.name}?`)) return
-                  await api.adminAdPackageDelete(p.id)
-                  void load()
-                }}
+                onClick={() => setDeletingPkg({ id: p.id, name: p.name })}
               >
                 <Trash2 size={12} />
               </button>
@@ -1553,6 +1850,66 @@ function AdsSection() {
           ))}
         </div>
       )}
+
+      {/* reject ad — InputDialog (replaces prompt) */}
+      <InputDialog
+        open={!!rejectingAd}
+        onOpenChange={(o) => { if (!o) setRejectingAd(null) }}
+        title={rejectingAd ? `Reject ad — ${rejectingAd.title}` : 'Reject ad'}
+        description="The advertiser sees this reason. A default is used if left blank."
+        label="Rejection reason"
+        placeholder="Does not meet content guidelines"
+        confirmLabel="Reject campaign"
+        variant="destructive"
+        loading={rejectAdBusy}
+        onConfirm={(v) => void submitRejectAd(v)}
+      />
+
+      {/* create house-ad — FormDialog (replaces 3 prompts) */}
+      <FormDialog
+        open={houseAdOpen}
+        onOpenChange={setHouseAdOpen}
+        title="New house ad"
+        description="House ads run in chat & room placements. The link URL is optional."
+        fields={[
+          { key: 'title', label: 'Ad title', placeholder: 'Try CALL Premium!', required: true },
+          { key: 'body', label: 'Ad body', placeholder: 'Unlock unlimited calls and no ads.' },
+          { key: 'linkUrl', label: 'Link URL (optional)', placeholder: 'https://example.com' },
+        ]}
+        confirmLabel="Create ad"
+        loading={houseAdBusy}
+        onConfirm={(v) => void submitHouseAd(v)}
+      />
+
+      {/* create ad package — FormDialog (replaces 4 prompts) */}
+      <FormDialog
+        open={pkgOpen}
+        onOpenChange={setPkgOpen}
+        title="New ad package"
+        description="Users pick a package when buying a campaign. Placements default to chats, rooms and profile."
+        fields={[
+          { key: 'name', label: 'Package name', placeholder: 'Promoted Post', required: true },
+          { key: 'priceUsd', label: 'Price (USD)', placeholder: '15', defaultValue: '15', type: 'number' as const, required: true },
+          { key: 'durationDays', label: 'Duration (days)', placeholder: '7', defaultValue: '7', type: 'number' as const, required: true },
+          { key: 'minBudget', label: 'Minimum budget USD (0 = none)', placeholder: '0', defaultValue: '0', type: 'number' as const },
+        ]}
+        confirmLabel="Create package"
+        loading={pkgBusy}
+        onConfirm={(v) => void submitPackage(v)}
+      />
+
+      {/* delete confirm — ConfirmDialog (replaces confirm()) */}
+      <ConfirmDialog
+        open={!!deletingAd || !!deletingPkg}
+        onOpenChange={(o) => { if (!o) { setDeletingAd(null); setDeletingPkg(null) } }}
+        title={deletingAd ? `Delete ad “${deletingAd.title}”?` : deletingPkg ? `Delete package “${deletingPkg.name}”?` : 'Delete?'}
+        description={deletingPkg ? 'Campaigns already using this package keep running; new campaigns cannot pick it.' : 'This permanently removes the ad. Existing impression/click stats are retained.'}
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        variant="destructive"
+        loading={deleteBusy}
+        onConfirm={() => void submitDelete()}
+      />
     </div>
   )
 }
@@ -1802,6 +2159,9 @@ function TeamSection() {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'team' as 'admin' | 'team' })
   const [creating, setCreating] = useState(false)
   const [err, setErr] = useState('')
+  // ---- reset-password modal (replaces prompt) ----
+  const [pwdMember, setPwdMember] = useState<StaffMember | null>(null)
+  const [pwdBusy, setPwdBusy] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -1841,14 +2201,25 @@ function TeamSection() {
     }
   }
 
-  const resetPassword = async (m: StaffMember) => {
-    const password = prompt(`New password for ${m.name} (min 8 characters):`)
-    if (!password) return
+  const resetPassword = (m: StaffMember) => {
+    setPwdMember(m)
+  }
+
+  const submitPassword = async (password: string) => {
+    if (!pwdMember) return
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    setPwdBusy(true)
     try {
-      await api.adminTeamUpdate(m.id, { password })
-      toast.success(`Password updated for ${m.name}`)
+      await api.adminTeamUpdate(pwdMember.id, { password })
+      toast.success(`Password updated for ${pwdMember.name}`)
+      setPwdMember(null)
     } catch (e) {
       toast.error((e as Error).message)
+    } finally {
+      setPwdBusy(false)
     }
   }
 
@@ -1940,7 +2311,7 @@ function TeamSection() {
                   </select>
                   <button
                     className="rounded-full bg-cbg px-3 py-1.5 text-[11px] font-bold text-cmut"
-                    onClick={() => void resetPassword(m)}
+                    onClick={() => resetPassword(m)}
                     aria-label={`Reset password for ${m.name}`}
                   >
                     <KeyRound size={12} className="mr-1 inline" /> Password
@@ -1960,7 +2331,377 @@ function TeamSection() {
           codes and calls are disabled for them.
         </span>
       </div>
+
+      {/* reset password — InputDialog (replaces prompt) */}
+      <InputDialog
+        open={!!pwdMember}
+        onOpenChange={(o) => { if (!o) setPwdMember(null) }}
+        title={pwdMember ? `Reset password — ${pwdMember.name}` : 'Reset password'}
+        description="Choose a new password (min 8 characters). The staff member can sign in with it immediately."
+        label="New password"
+        placeholder="At least 8 characters"
+        confirmLabel="Update password"
+        loading={pwdBusy}
+        validate={(v) => (v.length >= 8 ? null : 'Password must be at least 8 characters')}
+        onConfirm={(v) => void submitPassword(v)}
+      />
     </div>
+  )
+}
+
+/* ================= Authentication ================= */
+
+interface AuthPolicyForm {
+  requirePhoneVerification: boolean
+  requireEmailVerification: boolean
+  allowEmailOnlyRegistration: boolean
+  allowPhoneOnlyRegistration: boolean
+  googleClientId: string
+}
+
+const AUTH_POLICY_DEFAULT: AuthPolicyForm = {
+  requirePhoneVerification: true,
+  requireEmailVerification: true,
+  allowEmailOnlyRegistration: false,
+  allowPhoneOnlyRegistration: true,
+  googleClientId: '',
+}
+
+interface OtpConfigForm {
+  smsProvider: 'none' | 'twilio' | 'vonage'
+  twilioAccountSid: string
+  twilioAuthToken: string
+  twilioFromNumber: string
+  vonageApiKey: string
+  vonageApiSecret: string
+  vonageFromNumber: string
+  whatsappApiKey: string
+  whatsappPhoneNumberId: string
+  whatsappFromNumber: string
+}
+
+const OTP_CONFIG_DEFAULT: OtpConfigForm = {
+  smsProvider: 'none',
+  twilioAccountSid: '',
+  twilioAuthToken: '',
+  twilioFromNumber: '',
+  vonageApiKey: '',
+  vonageApiSecret: '',
+  vonageFromNumber: '',
+  whatsappApiKey: '',
+  whatsappPhoneNumberId: '',
+  whatsappFromNumber: '',
+}
+
+function AuthSection() {
+  const [policy, setPolicy] = useState<AuthPolicyForm | null>(null)
+  const [otp, setOtp] = useState<OtpConfigForm | null>(null)
+  const [savingPolicy, setSavingPolicy] = useState(false)
+  const [savingOtp, setSavingOtp] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.adminSettings()
+        const a = (res.settings.auth ?? {}) as Partial<AuthPolicyForm>
+        const o = (res.settings.otp ?? {}) as Partial<OtpConfigForm>
+        setPolicy({
+          requirePhoneVerification: a.requirePhoneVerification ?? true,
+          requireEmailVerification: a.requireEmailVerification ?? true,
+          allowEmailOnlyRegistration: a.allowEmailOnlyRegistration ?? false,
+          allowPhoneOnlyRegistration: a.allowPhoneOnlyRegistration ?? true,
+          googleClientId: a.googleClientId ?? '',
+        })
+        setOtp({
+          smsProvider: (o.smsProvider as 'none' | 'twilio' | 'vonage') || 'none',
+          twilioAccountSid: o.twilioAccountSid ?? '',
+          twilioAuthToken: o.twilioAuthToken ?? '',
+          twilioFromNumber: o.twilioFromNumber ?? '',
+          vonageApiKey: o.vonageApiKey ?? '',
+          vonageApiSecret: o.vonageApiSecret ?? '',
+          vonageFromNumber: o.vonageFromNumber ?? '',
+          whatsappApiKey: o.whatsappApiKey ?? '',
+          whatsappPhoneNumberId: o.whatsappPhoneNumberId ?? '',
+          whatsappFromNumber: o.whatsappFromNumber ?? '',
+        })
+      } catch {
+        setPolicy(AUTH_POLICY_DEFAULT)
+        setOtp(OTP_CONFIG_DEFAULT)
+      }
+    })()
+  }, [])
+
+  if (!policy || !otp) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+
+  const setP = <K extends keyof AuthPolicyForm>(k: K, v: AuthPolicyForm[K]) =>
+    setPolicy({ ...policy, [k]: v })
+  const setO = <K extends keyof OtpConfigForm>(k: K, v: OtpConfigForm[K]) =>
+    setOtp({ ...otp, [k]: v })
+
+  const savePolicy = async () => {
+    setSavingPolicy(true)
+    try {
+      await api.adminSaveSettings('auth', policy)
+      toast.success('Auth policy saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingPolicy(false)
+    }
+  }
+
+  const saveOtp = async () => {
+    setSavingOtp(true)
+    try {
+      await api.adminSaveSettings('otp', otp)
+      toast.success('OTP delivery settings saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingOtp(false)
+    }
+  }
+
+  // Whether each provider looks fully configured (so the admin can see at a glance).
+  const twilioReady = !!(otp.twilioAccountSid && otp.twilioAuthToken && otp.twilioFromNumber)
+  const vonageReady = !!(otp.vonageApiKey && otp.vonageApiSecret && otp.vonageFromNumber)
+  const whatsappReady = !!(otp.whatsappApiKey && otp.whatsappPhoneNumberId)
+  const smsReady = otp.smsProvider === 'twilio' ? twilioReady : otp.smsProvider === 'vonage' ? vonageReady : false
+
+  return (
+    <div className="max-w-2xl">
+      <h3 className="text-[15px] font-extrabold text-cink">Authentication &amp; Verification</h3>
+      <p className="pb-4 pt-1 text-[12px] leading-5 text-cmut">
+        Control what the sign-up form requires, and how one-time codes are delivered. CALL never fakes
+        SMS — when no SMS provider is configured, codes are surfaced in the app in <b>sandbox mode</b>
+        with a clear banner so the flow still works.
+      </p>
+
+      {/* ---- Verification policy ---- */}
+      <div className="rounded-[16px] border border-cline p-4">
+        <h4 className="text-[13.5px] font-extrabold text-cink">Registration policy</h4>
+        <p className="pb-3 pt-1 text-[11.5px] text-cmut">
+          Set which verifications the sign-up form requires. The server always re-checks consumed OTP
+          records before creating an account — a malicious client cannot bypass these.
+        </p>
+        <div className="space-y-2">
+          <AuthToggle
+            label="Require phone verification on registration"
+            hint="Send a 6-digit code by SMS / WhatsApp / sandbox."
+            checked={policy.requirePhoneVerification}
+            onChange={(v) => setP('requirePhoneVerification', v)}
+          />
+          <AuthToggle
+            label="Require email verification on registration"
+            hint="Send a 6-digit code by email (when an email is provided)."
+            checked={policy.requireEmailVerification}
+            onChange={(v) => setP('requireEmailVerification', v)}
+          />
+          <AuthToggle
+            label="Allow phone-only registration"
+            hint="Users can sign up with phone + password (no email)."
+            checked={policy.allowPhoneOnlyRegistration}
+            onChange={(v) => setP('allowPhoneOnlyRegistration', v)}
+          />
+          <AuthToggle
+            label="Allow email-only registration"
+            hint="Skip phone entirely (NOT recommended — phone is the primary identity on CALL)."
+            checked={policy.allowEmailOnlyRegistration}
+            onChange={(v) => setP('allowEmailOnlyRegistration', v)}
+          />
+        </div>
+        <div className="mt-3">
+          <AuthField
+            label="Google OAuth Client ID (optional)"
+            value={policy.googleClientId}
+            onChange={(v) => setP('googleClientId', v)}
+            placeholder="xxxxxxxx.apps.googleusercontent.com"
+          />
+          <p className="pt-1 text-[11px] text-cmut">
+            Configure Google Identity Services to enable “Continue with Google” on the login screen.
+          </p>
+        </div>
+        <button
+          className="mt-3 h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+          disabled={savingPolicy}
+          onClick={() => void savePolicy()}
+        >
+          {savingPolicy ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save policy'}
+        </button>
+      </div>
+
+      {/* ---- Status banner: which delivery channels are live ---- */}
+      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-[14px] bg-cbg p-3 text-[12px] text-cmut">
+        <Smartphone size={15} className="flex-none text-cbrand" />
+        <span className="flex-1">
+          <b>Live channels:</b>{' '}
+          <StatusPill ok={smsReady} label={`SMS (${otp.smsProvider})`} />
+          <StatusPill ok={whatsappReady} label="WhatsApp" />
+          <StatusPill ok={false} label="Email (SMTP — see Email/SMTP tab)" />
+          {!smsReady && !whatsappReady && (
+            <span className="ml-1 text-[#B7791F]">
+              Phone OTP will run in sandbox mode (codes shown in-app) until you configure an SMS provider.
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* ---- OTP delivery config ---- */}
+      <div className="mt-4 rounded-[16px] border border-cline p-4">
+        <h4 className="text-[13.5px] font-extrabold text-cink">OTP delivery (phone codes)</h4>
+        <p className="pb-3 pt-1 text-[11.5px] text-cmut">
+          Choose an SMS provider, or fall back to WhatsApp. Secrets are stored server-side only and
+          never returned to the browser (the masked values you see here are placeholders).
+        </p>
+
+        <div className="mb-3">
+          <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">SMS provider</span>
+          <div className="grid grid-cols-3 gap-1.5 rounded-[12px] bg-[#F0F3FA] p-1.5">
+            {(['none', 'twilio', 'vonage'] as const).map((p) => (
+              <button
+                key={p}
+                className={`h-10 rounded-[10px] text-[12.5px] font-bold transition ${
+                  otp.smsProvider === p ? 'bg-white text-cink shadow-sm' : 'text-cmut hover:text-cink'
+                }`}
+                onClick={() => setO('smsProvider', p)}
+              >
+                {p === 'none' ? 'None (sandbox)' : p === 'twilio' ? 'Twilio' : 'Vonage'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {otp.smsProvider === 'twilio' && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AuthField label="Twilio Account SID" value={otp.twilioAccountSid} onChange={(v) => setO('twilioAccountSid', v)} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            <AuthField label="Twilio Auth Token" value={otp.twilioAuthToken} onChange={(v) => setO('twilioAuthToken', v)} placeholder="hidden" type="password" />
+            <AuthField label="Twilio From Number" value={otp.twilioFromNumber} onChange={(v) => setO('twilioFromNumber', v)} placeholder="+1XXXXXXXXXX" />
+            <div className="flex items-end">
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${twilioReady ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'}`}>
+                {twilioReady ? 'Twilio ready' : 'Incomplete'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {otp.smsProvider === 'vonage' && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AuthField label="Vonage API Key" value={otp.vonageApiKey} onChange={(v) => setO('vonageApiKey', v)} placeholder="abcdef12" />
+            <AuthField label="Vonage API Secret" value={otp.vonageApiSecret} onChange={(v) => setO('vonageApiSecret', v)} placeholder="hidden" type="password" />
+            <AuthField label="Vonage From Name" value={otp.vonageFromNumber} onChange={(v) => setO('vonageFromNumber', v)} placeholder="CALL" />
+            <div className="flex items-end">
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${vonageReady ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'}`}>
+                {vonageReady ? 'Vonage ready' : 'Incomplete'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-cline pt-3">
+          <p className="text-[12.5px] font-semibold text-[#4A5568]">WhatsApp Cloud API (Meta Business)</p>
+          <p className="pb-2 pt-0.5 text-[11px] leading-5 text-cmut">
+            Falls back to WhatsApp when no SMS provider is configured. Free for the first 1,000
+            conversations/month; requires Meta Business verification (not auto-configured).
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AuthField label="WhatsApp Access Token" value={otp.whatsappApiKey} onChange={(v) => setO('whatsappApiKey', v)} placeholder="EAAG…" type="password" />
+            <AuthField label="WhatsApp Phone Number ID" value={otp.whatsappPhoneNumberId} onChange={(v) => setO('whatsappPhoneNumberId', v)} placeholder="103xxxxxx" />
+            <AuthField label="WhatsApp From Number (display only)" value={otp.whatsappFromNumber} onChange={(v) => setO('whatsappFromNumber', v)} placeholder="+1XXXXXXXXXX" />
+            <div className="flex items-end">
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${whatsappReady ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'}`}>
+                {whatsappReady ? 'WhatsApp ready' : 'Incomplete'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          className="mt-4 h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+          disabled={savingOtp}
+          onClick={() => void saveOtp()}
+        >
+          {savingOtp ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save OTP delivery settings'}
+        </button>
+      </div>
+
+      {/* ---- Honest SMS limitation notice ---- */}
+      <div className="mt-4 flex items-start gap-2 rounded-2xl bg-[#FFF8EB] p-4 text-[12px] leading-5 text-[#7A5B16]">
+        <MessageSquare size={15} className="mt-0.5 flex-none text-[#B45309]" />
+        <div>
+          <b>Why does sandbox mode exist?</b> A genuinely free, production-grade SMS OTP service does
+          not exist — Twilio, Vonage and MessageBird are all paid, and carrier email-to-SMS gateways
+          are unreliable and blocked by most carriers. CALL surfaces this honestly: when no provider
+          is configured, codes appear in-app (development/preview only) with a yellow banner so
+          testers can complete the flow. Configure an SMS provider here before going live.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AuthToggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string
+  hint?: string
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="flex items-start gap-2.5 rounded-[12px] bg-[#F0F3FA] px-4 py-2.5 text-[13px] text-cink">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 flex-none accent-[#2f5bea]"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        <span className="font-semibold">{label}</span>
+        {hint && <span className="mt-0.5 block text-[11.5px] text-cmut">{hint}</span>}
+      </span>
+    </label>
+  )
+}
+
+function AuthField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">{label}</span>
+      <input
+        className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] font-medium outline-none placeholder:text-[#8a94a8]"
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  )
+}
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={`mr-1.5 inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10.5px] font-bold ${
+        ok ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'
+      }`}
+    >
+      {ok ? <Check size={10} /> : <Flag size={9} />} {label}
+    </span>
   )
 }
 

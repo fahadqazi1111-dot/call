@@ -63,7 +63,7 @@ export function RoomsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desktop
       }
       setActiveRoom({ id: room.id, title: room.title, entryPaid: true })
     } catch (e) {
-      alert((e as Error).message || 'Could not join the room')
+      toast.error((e as Error).message || 'Could not join the room')
     }
   }
 

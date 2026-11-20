@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Swords, X, Trophy, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { liveManager } from '@/lib/callapp/liveManager'
@@ -50,7 +51,7 @@ export function BattleInviteBridge() {
       if (res.status === 'declined') return
       setParticipating({ liveId: invite.liveId, battleId: invite.battleId })
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message || 'Could not accept battle')
     }
   }
 

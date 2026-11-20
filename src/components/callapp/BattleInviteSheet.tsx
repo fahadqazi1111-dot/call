@@ -64,7 +64,7 @@ export function BattleInviteSheet({
       try {
         const res = await api.searchUsers(needle)
         if (seq !== searchSeq.current) return
-        setResults(res.users.map((u) => ({ id: u.id, name: u.name, username: u.username, avatarKey: u.avatarKey, avatarUrl: u.avatarUrl })))
+        setResults(res.map((u) => ({ id: u.id, name: u.name, username: u.username, avatarKey: u.avatarKey, avatarUrl: u.avatarUrl })))
       } catch {
         if (seq === searchSeq.current) setResults([])
       } finally {

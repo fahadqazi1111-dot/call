@@ -69,7 +69,7 @@ export function InviteUsersSheet({
     const t = window.setTimeout(async () => {
       try {
         const res = await api.searchUsers(needle)
-        setSearchRes(res.users.map((u) => ({ id: u.id, name: u.name, username: u.username, avatarKey: u.avatarKey, avatarUrl: u.avatarUrl })))
+        setSearchRes(res.map((u) => ({ id: u.id, name: u.name, username: u.username, avatarKey: u.avatarKey, avatarUrl: u.avatarUrl })))
       } catch {
         setSearchRes([])
       } finally {

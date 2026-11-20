@@ -82,7 +82,13 @@ export function AppRoot() {
       // browsers suspend WebAudio until the first user gesture — without
       // this, gift animations would be silent for passive viewers
       soundKit.installUnlock()
-      callManager.setToast((msg) => toast.info(msg))
+      callManager.setToast((msg, opts) => {
+        const kind = opts?.kind ?? 'info'
+        const description = opts?.description
+        if (kind === 'error') toast.error(msg, { description })
+        else if (kind === 'warning') toast.warning(msg, { description })
+        else toast.info(msg, { description })
+      })
       callManager.setRefresh(() => {
         void useApp.getState().loadCalls()
         void useApp.getState().loadChats()

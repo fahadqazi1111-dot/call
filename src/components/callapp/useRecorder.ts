@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 export interface RecorderHandle {
   status: 'idle' | 'recording'
@@ -94,7 +95,7 @@ export function useRecorder(): RecorderHandle {
       }, 250)
       setStatus('recording')
     } catch {
-      alert('Microphone permission is required to record voice messages.')
+      toast.error('Microphone permission is required to record voice messages.')
       cleanup()
     }
   }, [cleanup])

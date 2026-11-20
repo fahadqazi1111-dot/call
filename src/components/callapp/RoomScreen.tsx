@@ -6,6 +6,7 @@ import {
   Crown, Shield, Volume2, HandMetal, Loader2, Smile, ArrowDownToLine,
   ChevronUp, ChevronDown, Radio, MicVocal,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { roomManager, type RoomManagerState } from '@/lib/callapp/roomManager'
@@ -304,7 +305,7 @@ export function RoomScreen({
     try {
       await api.roomModerate(roomId, action, targetId)
     } catch (e) {
-      alert((e as Error).message)
+      toast.error((e as Error).message || 'Room error')
     }
   }
 

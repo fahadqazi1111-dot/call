@@ -4,24 +4,14 @@ import { useState, useEffect } from 'react'
 import { socketClient } from './socket'
 import { soundKit } from './sound'
 import { callManager } from './callManager'
+import { getIceConfig, describeMediaError } from './ice'
 import type { ConfIncoming, ConferenceSnapshot, ConfParticipant } from './conferenceTypes'
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    {
-      // Free public TURN relays (same as 1:1 calls) so the mesh also connects
-      // behind strict NATs and firewalls.
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turn:openrelay.metered.ca:80?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
+/** Toast severity — the AppRoot binding maps each to a Sonner variant. */
+export type ConfToastKind = 'info' | 'error' | 'warning'
+
+function iceConfig(): RTCConfiguration {
+  return getIceConfig()
 }
 
 const INVITE_TIMEOUT_MS = 45000
@@ -76,13 +66,13 @@ class ConferenceManager {
   private inviteTimer: number | null = null
   private createTimer: number | null = null
   private pendingInvites: { id: string }[] = []
-  private toastFn: ((msg: string) => void) | null = null
+  private toastFn: ((msg: string, opts?: { kind?: ConfToastKind; description?: string }) => void) | null = null
 
   setMe(me: { id: string; name: string; avatarKey: number; avatarUrl: string | null } | null) {
     this.me = me
   }
 
-  setToast(fn: (msg: string) => void) {
+  setToast(fn: (msg: string, opts?: { kind?: ConfToastKind; description?: string }) => void) {
     this.toastFn = fn
   }
 
@@ -107,8 +97,8 @@ class ConferenceManager {
     })
   }
 
-  private toast(msg: string) {
-    this.toastFn?.(msg)
+  private toast(msg: string, opts?: { kind?: ConfToastKind; description?: string }) {
+    this.toastFn?.(msg, opts)
   }
 
   private myId(): string {
@@ -153,7 +143,7 @@ class ConferenceManager {
         this.state.muted = false
         this.state.cameraOn = type === 'video'
       } catch {
-        this.toast(type === 'video' ? 'Camera and microphone are needed for group video calls' : 'Microphone permission is needed for group calls')
+        // getMedia() already surfaced an actionable error toast — just unwind.
         return
       }
     }
@@ -233,8 +223,9 @@ class ConferenceManager {
       this.state.muted = false
       this.state.cameraOn = invite.type === 'video'
     } catch {
+      // getMedia() already surfaced an actionable error toast — politely
+      // decline the incoming invite so the host isn't left ringing forever.
       socketClient.emit('conf:respond', { confId: invite.confId, action: 'decline' })
-      this.toast('Microphone/camera permission is needed for group calls')
       return
     }
     this.state.phase = 'active'
@@ -314,6 +305,12 @@ class ConferenceManager {
   }
 
   private closePeer(uid: string, pc: RTCPeerConnection) {
+    // Detach handlers BEFORE close() so the synthetic `closed` event during
+    // teardown doesn't double-fire toasts or schedule extra recreatePeer().
+    pc.ontrack = null
+    pc.onicecandidate = null
+    pc.onconnectionstatechange = null
+    pc.oniceconnectionstatechange = null
     try {
       pc.close()
     } catch {}
@@ -342,7 +339,7 @@ class ConferenceManager {
   private async ensurePeerRaw(otherId: string): Promise<RTCPeerConnection> {
     const existing = this.peers.get(otherId)
     if (existing) return existing
-    const pc = new RTCPeerConnection(ICE_CONFIG)
+    const pc = new RTCPeerConnection(iceConfig())
     this.peers.set(otherId, pc)
     const remote = new MediaStream()
     this.state.streams = { ...this.state.streams, [otherId]: remote }
@@ -369,6 +366,26 @@ class ConferenceManager {
 
     pc.onconnectionstatechange = () => {
       this.onPeerState(otherId, pc)
+    }
+
+    // Granular ICE-layer monitoring — surfaces a per-peer "Reconnecting…"
+    // toast so participants know a single leg of the mesh is healing.
+    // 'failed' is handled by onPeerState() -> recreatePeer(); we only surface
+    // the message here so we don't double-fire the recreation logic.
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState
+      const name =
+        this.state.conf?.participants.find((x) => x.userId === otherId)?.name ?? otherId
+      console.info('[callapp] conf ICE state for', otherId, ':', st)
+      if (st === 'disconnected') {
+        this.toast(`Reconnecting to ${name}…`, { kind: 'warning' })
+      } else if (st === 'failed') {
+        this.toast(`Connection to ${name} failed`, {
+          kind: 'error',
+          description: 'Attempting to reconnect automatically. If it persists, the call will continue without this participant.',
+        })
+      }
+      // 'closed' is expected during teardown — no-op.
     }
 
     // Symmetric pre-negotiated transceivers so m-lines match on both sides.
@@ -575,8 +592,9 @@ class ConferenceManager {
       const cam = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
       videoTrack = cam.getVideoTracks()[0]
       this.localStream?.addTrack(videoTrack)
-    } catch {
-      this.toast('Camera not available')
+    } catch (e) {
+      const d = describeMediaError(e, 'video') ?? { title: 'Camera not available', hint: undefined }
+      this.toast(d.title, { kind: 'error', description: d.hint })
       return
     }
     this.state.cameraOn = true
@@ -677,6 +695,12 @@ class ConferenceManager {
       this.inviteTimer = null
     }
     this.peers.forEach((pc) => {
+      // Detach handlers BEFORE close() so the synthetic `closed` event
+      // during teardown doesn't double-fire toasts or recreatePeer().
+      pc.ontrack = null
+      pc.onicecandidate = null
+      pc.onconnectionstatechange = null
+      pc.oniceconnectionstatechange = null
       try {
         pc.close()
       } catch {}
@@ -685,6 +709,8 @@ class ConferenceManager {
     this.pendingIce.clear()
     this.pendingOffers.clear()
     this.pcRetries.clear()
+    // Stop every local track — failing to do this leaves the camera/mic
+    // indicator light ON after the conference ends (a real bug).
     this.localStream?.getTracks().forEach((t) => t.stop())
     this.localStream = null
     this.pendingInvites = []
@@ -755,7 +781,27 @@ class ConferenceManager {
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
         }
       : { audio: { echoCancellation: true, noiseSuppression: true }, video: false }
-    return navigator.mediaDevices.getUserMedia(constraints)
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (e) {
+      // Surface a clear, actionable error toast — never a silent fail. The
+      // caller decides whether to bail out of createConference or politely
+      // decline an incoming invite.
+      const kind = withVideo ? 'video' : 'audio'
+      const described = describeMediaError(e, kind)
+      if (described) {
+        this.toast(described.title, { kind: 'error', description: described.hint })
+      } else {
+        this.toast(
+          withVideo ? 'Camera and microphone are needed for group video calls' : 'Microphone permission is needed for group calls',
+          {
+            kind: 'error',
+            description: 'Tap the padlock icon in the address bar to grant access, then try again.',
+          },
+        )
+      }
+      throw e
+    }
   }
 }
 

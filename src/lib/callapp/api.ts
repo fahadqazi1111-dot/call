@@ -92,7 +92,20 @@ export async function uploadFile(file: Blob, filename: string, kind: 'media' | '
 export const api = {
   /* ---------- auth ---------- */
   requestOtp: (phone: string) =>
-    request<{ ok: boolean; phone: string; devCode: string; expiresInSec: number }>('/api/auth/otp', {
+    request<{
+      ok: boolean
+      phone: string
+      /** delivery channel: 'sms' | 'whatsapp' | 'sandbox' */
+      channel?: string
+      /** true when the code was surfaced in-app (no SMS/email provider configured) */
+      sandbox?: boolean
+      /** the code itself, present only when sandbox=true (legacy field kept for back-compat) */
+      devCode: string
+      /** the code itself, present only when sandbox=true */
+      code?: string
+      expiresInSec: number
+      cooldownSec?: number
+    }>('/api/auth/otp', {
       method: 'POST',
       body: JSON.stringify({ phone }),
     }),
@@ -101,25 +114,71 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ phone, code, name, username, email }),
     }),
+  /** Pre-registration phone OTP check — validates the code WITHOUT creating an account. */
+  verifyPhoneOtp: (phone: string, code: string) =>
+    request<{ ok: boolean; verified: boolean; phone: string; verifiedAt: string }>(
+      '/api/auth/otp/verify',
+      { method: 'POST', body: JSON.stringify({ phone, code }) }
+    ),
   usernameCheck: (username: string) =>
     request<{ ok: boolean; available: boolean; reason?: string; mine?: boolean }>(
       `/api/auth/username/check?u=${encodeURIComponent(username)}`
     ),
-  authConfig: () => request<{ googleClientId: string | null; googleEnabled: boolean }>('/api/auth/config'),
-  emailRequestCode: (email: string) =>
-    request<{ ok: boolean; email: string; devCode: string; expiresInSec: number }>('/api/auth/email/request-code', {
+  authConfig: () =>
+    request<{
+      googleClientId: string | null
+      googleEnabled: boolean
+      policy: {
+        requirePhoneVerification: boolean
+        requireEmailVerification: boolean
+        allowEmailOnlyRegistration: boolean
+        allowPhoneOnlyRegistration: boolean
+      }
+      delivery: { sms: boolean; whatsapp: boolean; email: boolean }
+    }>('/api/auth/config'),
+  emailRequestCode: (email: string, purpose?: 'verify' | 'reset') =>
+    request<{
+      ok: boolean
+      email: string
+      /** 'email' | 'sandbox' */
+      channel?: string
+      sandbox?: boolean
+      /** true when a real email was sent */
+      delivered: boolean
+      /** the code itself, present only when sandbox=true (legacy field kept for back-compat) */
+      devCode: string
+      /** the code itself, present only when sandbox=true */
+      code?: string
+      expiresInSec: number
+      cooldownSec?: number
+    }>('/api/auth/email/request-code', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, purpose }),
     }),
   emailVerify: (email: string, code: string, linkToken?: string) =>
     request<{ verified?: boolean; ok?: boolean; token?: string; user?: Me }>('/api/auth/email/verify', {
       method: 'POST',
       body: JSON.stringify({ email, code, linkToken }),
     }),
-  passwordRegister: (name: string, email: string, password: string, username: string) =>
-    request<{ ok: boolean; token: string; needEmailVerification: boolean }>('/api/auth/password/register', {
+  passwordRegister: (payload: {
+    name: string
+    phone: string
+    email?: string
+    password: string
+    username?: string
+    phoneVerified?: boolean
+    emailVerified?: boolean
+  }) =>
+    request<{
+      ok: boolean
+      token: string
+      user?: Me
+      emailVerified?: boolean
+      phoneVerified?: boolean
+      needEmailVerification?: boolean
+    }>('/api/auth/password/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password, username }),
+      body: JSON.stringify(payload),
     }),
   passwordLogin: (email: string, password: string) =>
     request<{ ok: boolean; token: string; user: Me }>('/api/auth/password/login', {
@@ -168,6 +227,9 @@ export const api = {
   me: () => request<{ user: Me; wallet?: { available: number; reserved: number; totalEarned: number } }>('/api/me'),
   updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) =>
     request<{ user: Me; nextChangeAt?: string }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
+  /** Permanently delete the authenticated user's account (App Store / Play Store compliance). */
+  deleteAccount: (body: { password?: string; confirm: boolean }) =>
+    request<{ ok: boolean }>('/api/me/delete', { method: 'POST', body: JSON.stringify(body) }),
 
   /* ---------- chats ---------- */
   chats: () => request<{ chats: ChatSummary[] }>('/api/chats'),
@@ -206,9 +268,22 @@ export const api = {
 
   /* ---------- contacts ---------- */
   contacts: () => request<{ contacts: ContactItem[] }>('/api/contacts'),
-  addContact: (name: string, phone: string) =>
-    request<{ contact: ContactItem }>('/api/contacts', { method: 'POST', body: JSON.stringify({ name, phone }) }),
+  /**
+   * Add a contact by any one of { username | userId | (name, phone) | phone }.
+   * The server resolves username/userId to the registered user's name + phone,
+   * then upserts a Contact row (the unique (ownerId, phone) constraint prevents
+   * duplicates). Returns { ok, contact } — `contact.user` is the matched
+   * registered CALL user if one exists.
+   */
+  addContact: (body: { username?: string; userId?: string; name?: string; phone?: string }) =>
+    request<{ ok: boolean; contact: ContactItem }>('/api/contacts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /** @deprecated use removeContact — same backend, cleaner REST path. */
   deleteContact: (id: string) => request<{ ok: boolean }>(`/api/contacts?id=${id}`, { method: 'DELETE' }),
+  /** DELETE /api/contacts/[id] — owned-by-me is enforced server-side. */
+  removeContact: (id: string) => request<{ ok: boolean }>(`/api/contacts/${id}`, { method: 'DELETE' }),
   syncContacts: (contacts: { name: string; phone: string }[]) =>
     request<{ ok: boolean; saved: number; matched: number }>('/api/contacts/sync', {
       method: 'POST',
@@ -417,8 +492,14 @@ export const api = {
     request<{ viewers: Array<{ userId: string; name: string; avatarKey: number; avatarUrl: string | null }> }>(
       `/api/live/${id}/viewers`
     ),
+  /**
+   * Search every registered CALL user by @username (prefix) or phone (exact
+   * digits). Returns an array of public-user fields (no email / password /
+   * role). The backend uses `startsWith` on the normalized lowercase username
+   * so it works on SQLite (dev) and MySQL (prod) alike.
+   */
   searchUsers: (q: string) =>
-    request<{ users: Array<{ id: string; name: string; username: string; avatarKey: number; avatarUrl: string | null; role?: string; isOfficial?: boolean }> }>(
+    request<Array<{ id: string; name: string; username: string; avatarKey: number; avatarUrl: string | null; phone: string; about: string; isOfficial: boolean }>>(
       `/api/users/search?q=${encodeURIComponent(q)}`
     ),
   appConfig: () => request<{ splashEnabled: boolean }>('/api/config'),
@@ -587,6 +668,11 @@ export const api = {
     }>(`/api/admin/users?q=${encodeURIComponent(q || '')}`),
   adminUserAction: (targetId: string, action: string, value?: number, note?: string) =>
     request<{ ok: boolean }>('/api/admin/users', { method: 'POST', body: JSON.stringify({ targetId, action, value, note }) }),
+  adminUserCreate: (payload: { name: string; username?: string; phone: string; email?: string; password: string; role: 'user' | 'team' | 'admin' }) =>
+    request<{ ok: boolean; user: { id: string; name: string; username: string; phone: string; email: string | null; role: string } }>(
+      '/api/admin/users/create',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
   adminGifts: () => request<{ gifts: GiftItem[] }>('/api/admin/gifts'),
   adminGiftCreate: (payload: Partial<GiftItem> & { androidProduct?: string; iosProduct?: string; description?: string }) =>
     request<{ ok: boolean }>('/api/admin/gifts', { method: 'POST', body: JSON.stringify(payload) }),

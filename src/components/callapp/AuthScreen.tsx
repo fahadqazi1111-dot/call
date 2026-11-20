@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { toast } from 'sonner'
 import { CallWordmark } from './CallLogo'
 import { CountryPicker } from './CountryPicker'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
@@ -24,18 +26,14 @@ import {
 import { api, setToken } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 
-type Step = 'start' | 'otp' | 'name' | 'verify' | 'forgot' | 'reset' | 'google'
+type Step = 'start' | 'otp' | 'forgot' | 'reset' | 'google'
 type Mode = 'login' | 'signup'
-type SignupMethod = 'phone' | 'email'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /** Turn "Ayesha Siddiqui" into "ayeshasiddiqui" — a username suggestion. */
 function suggestUsername(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '')
-    .slice(0, 16)
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16)
 }
 
 function GoogleG({ size = 18 }: { size?: number }) {
@@ -78,18 +76,39 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">{children}</label>
 }
 
-function SandboxBanner({ code, onFill }: { code: string; onFill: () => void }) {
+/**
+ * Honest sandbox banner — shown only when the backend returned `sandbox: true`
+ * (no SMS/SMTP provider configured). It clearly states that the code is being
+ * surfaced in-app for development/preview and that production requires an
+ * SMS/SMTP provider to be configured in the admin panel.
+ */
+function SandboxBanner({
+  code,
+  onFill,
+  channel,
+}: {
+  code: string
+  onFill: () => void
+  channel?: 'phone' | 'email'
+}) {
   return (
-    <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-4">
-      <KeyRound size={20} className="flex-none text-[#B45309]" />
-      <div className="text-[13px] leading-5 text-[#7A5B16]">
-        Sandbox code (free mode):{' '}
+    <div className="mb-3 flex items-start gap-3 rounded-2xl border border-[#F5A52433] bg-[#FFF8EB] p-3.5">
+      <KeyRound size={18} className="mt-0.5 flex-none text-[#B45309]" />
+      <div className="text-[12.5px] leading-5 text-[#7A5B16]">
+        <b>Sandbox mode.</b>{' '}
+        {channel === 'email'
+          ? 'No SMTP server is configured — your email code is shown here so you can complete the flow.'
+          : 'No SMS provider is configured — your code is shown here so you can complete the flow.'}{' '}
         <button
           className="font-bold tracking-widest text-[#B45309] underline decoration-dotted"
           onClick={onFill}
         >
           {code}
         </button>
+        <div className="mt-1 text-[11px] text-[#9A7716]">
+          Configure an {channel === 'email' ? 'SMTP server' : 'SMS provider'} in Admin →
+          Authentication to send real {channel === 'email' ? 'emails' : 'messages'}.
+        </div>
       </div>
     </div>
   )
@@ -104,12 +123,20 @@ function OtpSlots({ value, onChange }: { value: string; onChange: (v: string) =>
             <InputOTPSlot
               key={i}
               index={i}
-              className="h-14 w-12 rounded-2xl border-[1.5px] border-[#DDE3EE] text-lg font-bold shadow-none md:h-[52px] md:w-11"
+              className="h-12 w-11 rounded-2xl border-[1.5px] border-[#DDE3EE] text-base font-bold shadow-none md:h-[48px] md:w-10"
             />
           ))}
         </InputOTPGroup>
       </InputOTP>
     </div>
+  )
+}
+
+function VerifiedPill({ label }: { label: string }) {
+  return (
+    <span className="flex items-center gap-1 rounded-full bg-[#EDFAF3] px-2 py-0.5 text-[11px] font-bold text-[#067647]">
+      <CheckCircle2 size={12} /> {label}
+    </span>
   )
 }
 
@@ -222,20 +249,32 @@ export function AuthScreen() {
   const idDigits = identifier.replace(/\D/g, '')
   const [password, setPassword] = useState('')
 
-  // signup
-  const [signupMethod, setSignupMethod] = useState<SignupMethod>('phone')
+  // signup (unified — phone always required, email optional)
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [username, setUsername] = useState('')
   const [usernameTouched, setUsernameTouched] = useState(false)
-  const [email, setEmail] = useState('')
-  // optional email on phone signup — used only for email communication
   const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
 
-  // email verification
-  const [pendingToken, setPendingToken] = useState('')
+  // signup: phone OTP inline verification
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneDevCode, setPhoneDevCode] = useState('')
+  const [phoneSandbox, setPhoneSandbox] = useState(false)
+  const [phoneSent, setPhoneSent] = useState(false)
+  const [phoneVerified, setPhoneVerified] = useState(false)
+  const [phoneResendIn, setPhoneResendIn] = useState(0)
+
+  // signup: email OTP inline verification (only when email provided)
   const [emailCode, setEmailCode] = useState('')
   const [emailDevCode, setEmailDevCode] = useState('')
+  const [emailSandbox, setEmailSandbox] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailVerified, setEmailVerified] = useState(false)
+  const [emailResendIn, setEmailResendIn] = useState(0)
+
+  // signup: terms
+  const [termsAgreed, setTermsAgreed] = useState(false)
 
   // forgot / reset password
   const [resetEmail, setResetEmail] = useState('')
@@ -247,6 +286,7 @@ export function AuthScreen() {
 
   const googleHostRef = useRef<HTMLDivElement>(null)
 
+  // shared countdown timer for login OTP
   useEffect(() => {
     if (resendIn <= 0) return
     resendTimer.current = window.setTimeout(() => setResendIn((s) => s - 1), 1000)
@@ -255,6 +295,21 @@ export function AuthScreen() {
     }
   }, [resendIn])
 
+  // countdown for signup phone resend
+  useEffect(() => {
+    if (phoneResendIn <= 0) return
+    const t = window.setTimeout(() => setPhoneResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [phoneResendIn])
+
+  // countdown for signup email resend
+  useEffect(() => {
+    if (emailResendIn <= 0) return
+    const t = window.setTimeout(() => setEmailResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [emailResendIn])
+
+  // reset password resend countdown
   useEffect(() => {
     if (resetResendIn <= 0) return
     const t = window.setTimeout(() => setResetResendIn((s) => s - 1), 1000)
@@ -263,24 +318,28 @@ export function AuthScreen() {
 
   const signupPhone = () => `${country}${phone.replace(/\D/g, '')}`
   const loginPhone = () => `${country}${idDigits}`
-  const isSignupPhone = mode === 'signup' && signupMethod === 'phone'
-  const activePhone = isSignupPhone ? signupPhone() : loginPhone()
+  const activePhone = mode === 'signup' ? signupPhone() : loginPhone()
 
   const goStart = () => {
     setError('')
     setStep('start')
   }
 
-  /* ---------- phone OTP (login + signup) ---------- */
+  /* ---------- phone OTP (LOGIN only) ---------- */
+  /* Login phone OTP uses /api/auth/verify which auto-creates a new account
+     when the phone is unknown — preserved as a fast signup shortcut. */
 
   const requestOtp = async (fullPhone: string, resend = false) => {
     setBusy(true)
     setError('')
     try {
       const res = await api.requestOtp(fullPhone)
-      setDevCode(res.devCode)
+      setDevCode(res.devCode || '')
       setResendIn(30)
       if (!resend) setStep('otp')
+      if (res.sandbox && res.code) {
+        toast.info('Sandbox mode — code shown in the panel below.')
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -292,17 +351,10 @@ export function AuthScreen() {
     setBusy(true)
     setError('')
     try {
-      const res = isSignupPhone
-        ? await api.verifyOtp(
-            activePhone,
-            otp,
-            name.trim(),
-            username.trim().toLowerCase(),
-            signupEmail.trim().toLowerCase() || undefined
-          )
-        : await api.verifyOtp(activePhone, otp)
+      const res = await api.verifyOtp(activePhone, otp)
       if (res.needName) {
-        setStep('name')
+        setStep('otp')
+        setError('No account exists with this number. Use the Sign up tab to create one.')
         return
       }
       if (res.token && res.user) loginSuccess(res.token, res.user)
@@ -331,53 +383,148 @@ export function AuthScreen() {
     }
   }
 
-  /* ---------- email + password signup ---------- */
+  /* ---------- signup: phone OTP inline verification ---------- */
 
-  const submitSignupEmail = async () => {
+  const sendPhoneCode = async (resend = false) => {
+    const p = signupPhone()
+    if (p.replace(/\D/g, '').length < 7) {
+      toast.error('Enter a valid phone number first')
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      if (!name.trim()) {
-        setError('Name is required')
-        return
+      const res = await api.requestOtp(p)
+      setPhoneDevCode(res.devCode || '')
+      setPhoneSandbox(Boolean(res.sandbox))
+      setPhoneSent(true)
+      setPhoneVerified(false)
+      setPhoneCode('')
+      setPhoneResendIn(60)
+      if (res.sandbox) {
+        toast.info('Sandbox mode — phone code is shown below.')
+      } else {
+        toast.success(`Code sent to ${p}`)
       }
-      const uname = (username.trim() || suggestUsername(name)).toLowerCase()
-      const res = await api.passwordRegister(name.trim(), email.trim().toLowerCase(), password, uname)
-      // session starts right away; verify the email with a code next
-      setPendingToken(res.token)
-      const codeRes = await api.emailRequestCode(email.trim().toLowerCase())
-      setEmailDevCode(codeRes.devCode ?? '')
-      setStep('verify')
     } catch (e) {
-      setError((e as Error).message)
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const verifyPhoneCode = async () => {
+    if (phoneCode.length !== 6) {
+      toast.error('Enter the 6-digit code')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.verifyPhoneOtp(signupPhone(), phoneCode)
+      setPhoneVerified(true)
+      setPhoneDevCode('')
+      toast.success('Phone number verified')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---------- signup: email OTP inline verification ---------- */
+
+  const sendEmailCode = async (resend = false) => {
+    const e = signupEmail.trim().toLowerCase()
+    if (!EMAIL_RE.test(e)) {
+      toast.error('Enter a valid email first')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.emailRequestCode(e, 'verify')
+      setEmailDevCode(res.devCode || '')
+      setEmailSandbox(Boolean(res.sandbox))
+      setEmailSent(true)
+      setEmailVerified(false)
+      setEmailCode('')
+      setEmailResendIn(60)
+      if (res.sandbox) {
+        toast.info('Sandbox mode — email code is shown below.')
+      } else {
+        toast.success(`Code emailed to ${e}`)
+      }
+    } catch (e) {
+      toast.error((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
   const verifyEmailCode = async () => {
+    if (emailCode.length !== 6) {
+      toast.error('Enter the 6-digit code')
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      await api.emailVerify(email.trim().toLowerCase(), emailCode, pendingToken)
-      // token must be persisted BEFORE calling /api/me (it reads it from storage)
-      setToken(pendingToken)
-      const me = await api.me()
-      loginSuccess(pendingToken, me.user)
+      await api.emailVerify(signupEmail.trim().toLowerCase(), emailCode)
+      setEmailVerified(true)
+      setEmailDevCode('')
+      toast.success('Email verified')
     } catch (e) {
-      setError((e as Error).message)
+      toast.error((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
-  const skipVerify = async () => {
+  /* ---------- signup: create account ---------- */
+
+  const emailProvided = EMAIL_RE.test(signupEmail.trim())
+  const phoneInputReady = name.trim().length >= 2 && phone.replace(/\D/g, '').length >= 7 && signupPassword.length >= 8
+  const needEmailVerify = emailProvided
+  const canCreateAccount =
+    phoneInputReady &&
+    phoneVerified &&
+    (!needEmailVerify || emailVerified) &&
+    termsAgreed &&
+    !busy
+
+  const submitSignup = async () => {
+    if (!canCreateAccount) {
+      if (!termsAgreed) toast.error('Please accept the Terms and Privacy Policy first')
+      else if (!phoneVerified) toast.error('Verify your phone number first')
+      else if (needEmailVerify && !emailVerified) toast.error('Verify your email first')
+      return
+    }
+    setBusy(true)
+    setError('')
     try {
-      setToken(pendingToken)
-      const me = await api.me()
-      loginSuccess(pendingToken, me.user)
-    } catch {
-      setError('Could not start the session — please log in again')
+      const res = await api.passwordRegister({
+        name: name.trim(),
+        phone: signupPhone(),
+        email: emailProvided ? signupEmail.trim().toLowerCase() : undefined,
+        password: signupPassword,
+        username: username.trim().toLowerCase() || undefined,
+        phoneVerified: true,
+        emailVerified: emailProvided ? true : undefined,
+      })
+      if (res.token) {
+        if (res.user) {
+          loginSuccess(res.token, res.user)
+        } else {
+          setToken(res.token)
+          const me = await api.me()
+          loginSuccess(res.token, me.user)
+        }
+      }
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -484,9 +631,6 @@ export function AuthScreen() {
   const loginPhoneReady = idDigits.length >= 7
   const loginReady = idIsEmail ? loginEmailReady : loginPhoneReady
 
-  const signupPhoneReady = name.trim().length >= 2 && phone.replace(/\D/g, '').length >= 7
-  const signupEmailReady = name.trim().length >= 2 && EMAIL_RE.test(email.trim()) && password.length >= 8
-
   const resetReady = EMAIL_RE.test(resetEmail.trim())
   const submitResetReady = resetCode.length === 6 && resetPw.length >= 8
 
@@ -495,10 +639,6 @@ export function AuthScreen() {
   const header = (() => {
     if (step === 'otp')
       return { t: 'Verify your number', s: `We sent a 6-digit code to ${country} ${activePhone.replace(country, '')}` }
-    if (step === 'name')
-      return { t: 'Set up your profile', s: 'Choose the name and username your contacts will see.' }
-    if (step === 'verify')
-      return { t: 'Verify your email', s: `Enter the 6-digit code sent to ${email}` }
     if (step === 'forgot')
       return { t: 'Reset your password', s: 'Enter your account email — we will send you a 6-digit code.' }
     if (step === 'reset')
@@ -510,7 +650,7 @@ export function AuthScreen() {
       return { t: 'Continue with Google', s: 'A unique username is created from your Google name automatically.' }
     return mode === 'login'
       ? { t: 'Welcome back', s: 'Log in with your email or phone number.' }
-      : { t: 'Create your account', s: 'Pick a unique @username — it becomes your handle on CALL.' }
+      : { t: 'Create your account', s: 'Verify your phone (and email) with one-time codes, then pick a password.' }
   })()
 
   const switchMode = (m: Mode) => {
@@ -530,8 +670,7 @@ export function AuthScreen() {
 
   const back = () => {
     setError('')
-    if (step === 'name') setStep('otp')
-    else if (step === 'reset') setStep('forgot')
+    if (step === 'reset') setStep('forgot')
     else goStart()
   }
 
@@ -677,18 +816,30 @@ export function AuthScreen() {
                   <GoogleG /> Continue with Google
                 </button>
 
-                <div className="mt-5 flex items-start gap-2 rounded-2xl bg-cbg p-3.5 text-[12px] leading-5 text-cmut">
-                  <Info size={14} className="mt-0.5 flex-none text-cbrand" />
-                  <span>
-                    Free sandbox build — verification codes are shown right in the app, no SMS needed.
-                  </span>
-                </div>
+                <p className="mt-5 text-center text-[11.5px] leading-4 text-[#9AA8C7]">
+                  By continuing you agree to CALL&apos;s{' '}
+                  <Link
+                    href="/legal/terms"
+                    className="underline-offset-2 hover:text-cbrand hover:underline"
+                  >
+                    Terms
+                  </Link>{' '}
+                  and{' '}
+                  <Link
+                    href="/legal/privacy"
+                    className="underline-offset-2 hover:text-cbrand hover:underline"
+                  >
+                    Privacy Policy
+                  </Link>
+                  .
+                </p>
               </div>
             )}
 
-            {/* ================= SIGNUP ================= */}
+            {/* ================= SIGNUP (unified — phone always, email optional) ================= */}
             {step === 'start' && mode === 'signup' && (
               <div className="mt-6">
+                {/* Full name */}
                 <FieldLabel>Full name</FieldLabel>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
@@ -716,126 +867,218 @@ export function AuthScreen() {
                   />
                 </div>
 
-                <div className="mt-5">
-                  <div className="mb-2 grid grid-cols-2 gap-1.5 rounded-[16px] bg-cbg p-1.5">
-                    {(['phone', 'email'] as const).map((mth) => (
-                      <button
-                        key={mth}
-                        className={`flex h-10 items-center justify-center gap-1.5 rounded-[12px] text-[13px] font-bold transition-all ${
-                          signupMethod === mth
-                            ? 'bg-white text-cink shadow-[0_2px_8px_rgba(14,23,38,0.1)]'
-                            : 'text-cmut hover:text-cink'
-                        }`}
-                        onClick={() => {
-                          setError('')
-                          setSignupMethod(mth)
+                {/* Phone (always required) */}
+                <div className="mt-4">
+                  <FieldLabel>
+                    Phone number <span className="font-normal text-cmut">(required — we verify it)</span>
+                  </FieldLabel>
+                  <div className="flex gap-2.5">
+                    <CountryPicker value={country} onChange={setCountry} />
+                    <div className="relative min-w-0 flex-1">
+                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                        <Smartphone size={18} />
+                      </span>
+                      <input
+                        className="app-input w-full has-icon"
+                        inputMode="tel"
+                        placeholder="3XX 1234567"
+                        value={phone}
+                        onChange={(e) => {
+                          setPhone(e.target.value)
+                          setPhoneVerified(false)
+                          setPhoneSent(false)
                         }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Email (optional, but if entered, must be verified) */}
+                <div className="mt-3">
+                  <FieldLabel>
+                    Email <span className="font-normal text-cmut">(optional — recommended for recovery)</span>
+                  </FieldLabel>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                      <Mail size={18} />
+                    </span>
+                    <input
+                      className="app-input w-full has-icon"
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      value={signupEmail}
+                      onChange={(e) => {
+                        setSignupEmail(e.target.value)
+                        setEmailVerified(false)
+                        setEmailSent(false)
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div className="mt-3">
+                  <FieldLabel>Password</FieldLabel>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                      <Lock size={18} />
+                    </span>
+                    <input
+                      className="app-input w-full has-icon has-trailing"
+                      type={showPw ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                      onClick={() => setShowPw((v) => !v)}
+                      aria-label={showPw ? 'Hide password' : 'Show password'}
+                    >
+                      {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* ============ Phone OTP verification (inline) ============ */}
+                <div className="mt-5 rounded-2xl border border-cline bg-[#FBFCFE] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-[13px] font-bold text-cink">
+                      <Smartphone size={15} className="text-cbrand" /> Phone verification
+                      {phoneVerified && <VerifiedPill label="Verified" />}
+                    </p>
+                    {!phoneVerified && (
+                      <button
+                        className="rounded-full bg-csoft px-3 py-1.5 text-[11.5px] font-bold text-cbrand transition hover:bg-[#e2e9fb] disabled:opacity-50"
+                        disabled={busy || phone.replace(/\D/g, '').length < 7 || phoneResendIn > 0}
+                        onClick={() => void sendPhoneCode()}
                       >
-                        {mth === 'phone' ? <Phone size={14} /> : <Mail size={14} />}
-                        {mth === 'phone' ? 'Phone' : 'Email'}
+                        {phoneResendIn > 0
+                          ? `Resend in ${phoneResendIn}s`
+                          : phoneSent
+                            ? 'Resend code'
+                            : 'Send code'}
                       </button>
-                    ))}
+                    )}
                   </div>
 
-                  {signupMethod === 'phone' ? (
-                    <div>
-                      <div className="flex gap-2.5">
-                        <CountryPicker value={country} onChange={setCountry} />
-                        <div className="relative min-w-0 flex-1">
-                          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                            <Smartphone size={18} />
-                          </span>
-                          <input
-                            className="app-input w-full has-icon"
-                            inputMode="tel"
-                            placeholder="3XX 1234567"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && signupPhoneReady && !busy)
-                                void requestOtp(signupPhone())
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="relative mt-3">
-                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                          <Mail size={18} />
-                        </span>
-                        <input
-                          className="app-input w-full has-icon"
-                          type="email"
-                          inputMode="email"
-                          autoCapitalize="none"
-                          placeholder="Email (optional — for updates & recovery)"
-                          value={signupEmail}
-                          onChange={(e) => setSignupEmail(e.target.value)}
+                  {!phoneVerified && phoneSent && (
+                    <div className="mt-3">
+                      {phoneSandbox && phoneDevCode && (
+                        <SandboxBanner
+                          code={phoneDevCode}
+                          channel="phone"
+                          onFill={() => setPhoneCode(phoneDevCode)}
                         />
-                      </div>
+                      )}
+                      <OtpSlots value={phoneCode} onChange={setPhoneCode} />
+                      <button
+                        className="btn-p mt-3 w-full disabled:opacity-50"
+                        disabled={busy || phoneCode.length < 6}
+                        onClick={() => void verifyPhoneCode()}
+                      >
+                        <ShieldCheck size={16} /> {busy ? 'Verifying…' : 'Verify phone'}
+                      </button>
                     </div>
-                  ) : (
-                    <>
-                      <div className="relative">
-                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                          <Mail size={18} />
-                        </span>
-                        <input
-                          className="app-input w-full has-icon"
-                          type="email"
-                          inputMode="email"
-                          autoCapitalize="none"
-                          autoComplete="email"
-                          placeholder="you@example.com"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                        />
-                      </div>
-                      <div className="relative mt-4">
-                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                          <Lock size={18} />
-                        </span>
-                        <input
-                          className="app-input w-full has-icon has-trailing"
-                          type={showPw ? 'text' : 'password'}
-                          autoComplete="new-password"
-                          placeholder="At least 8 characters"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && signupEmailReady && !busy) void submitSignupEmail()
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
-                          onClick={() => setShowPw((v) => !v)}
-                          aria-label={showPw ? 'Hide password' : 'Show password'}
-                        >
-                          {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
-                        </button>
-                      </div>
-                    </>
+                  )}
+
+                  {!phoneSent && !phoneVerified && (
+                    <p className="mt-1 text-[11.5px] leading-4 text-cmut">
+                      Tap <b>Send code</b> to receive a 6-digit verification code by SMS (or shown here in sandbox mode when no SMS provider is configured).
+                    </p>
                   )}
                 </div>
 
+                {/* ============ Email OTP verification (inline, only if email provided) ============ */}
+                {emailProvided && (
+                  <div className="mt-3 rounded-2xl border border-cline bg-[#FBFCFE] p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-[13px] font-bold text-cink">
+                        <Mail size={15} className="text-cbrand" /> Email verification
+                        {emailVerified && <VerifiedPill label="Verified" />}
+                      </p>
+                      {!emailVerified && (
+                        <button
+                          className="rounded-full bg-csoft px-3 py-1.5 text-[11.5px] font-bold text-cbrand transition hover:bg-[#e2e9fb] disabled:opacity-50"
+                          disabled={busy || emailResendIn > 0}
+                          onClick={() => void sendEmailCode()}
+                        >
+                          {emailResendIn > 0
+                            ? `Resend in ${emailResendIn}s`
+                            : emailSent
+                              ? 'Resend code'
+                              : 'Send code'}
+                        </button>
+                      )}
+                    </div>
+
+                    {!emailVerified && emailSent && (
+                      <div className="mt-3">
+                        {emailSandbox && emailDevCode && (
+                          <SandboxBanner
+                            code={emailDevCode}
+                            channel="email"
+                            onFill={() => setEmailCode(emailDevCode)}
+                          />
+                        )}
+                        <OtpSlots value={emailCode} onChange={setEmailCode} />
+                        <button
+                          className="btn-p mt-3 w-full disabled:opacity-50"
+                          disabled={busy || emailCode.length < 6}
+                          onClick={() => void verifyEmailCode()}
+                        >
+                          <ShieldCheck size={16} /> {busy ? 'Verifying…' : 'Verify email'}
+                        </button>
+                      </div>
+                    )}
+
+                    {!emailSent && !emailVerified && (
+                      <p className="mt-1 text-[11.5px] leading-4 text-cmut">
+                        Tap <b>Send code</b> to receive a 6-digit code by email (or shown here in sandbox mode when SMTP is not configured).
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Terms agreement */}
+                <label className="mt-5 flex items-start gap-2.5 rounded-2xl bg-cbg p-3.5 text-[12.5px] leading-5 text-cmut">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 flex-none accent-[#2f5bea]"
+                    checked={termsAgreed}
+                    onChange={(e) => setTermsAgreed(e.target.checked)}
+                  />
+                  <span>
+                    I agree to CALL&apos;s{' '}
+                    <Link href="/legal/terms" className="text-cbrand underline-offset-2 hover:underline">
+                      Terms of Service
+                    </Link>{' '}
+                    and{' '}
+                    <Link href="/legal/privacy" className="text-cbrand underline-offset-2 hover:underline">
+                      Privacy Policy
+                    </Link>
+                    .
+                  </span>
+                </label>
+
                 <button
-                  className="btn-p mt-6 w-full disabled:opacity-50"
-                  disabled={busy || (signupMethod === 'phone' ? !signupPhoneReady : !signupEmailReady)}
-                  onClick={() => {
-                    if (signupMethod === 'phone') void requestOtp(signupPhone())
-                    else void submitSignupEmail()
-                  }}
+                  className="btn-p mt-5 w-full disabled:opacity-50"
+                  disabled={!canCreateAccount}
+                  onClick={() => void submitSignup()}
                 >
                   {busy ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" /> Please wait…
-                    </>
-                  ) : signupMethod === 'phone' ? (
-                    <>
-                      <Phone size={18} /> Send code
+                      <Loader2 size={18} className="animate-spin" /> Creating account…
                     </>
                   ) : (
-                    'Create my account'
+                    <>
+                      <ShieldCheck size={18} /> Create my account
+                    </>
                   )}
                 </button>
 
@@ -853,16 +1096,22 @@ export function AuthScreen() {
                   <GoogleG /> Continue with Google
                 </button>
 
-                <p className="mt-5 text-center text-[11.5px] leading-4 text-[#9AA8C7]">
-                  By continuing you agree to CALL&apos;s Terms of Service and Privacy Policy.
-                </p>
+                {/* Honest sandbox notice */}
+                <div className="mt-5 flex items-start gap-2 rounded-2xl bg-cbg p-3.5 text-[11.5px] leading-5 text-cmut">
+                  <Info size={15} className="mt-0.5 flex-none text-cbrand" />
+                  <span>
+                    CALL never fakes SMS — when no SMS provider is configured, codes are shown in a
+                    yellow <b>Sandbox mode</b> banner above. For production, an admin adds Twilio /
+                    Vonage / WhatsApp credentials under Admin → Authentication.
+                  </span>
+                </div>
               </div>
             )}
 
-            {/* ================= phone OTP ================= */}
+            {/* ================= phone OTP (LOGIN) ================= */}
             {step === 'otp' && (
               <div className="mt-6">
-                {devCode && <SandboxBanner code={devCode} onFill={() => setOtp(devCode)} />}
+                {devCode && <SandboxBanner code={devCode} channel="phone" onFill={() => setOtp(devCode)} />}
                 <OtpSlots value={otp} onChange={setOtp} />
                 <button
                   className="btn-p mt-6 w-full disabled:opacity-50"
@@ -885,95 +1134,6 @@ export function AuthScreen() {
                     </button>
                   )}
                 </div>
-              </div>
-            )}
-
-            {/* ================= profile after phone OTP ================= */}
-            {step === 'name' && (
-              <div className="mt-6">
-                <FieldLabel>Full name</FieldLabel>
-                <div className="relative">
-                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                    <User size={18} />
-                  </span>
-                  <input
-                    className="app-input w-full has-icon"
-                    placeholder="Your name"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value)
-                      if (!usernameTouched) setUsername(suggestUsername(e.target.value))
-                    }}
-                    autoFocus
-                  />
-                </div>
-                <div className="mt-4">
-                  <UsernameField
-                    value={username}
-                    onChange={(v) => {
-                      setUsernameTouched(true)
-                      setUsername(v)
-                    }}
-                  />
-                </div>
-                <div className="relative mt-4">
-                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                    <Mail size={18} />
-                  </span>
-                  <input
-                    className="app-input w-full has-icon"
-                    type="email"
-                    inputMode="email"
-                    autoCapitalize="none"
-                    placeholder="Email (optional — for updates & recovery)"
-                    value={signupEmail}
-                    onChange={(e) => setSignupEmail(e.target.value)}
-                  />
-                </div>
-                <button
-                  className="btn-p mt-6 w-full disabled:opacity-50"
-                  disabled={busy || name.trim().length < 2}
-                  onClick={() => {
-                    setBusy(true)
-                    setError('')
-                    api
-                      .verifyOtp(
-                        activePhone,
-                        otp,
-                        name.trim(),
-                        username.trim().toLowerCase(),
-                        signupEmail.trim().toLowerCase() || undefined
-                      )
-                      .then((res) => {
-                        if (res.token && res.user) loginSuccess(res.token, res.user)
-                      })
-                      .catch((e) => setError((e as Error).message))
-                      .finally(() => setBusy(false))
-                  }}
-                >
-                  {busy ? 'Creating account…' : 'Create my account'}
-                </button>
-              </div>
-            )}
-
-            {/* ================= email verification ================= */}
-            {step === 'verify' && (
-              <div className="mt-6">
-                {emailDevCode && <SandboxBanner code={emailDevCode} onFill={() => setEmailCode(emailDevCode)} />}
-                <OtpSlots value={emailCode} onChange={setEmailCode} />
-                <button
-                  className="btn-p mt-6 w-full disabled:opacity-50"
-                  disabled={busy || emailCode.length < 6}
-                  onClick={() => void verifyEmailCode()}
-                >
-                  <ShieldCheck size={18} /> {busy ? 'Verifying…' : 'Verify & continue'}
-                </button>
-                <button
-                  className="mt-4 w-full text-center text-sm font-semibold text-cmut"
-                  onClick={() => void skipVerify()}
-                >
-                  Skip for now
-                </button>
               </div>
             )}
 
@@ -1016,7 +1176,7 @@ export function AuthScreen() {
             {step === 'reset' && (
               <div className="mt-6">
                 {resetDevCode ? (
-                  <SandboxBanner code={resetDevCode} onFill={() => setResetCode(resetDevCode)} />
+                  <SandboxBanner code={resetDevCode} channel="email" onFill={() => setResetCode(resetDevCode)} />
                 ) : (
                   resetDelivered && (
                     <div className="mb-5 flex items-center gap-3 rounded-2xl border border-[#12B76A33] bg-[#EDFAF3] p-4">

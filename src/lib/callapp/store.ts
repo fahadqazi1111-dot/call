@@ -108,6 +108,11 @@ interface AppState {
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
   markPasswordSet: () => void
   logout: () => void
+  /** Permanently delete the authenticated user's account + all personal data.
+   *  App Store / Play Store compliance. Requires `confirm: true` and, when the
+   *  user has a password set, the correct password. On success, clears all
+   *  local state and bounces back to the auth screen. */
+  deleteAccount: (password: string | null) => Promise<void>
 
   loadChats: () => Promise<void>
   openChat: (peerId: string | null) => void
@@ -126,6 +131,8 @@ interface AppState {
 
   loadContacts: () => Promise<void>
   addContact: (name: string, phone: string) => Promise<boolean>
+  /** add a registered CALL user by @username (or userId); resolves their phone/name on the server. */
+  addContactByUsername: (username: string) => Promise<boolean>
   syncDeviceContacts: (list: { name: string; phone: string }[]) => Promise<{ saved: number; matched: number } | null>
   deleteContact: (id: string) => Promise<void>
 
@@ -315,6 +322,50 @@ export const useApp = create<AppState>((set, get) => ({
       overlay: null,
       staffView: 'app',
     })
+  },
+
+  deleteAccount: async (password) => {
+    // Call the server first — if it fails, we keep the user logged in so they
+    // can retry. Only when the server confirms deletion do we wipe local state.
+    await api.deleteAccount({ password: password ?? undefined, confirm: true })
+    // Mirror logout(): tear down every manager + clear state, then go to auth.
+    if (get().call) callManager.hangup()
+    conferenceManager.leave()
+    void roomManager.leave(true)
+    void liveManager.leave(true)
+    callManager.setMe(null)
+    conferenceManager.setMe(null)
+    socketClient.disconnectAll()
+    persistToken(null)
+    saveSession(null)
+    set({
+      phase: 'auth',
+      me: null,
+      token: null,
+      chats: [],
+      messages: {},
+      contacts: [],
+      calls: [],
+      openPeerId: null,
+      chatsLoaded: false,
+      wallet: null,
+      walletCurrency: 'USD',
+      walletLedger: [],
+      walletGifts: [],
+      withdrawals: [],
+      bankAccounts: [],
+      notifications: [],
+      unreadNotifs: 0,
+      blockedIds: {},
+      overlay: null,
+      staffView: 'app',
+    })
+    // Hard redirect to "/" so the whole app remounts on the login screen — no
+    // stale socket listeners, no cached query data, no chance of the deleted
+    // session being re-hydrated from a tab that was open elsewhere.
+    if (typeof window !== 'undefined') {
+      window.location.href = '/'
+    }
   },
 
   loadChats: async () => {
@@ -532,7 +583,17 @@ export const useApp = create<AppState>((set, get) => ({
 
   addContact: async (name, phone) => {
     try {
-      await api.addContact(name, phone)
+      await api.addContact({ name, phone })
+      await get().loadContacts()
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  addContactByUsername: async (username) => {
+    try {
+      await api.addContact({ username })
       await get().loadContacts()
       return true
     } catch {
@@ -552,7 +613,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   deleteContact: async (id) => {
     try {
-      await api.deleteContact(id)
+      await api.removeContact(id)
       await get().loadContacts()
     } catch {}
   },
@@ -652,7 +713,13 @@ export function bindGlobalSocketHandlers() {
   liveManager.bindSocket()
   battleManager.bindSocket()
   conferenceManager.bindSocket()
-  conferenceManager.setToast((msg) => toast.info(msg))
+  conferenceManager.setToast((msg, opts) => {
+    const kind = opts?.kind ?? 'info'
+    const description = opts?.description
+    if (kind === 'error') toast.error(msg, { description })
+    else if (kind === 'warning') toast.warning(msg, { description })
+    else toast.info(msg, { description })
+  })
   callManager.setCallMessageHandler((peerId, message) => {
     // Append the call summary to my own chat and push it to the peer in realtime.
     const msg = message as Message
