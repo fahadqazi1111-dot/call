@@ -17,16 +17,22 @@
 /**
  * ICE servers used by every RTCPeerConnection.
  *
- * Override with the `NEXT_PUBLIC_CALL_ICE_SERVERS` env var (JSON array, same
- * shape as `RTCIceServer[]`). When unset we fall back to Google's public STUN
- * servers — enough for same-network testing, but production deploys behind
- * symmetric NAT MUST configure a TURN relay.
+ * ORDER OF PREFERENCE:
+ *   1. process.env.NEXT_PUBLIC_CALL_ICE_SERVERS (explicit override — for
+ *      production scale, plug in your own dedicated TURN relay)
+ *   2. Built-in FREE public STUN + TURN servers that work out of the box:
+ *        - Google public STUN (fast, free, but STUN-only = same-network only)
+ *        - OpenRelay public TURN (free, no signup required, crosses NAT)
  *
- * Example .env:
- *   NEXT_PUBLIC_CALL_ICE_SERVERS='[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"c"}]'
+ * The OpenRelay TURN servers (openrelay.metered.ca) are a free public service
+ * provided by Metered. They require NO signup, NO API key, and work on any
+ * port (80, 443, TCP, UDP). This means calls work cross-network out of the box
+ * — mobile 4G/5G users can call each other without any extra configuration.
  *
- * NOTE: NEXT_PUBLIC_* values are baked into the client bundle at build time,
- * so this is read ONCE at module load and cached.
+ * For production at scale, set your own TURN in .env to avoid rate limits:
+ *   NEXT_PUBLIC_CALL_ICE_SERVERS='[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:your-turn.com:3478","username":"u","credential":"c"}]'
+ *
+ * NOTE: NEXT_PUBLIC_* values are baked into the client bundle at build time.
  */
 let cachedIceServers: RTCIceServer[] | null = null
 
@@ -42,12 +48,33 @@ export function getIceServers(): RTCIceServer[] {
       }
     } catch (e) {
       // Bad env value must NEVER silently strand calls on no servers.
-      console.warn('[callapp] NEXT_PUBLIC_CALL_ICE_SERVERS is set but is not valid JSON — falling back to default STUN.', e)
+      console.warn('[callapp] NEXT_PUBLIC_CALL_ICE_SERVERS is set but is not valid JSON — falling back to default STUN+TURN.', e)
     }
   }
+  // Defaults include FREE public TURN (OpenRelay by Metered) so calls work
+  // cross-network out of the box. STUN is fast for same-network; TURN relays
+  // traffic when STUN can't traverse symmetric NAT / CGNAT (mobile networks).
   cachedIceServers = [
+    // Google public STUN — fast, free, works for same-network & cone NAT
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    // OpenRelay free public TURN — no signup required, crosses NAT/CGNAT.
+    // UDP first (lower latency), then TCP (works through restrictive firewalls)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ]
   return cachedIceServers
 }
