@@ -88,6 +88,21 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   // remove the Next.js dev "N" badge from the bottom-left corner permanently
   devIndicators: false,
+  experimental: {
+    /**
+     * Cap the build worker count.
+     *
+     * Next.js defaults to `os.cpus().length - 1` workers for
+     * "Collecting page data" / "Generating static pages". Hostinger's build
+     * machine reports ~64 CPUs but enforces a strict OS process/thread
+     * limit, so 63 workers crashed with:
+     *   "OS can't spawn worker thread: Resource temporarily unavailable
+     *    (os error 11)"  ->  SIGABRT
+     * Pinning a small number keeps the same footprint as the compile phase
+     * (which succeeded) and works identically on local dev machines.
+     */
+    cpus: 1,
+  },
 };
 
 export default nextConfig;
