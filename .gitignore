@@ -66,3 +66,8 @@ agent-ctx/
 # pid files
 *.pid
 upload/*.png
+
+# Generated download artifacts (user downloads via chat, not git)
+download/call-deploy.zip
+download/call-mysql.sql
+download/call-mysql-schema-only.sql
