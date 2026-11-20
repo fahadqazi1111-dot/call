@@ -178,6 +178,24 @@ function legacyCompat() {
         return chain.reverse();
       };
 
+      // ---------- pass 0: unwrap @layer blocks ----------
+      // Tailwind v4 wraps everything in @layer theme/base/utilities, but
+      // Chrome/WebView < 99 skips @layer contents ENTIRELY (no utilities at
+      // all). Unwrapping preserves the source order that the layer order
+      // encoded (theme -> base -> components -> utilities), so the cascade
+      // stays identical for modern browsers while old ones finally see the
+      // rules. Empty layer statements (e.g. "@layer components;") vanish.
+      for (let unwrapRun = 0; unwrapRun < 6; unwrapRun++) {
+        const layers = [];
+        root.walkAtRules("layer", (at) => layers.push(at));
+        if (!layers.length) break;
+        for (const layer of layers) {
+          const children = layer.nodes ? [...layer.nodes] : [];
+          if (children.length) layer.replaceWith(...children);
+          else layer.remove();
+        }
+      }
+
       // ---------- pass 1: Lab-family color literals -> rgb()/rgba() ----------
       root.walkDecls((decl) => {
         if (!/(oklch|oklab|lab|lch)\(/i.test(decl.value)) return;
@@ -187,25 +205,37 @@ function legacyCompat() {
         );
       });
 
-      // ---------- pass 2: collect color custom props, add -rgb companions ----------
-      const rgbTriple = new Map(); // var name -> "r,g,b"
-      const alias = new Map(); // var name -> referenced var name
-      const colorDecls = []; // { rule, decl } for literal colors
-      const aliasDecls = []; // { rule, decl } for var() aliases
+      // ---------- pass 2: theme tokens -> -rgb companions ----------
+      // Companions are created ONLY for theme-token scopes (:root, :host,
+      // html, .dark). Utility-local vars (--tw-*) are redefined per rule with
+      // different values, so global companions would collide (e.g. every
+      // --tw-ring-color-rgb getting the last ring color seen). Companions in
+      // both :root and .dark keep partial-opacity fallbacks dark-mode aware.
+      const inTokenScope = (rule) =>
+        !!rule &&
+        rule.type === "rule" &&
+        rule.selector
+          .split(",")
+          .some((part) => /(^|\s)(:root|:host|html|\.dark)$/.test(part.trim()));
+      const rgbTriple = new Map(); // token name -> "r,g,b" (last wins; lookup only)
+      const alias = new Map(); // token name -> referenced token (last wins)
+      const companionJobs = []; // { rule, decl, value, kind }
       root.walkDecls((decl) => {
         const prop = decl.prop;
         if (!prop.startsWith("--") || prop.endsWith("-rgb")) return;
         if (inKeyframes(decl)) return;
+        const rule = decl.parent;
+        if (!inTokenScope(rule)) return;
         const t = colorToTriplet(decl.value);
         if (t) {
           rgbTriple.set(prop, t);
-          colorDecls.push({ rule: decl.parent, decl });
+          companionJobs.push({ rule, decl, value: t, kind: "literal" });
           return;
         }
         const m = decl.value.trim().match(/^var\(\s*(--[\w-]+)\s*\)$/);
         if (m) {
           alias.set(prop, m[1]);
-          aliasDecls.push({ rule: decl.parent, decl });
+          companionJobs.push({ rule, decl, value: `var(${m[1]}-rgb)`, kind: "alias" });
         }
       });
       const aliasRoot = (name, seen = new Set()) => {
@@ -215,44 +245,160 @@ function legacyCompat() {
         seen.add(name);
         return aliasRoot(tgt, seen);
       };
-      for (const { rule, decl } of colorDecls) {
+      for (const { rule, decl, value, kind } of companionJobs) {
+        if (kind === "alias" && !aliasRoot(decl.prop)) continue;
         if (rule.some((n) => n.type === "decl" && n.prop === `${decl.prop}-rgb`)) continue;
-        rule.insertAfter(decl, decl.clone({ prop: `${decl.prop}-rgb`, value: rgbTriple.get(decl.prop) }));
-      }
-      for (const { rule, decl } of aliasDecls) {
-        const rootName = aliasRoot(decl.prop);
-        if (!rootName) continue;
-        if (rule.some((n) => n.type === "decl" && n.prop === `${decl.prop}-rgb`)) continue;
-        rule.insertAfter(decl, decl.clone({ prop: `${decl.prop}-rgb`, value: `var(${rootName}-rgb)` }));
+        rule.insertAfter(decl, decl.clone({ prop: `${decl.prop}-rgb`, value }));
       }
       const hasRgb = new Set();
       for (const n of rgbTriple.keys()) hasRgb.add(n);
       for (const n of alias.keys()) if (aliasRoot(n)) hasRgb.add(n);
 
       // ---------- pass 3: color-mix() -> rgba()/rgb() fallbacks ----------
-      root.walkDecls((decl) => {
-        if (!decl.value.includes("color-mix(")) return;
-        let v = decl.value;
-        // color-mix(in oklab, var(--x) 50%, transparent) -> rgba(var(--x-rgb), .5)
+      // NOTE: the compiled CSS reaches this plugin already MINIFIED (e.g.
+      // "color-mix(in oklab,var(--x)50%,transparent)"), so every regex below
+      // treats whitespace as optional. Tailwind v4 additionally wraps
+      // opacity-modifier utilities in
+      //   @supports (color: color-mix(in lab, red, red)) { ... }
+      // which old WebViews skip ENTIRELY — for guarded rules the legacy
+      // declaration is emitted in a twin rule placed BEFORE the guard, so
+      // old browsers pick it up while modern browsers still get color-mix().
+      const cmLegacy = (value) => {
+        let v = value;
+        // var(--x) N% , transparent -> rgba(var(--x-rgb), a)
         v = v.replace(
-          /color-mix\(\s*in\s+[\w-]+\s*,\s*var\(\s*(--[\w-]+)\s*\)\s+([\d.]+)%\s*,\s*transparent\s*\)/gi,
+          /color-mix\(\s*in\s+[\w-]+\s*,\s*var\(\s*(--[\w-]+)\s*\)\s*([\d.]+)%\s*,\s*transparent\s*\)/gi,
           (m, name, pct) =>
             hasRgb.has(name) ? `rgba(var(${name}-rgb), ${round3(parseFloat(pct) / 100)})` : m
         );
-        // color-mix(in oklab, var(--a), var(--b)) -> rgb(var(--a-rgb))
+        // transparent N% , var(--x) -> rgba(var(--x-rgb), 1-a)
+        v = v.replace(
+          /color-mix\(\s*in\s+[\w-]+\s*,\s*transparent\s+([\d.]+)%\s*,\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi,
+          (m, pct, name) =>
+            hasRgb.has(name) ? `rgba(var(${name}-rgb), ${round3(1 - parseFloat(pct) / 100)})` : m
+        );
+        // var(--x) , transparent (no percents = 50/50)
+        v = v.replace(
+          /color-mix\(\s*in\s+[\w-]+\s*,\s*var\(\s*(--[\w-]+)\s*\)\s*,\s*transparent\s*\)/gi,
+          (m, name) => (hasRgb.has(name) ? `rgba(var(${name}-rgb), 0.5)` : m)
+        );
+        // var(--a) , var(--b) -> rgb(var(--a-rgb)) (first-color approximation)
         v = v.replace(
           /color-mix\(\s*in\s+[\w-]+\s*,\s*var\(\s*(--[\w-]+)\s*\)\s*,\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi,
           (m, n1) => (hasRgb.has(n1) ? `rgb(var(${n1}-rgb))` : m)
         );
-        // color-mix(in oklab, #f00 50%, transparent) -> rgba(255,0,0,.5)
+        // literal N% , transparent -> rgba(r,g,b,a)
         v = v.replace(
-          /color-mix\(\s*in\s+[\w-]+\s*,\s*(#[0-9a-fA-F]{3,8}|rgba?\([^()]*\))\s+([\d.]+)%\s*,\s*transparent\s*\)/gi,
+          /color-mix\(\s*in\s+[\w-]+\s*,\s*(#[0-9a-fA-F]{3,8}|rgba?\([^()]*\))\s*([\d.]+)%\s*,\s*transparent\s*\)/gi,
           (m, lit, pct) => {
             const t = colorToTriplet(lit);
             return t ? `rgba(${t}, ${round3(parseFloat(pct) / 100)})` : m;
           }
         );
-        decl.value = v;
+        return v;
+      };
+      const cmGuardOf = (node) => {
+        let p = node && node.parent;
+        while (p) {
+          if (
+            p.type === "atrule" &&
+            p.name === "supports" &&
+            /color-mix/i.test(p.params || "")
+          )
+            return p;
+          p = p.parent;
+        }
+        return null;
+      };
+      // Tailwind v4 emits NATIVE-NESTED CSS: color-mix declarations often sit
+      // directly inside @media/@supports blocks nested within rules, so
+      // decl.parent is not always a Rule. Handle every shape:
+      //   a) guarded bare decl (decl inside @supports, nested in a rule) ->
+      //      legacy declaration as a sibling placed right BEFORE the guard
+      //      (the enclosing nested rule supplies the selector context)
+      //   b) guarded decl inside a flat rule inside the guard -> twin rule
+      //      with the same selector placed before the guard
+      //   c) plain decl inside a rule -> legacy declaration before it
+      //   d) plain bare decl inside a nested at-rule -> legacy sibling before
+      // Modern browsers keep the exact color-mix()/oklab() value; old
+      // WebViews take the legacy fallback by source order.
+      root.walkDecls((decl) => {
+        if (!decl.value.includes("color-mix(")) return;
+        const legacy = cmLegacy(decl.value);
+        if (legacy === decl.value) return; // unresolvable shape, leave as-is
+        const guard = cmGuardOf(decl);
+        const parent = decl.parent;
+        if (!parent) return;
+
+        const legacySiblingExists = (container, stopNode, selector) => {
+          for (const sib of container.nodes || []) {
+            if (stopNode && sib === stopNode) break;
+            if (sib.type === "decl") {
+              if (sib.prop === decl.prop && sib.value === legacy) return true;
+            } else if (sib.type === "rule" && selector && sib.selector === selector) {
+              if (
+                sib.some(
+                  (n) => n.type === "decl" && n.prop === decl.prop && n.value === legacy
+                )
+              )
+                return true;
+            }
+          }
+          return false;
+        };
+        const legacyDecl = () =>
+          postcss.decl({ prop: decl.prop, value: legacy, important: decl.important });
+
+        if (guard) {
+          const gp = guard.parent;
+          if (!gp) return;
+          if (parent === guard) {
+            // (a) bare decl directly inside the guard
+            if (!legacySiblingExists(gp, guard, null)) {
+              gp.insertBefore(guard, legacyDecl());
+            }
+          } else if (parent.type === "rule") {
+            // (b) decl inside a rule inside the guard -> twin rule
+            let twin = null;
+            for (const sib of gp.nodes || []) {
+              if (sib === guard) break;
+              if (sib.type !== "rule" || sib.selector !== parent.selector) continue;
+              if (
+                (sib._callLegacyTwin ||
+                  sib.some(
+                    (n) =>
+                      n.type === "decl" &&
+                      n.prop === decl.prop &&
+                      n.value === legacy
+                  )) &&
+                sib.some((n) => n.type === "decl" && n.prop === decl.prop)
+              ) {
+                twin = sib;
+                break;
+              }
+            }
+            if (!twin) {
+              twin = postcss.rule({ selector: parent.selector });
+              twin._callLegacyTwin = true;
+              twin.append(legacyDecl());
+              gp.insertBefore(guard, twin);
+            }
+          } else {
+            // guard present but odd container: last resort, in-place
+            decl.value = legacy;
+          }
+        } else if (parent.type === "rule") {
+          // (c) plain decl in a rule
+          const prev = decl.prev();
+          if (!(prev && prev.type === "decl" && prev.prop === decl.prop && prev.value === legacy)) {
+            parent.insertBefore(decl, legacyDecl());
+          }
+        } else {
+          // (d) plain bare decl inside a nested at-rule
+          if (!legacySiblingExists(parent, decl, null)) {
+            parent.insertBefore(decl, legacyDecl());
+          }
+        }
       });
 
       // ---------- pass 4: translate/scale/rotate props -> universal transform ----------
