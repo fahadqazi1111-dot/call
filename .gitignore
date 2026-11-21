@@ -68,8 +68,6 @@ agent-ctx/
 upload/
 
 # Generated download artifacts (user downloads via chat, not git)
-download/
-call-deploy.zip
 
 # Dev-only screenshots (not needed for deployment)
 shots/
