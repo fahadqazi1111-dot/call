@@ -1,73 +1,96 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- plain-Node CJS production entry: require is the point */
 /**
- * CALL production entry — Next.js (standalone build) + CALL realtime service
- * (socket.io) hosted in ONE Node process on ONE port.
+ * CALL production entry — Next.js + CALL realtime (socket.io) in one process.
  *
- * Works on any Node-only host (shared "supports Next.js" panels, VPS, PaaS):
- *   PORT=3000 node .next/standalone/production-server.js
+ * This file is copied over .next/standalone/server.js by the build script,
+ * so when Hostinger detects "Next.js standalone" and runs `node server.js`,
+ * it gets socket.io attached.
  *
- * What runs where (production):
- *   - Next.js pages/API          -> same http server (every path except /socket.io/
- *                                  and /internal/*)
- *   - socket.io realtime layer   -> /socket.io/ on the SAME server/port
- *   - internal relay             -> /internal/* on the SAME server/port
- *                                  (Hostinger shared hosting only allows ONE
- *                                   port per process — the relay can no longer
- *                                   bind a second loopback port like 3004)
- *
- * The realtime logic is the exact same code that runs in dev
- * (mini-services/call-service/service.ts), bundled to socket-service-bundle.cjs
- * by scripts/copy-production-runtime.js during `npm run build`.
+ * GRACEFUL DEGRADATION: if socket-service-bundle.cjs cannot be found (some
+ * hosts copy only standard Next.js standalone files and miss our extra
+ * bundle), the server still starts — just without realtime. The /api/health
+ * endpoint reports socketio:false so the admin knows to fix the deploy.
+ * This prevents 503 crashes on hosts that strip non-standard files.
  */
 process.env.NODE_ENV = 'production'
-process.env.CALL_SKIP_MINI_SERVICE = '1' // integrated mode: no watchdog needed
-process.chdir(__dirname)
+process.env.CALL_SKIP_MINI_SERVICE = '1'
 
-const http = require('http')
-const next = require('next')
-const { createCallService } = require('./socket-service-bundle.cjs')
+var http = require('http')
+var path = require('path')
+var fs = require('fs')
 
-const port = parseInt(process.env.PORT || '3000', 10)
-const hostname = process.env.HOSTNAME || '0.0.0.0'
+// Try to find the working directory — Hostinger may run server.js from
+// a different deploy dir than __dirname. Use __dirname (the standalone dir).
+try { process.chdir(__dirname) } catch (e) {}
 
-// The realtime service verifies roles/host state against the Next backend —
-// default it to THIS process's own loopback URL so it works on any assigned port.
-process.env.CALL_APP_URL = process.env.CALL_APP_URL || `http://127.0.0.1:${port}`
-// Internal relay used by Next API routes to push realtime events (gifts,
-// broadcasts, ghost-live cleanup). The relay is now mounted on the MAIN http
-// server at /internal/* (no second port) — required by Hostinger shared
-// hosting where a process can only listen on ONE port.
-process.env.CALL_RELAY_URL =
-  process.env.CALL_RELAY_URL || `http://127.0.0.1:${port}/internal/relay`
+// ---- Load the socket.io bundle (graceful: don't crash if missing) ----
+var createCallService = null
+var bundleSearchPaths = [
+  path.join(__dirname, 'socket-service-bundle.cjs'),
+  path.join(process.cwd(), 'socket-service-bundle.cjs'),
+  path.join(__dirname, 'deploy', 'socket-service-bundle.cjs'),
+  path.join(process.cwd(), 'deploy', 'socket-service-bundle.cjs'),
+]
+var bundleFound = null
+for (var i = 0; i < bundleSearchPaths.length; i++) {
+  try {
+    if (fs.existsSync(bundleSearchPaths[i])) {
+      bundleFound = bundleSearchPaths[i]
+      break
+    }
+  } catch (e) {}
+}
+if (bundleFound) {
+  try {
+    var bundle = require(bundleFound)
+    createCallService = bundle.createCallService || bundle.default || bundle
+    console.log('[CALL] socket.io bundle loaded from:', bundleFound)
+  } catch (e) {
+    console.warn('[CALL] socket.io bundle found but failed to load:', e.message)
+  }
+} else {
+  console.warn('[CALL] socket-service-bundle.cjs not found — starting WITHOUT realtime.')
+  console.warn('[CALL] Calls/live/rooms will not work until the bundle is deployed.')
+  console.warn('[CALL] Searched paths:', bundleSearchPaths.join(', '))
+}
 
-const app = next({ dev: false, dir: __dirname })
-const handle = app.getRequestHandler()
+var port = parseInt(process.env.PORT || '3000', 10)
+var hostname = process.env.HOSTNAME || '0.0.0.0'
 
-app
-  .prepare()
-  .then(() => {
-    const server = http.createServer((req, res) => handle(req, res))
+// The realtime service verifies roles/host state against the Next backend.
+process.env.CALL_APP_URL = process.env.CALL_APP_URL || ('http://127.0.0.1:' + port)
+process.env.CALL_RELAY_URL = process.env.CALL_RELAY_URL || ('http://127.0.0.1:' + port + '/internal/relay')
 
-    // Attach the CALL realtime service to the same http server:
-    //  - socket.io at /socket.io/ (client: NEXT_PUBLIC_SOCKET_URL="/")
-    //  - internal HTTP relay at /internal/* on this same server (NO second
-    //    port — Hostinger shared hosting only allows ONE port per process)
-    createCallService({
-      httpServer: server,
-      socketPath: '/socket.io/',
-      relayPort: null,
-    })
+// ---- Start Next.js ----
+var next = require('next')
+var app = next({ dev: false, dir: __dirname })
+var handle = app.getRequestHandler()
 
-    // Mark socket.io as attached so /api/health can report it. This lets the
-    // user verify they're running the right start command (production-server.js
-    // vs next start — the latter has NO socket.io so calls/live/rooms break).
-    process.env.CALL_REALTIME_ATTACHED = '1'
-
-    server.listen(port, hostname, () => {
-      console.log(`> CALL ready on http://${hostname}:${port} — Next.js + realtime in one process`)
-    })
+app.prepare().then(function () {
+  var server = http.createServer(function (req, res) {
+    handle(req, res)
   })
-  .catch((err) => {
-    console.error('Failed to start CALL:', err)
-    process.exit(1)
+
+  // Attach socket.io IF the bundle was loaded
+  if (createCallService) {
+    try {
+      createCallService({
+        httpServer: server,
+        socketPath: '/socket.io/',
+        relayPort: null,
+      })
+      process.env.CALL_REALTIME_ATTACHED = '1'
+      console.log('[CALL] socket.io attached to HTTP server')
+    } catch (e) {
+      console.error('[CALL] Failed to attach socket.io:', e.message)
+    }
+  }
+
+  server.listen(port, hostname, function () {
+    var rt = createCallService ? 'Next.js + realtime' : 'Next.js (no realtime)'
+    console.log('[CALL] Ready on http://' + hostname + ':' + port + ' — ' + rt)
   })
+}).catch(function (err) {
+  console.error('[CALL] Failed to start:', err)
+  process.exit(1)
+})
