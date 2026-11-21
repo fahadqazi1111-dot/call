@@ -87,3 +87,8 @@ Caddyfile
 # Dev-only scripts
 scripts/dev-keepalive.ts
 scripts/gift-test-fixture.ts
+
+# Build artifacts (generated, not for git)
+call-hostinger.zip
+call-source.zip
+call-source-hostinger.zip
