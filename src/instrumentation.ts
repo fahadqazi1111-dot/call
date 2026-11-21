@@ -35,7 +35,9 @@ export async function register() {
       return
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- instrumentation runs in plain Node, require is native
     const { createCallService } = require(bundlePath)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- same as above
     const http = require('node:http')
 
     // Monkey-patch http.createServer to intercept the server Next.js creates.
