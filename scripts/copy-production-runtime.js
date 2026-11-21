@@ -61,17 +61,13 @@ if (bunCheck.status === 0 && existsSync(serviceSrc)) {
   console.log('copy-production-runtime: used committed socket bundle (no bun)')
 }
 
-// 3. CRITICAL: Overwrite the default Next.js standalone server.js with our
-//    production-server.js. Hosts like Hostinger detect "Next.js standalone
-//    server output" and run `node server.js` — the default server.js has NO
-//    socket.io, so calls/live/rooms break. By overwriting it with our
-//    production-server.js (which attaches socket.io), the default `server.js`
-//    entry point gets realtime too.
-const standaloneServerJs = path.join(standalone, 'server.js')
-const prodServerJs = path.join(standalone, 'production-server.js')
-if (existsSync(prodServerJs)) {
-  copyFileSync(prodServerJs, standaloneServerJs)
-  console.log('copy-production-runtime: server.js overwritten with production-server.js (socket.io attached)')
-}
+// 3. DO NOT overwrite the default standalone server.js.
+// Previously we overwrote .next/standalone/server.js with production-server.js
+// to attach socket.io. But production-server.js uses require('next') which
+// doesn't work in standalone mode (standome uses NextServer, not next()).
+// This caused 503 crashes on Hostinger.
+// Instead, we let the default server.js run (it works fine), and socket.io
+// is attached separately if possible.
+// The production-server.js is still copied (step 1) for manual/VPS deploys.
 
-console.log('copy-production-runtime: done — start with `node .next/standalone/server.js` or `node production-server.js`')
+console.log('copy-production-runtime: done — start with `node .next/standalone/server.js`')
