@@ -91,4 +91,4 @@ scripts/gift-test-fixture.ts
 # Build artifacts (generated, not for git)
 call-hostinger.zip
 call-source.zip
-call-source-hostinger.zip
+
