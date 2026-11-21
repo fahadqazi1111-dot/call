@@ -8,6 +8,9 @@
  *      available (guaranteed fresh),
  *    - otherwise falls back to the committed deploy/socket-service-bundle.cjs
  *      so plain-Node hosts never need bun.
+ * 3. OVERWRITES the default standalone server.js with our production-server.js
+ *    so hosts that auto-detect "Next.js standalone" and run `server.js` get
+ *    socket.io attached (calls/live/rooms work).
  *
  * Pure Node — no bun required on the deploy machine.
  */
@@ -58,4 +61,17 @@ if (bunCheck.status === 0 && existsSync(serviceSrc)) {
   console.log('copy-production-runtime: used committed socket bundle (no bun)')
 }
 
-console.log('copy-production-runtime: done — start with `node .next/standalone/production-server.js`')
+// 3. CRITICAL: Overwrite the default Next.js standalone server.js with our
+//    production-server.js. Hosts like Hostinger detect "Next.js standalone
+//    server output" and run `node server.js` — the default server.js has NO
+//    socket.io, so calls/live/rooms break. By overwriting it with our
+//    production-server.js (which attaches socket.io), the default `server.js`
+//    entry point gets realtime too.
+const standaloneServerJs = path.join(standalone, 'server.js')
+const prodServerJs = path.join(standalone, 'production-server.js')
+if (existsSync(prodServerJs)) {
+  copyFileSync(prodServerJs, standaloneServerJs)
+  console.log('copy-production-runtime: server.js overwritten with production-server.js (socket.io attached)')
+}
+
+console.log('copy-production-runtime: done — start with `node .next/standalone/server.js` or `node production-server.js`')
