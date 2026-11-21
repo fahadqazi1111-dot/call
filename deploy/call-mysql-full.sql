@@ -1,6 +1,6 @@
 -- ============================================================
 -- CALL — full MySQL dump (schema + data) for phpMyAdmin import
--- Generated 2026-11-20T21:45:33.442Z
+-- Generated 2026-11-21T11:12:35.947Z
 -- All DateTime values are UTC.
 -- ============================================================
 
@@ -824,53 +824,35 @@ CREATE TABLE `BroadcastDelivery` (
 START TRANSACTION;
 
 INSERT INTO `User` (`id`, `phone`, `email`, `emailVerified`, `passwordHash`, `googleId`, `role`, `isOfficial`, `blocked`, `name`, `username`, `usernameChangedAt`, `about`, `avatarKey`, `avatarUrl`, `allowNonContacts`, `createdAt`, `lastSeen`) VALUES
-  ('cmwpeu4id0000r4vnatu9kolf', '0000000002', 'fahadqazi1111@gmail.com', 1, 'scrypt:b73fd6fefcf440feee0f45e68ebdb7dd:af7ba56866d825fd75613df6b4f38f9c95dd237dc03ce68449c69332f62a07c1', NULL, 'admin', 0, 0, 'Fahad Mazhar', 'fahadqazi', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-20 20:06:59.414', '2026-11-20 21:43:53.368'),
-  ('cmwpeury80003r4vnogm78ykk', '0309306009', 'test2a@example.com', 0, 'scrypt:93763f2ab089f8a984562ffbcc9e7349:8e3802f5a5c3f2d5577b8e22716b5d8ab2edb64efeddcfcfc5e8c1fd62a9adf7', NULL, 'user', 0, 0, 'Test User 2A', 'testuser2a', NULL, 'Available on CALL', 4, NULL, 0, '2026-11-20 20:07:29.793', '2026-11-20 20:07:29.793'),
-  ('cmwpeuryh0006r4vnugwqnwr2', '0000000000', 'official@call.app', 0, NULL, NULL, 'user', 1, 0, 'CALL', 'official', NULL, 'The official CALL account. Messages from the CALL team are sent from here.', 0, NULL, 0, '2026-11-20 20:07:29.801', '2026-11-20 20:07:29.801'),
-  ('cmwpfgjcw000kr4vn0tco3tb6', '923001234567', 'test@example.com', 1, 'scrypt:c2169b025d0cfc1043557e3c53db11d1:209fbc87121b00936b2e0802c352042a908e7202c8e5eb9128e178201130cdbc', NULL, 'user', 0, 0, 'Test User', 'testuser', NULL, 'Available on CALL', 6, NULL, 0, '2026-11-20 20:24:25.089', '2026-11-20 20:24:25.089'),
-  ('cmwpgeywq000xr4vndvbk1ri6', '923009993909', 'test.google.534790@example.com', 1, NULL, 'google-sub-124957151', 'user', 0, 0, 'Google Tester', 'googletester', NULL, 'Available on CALL', 3, NULL, 0, '2026-11-20 20:51:11.546', '2026-11-20 20:51:11.546'),
-  ('cmwph1l3k0017r4vnj727yf8y', '3009998888', 'gtest_1795208926712@gmail.com', 1, NULL, 'gflow_1795208926712', 'user', 0, 0, 'Google Flow', 'googleflow', NULL, 'Available on CALL', 6, NULL, 0, '2026-11-20 21:08:46.736', '2026-11-20 21:08:46.736');
-INSERT INTO `Otp` (`id`, `phone`, `code`, `expiresAt`, `consumed`, `createdAt`) VALUES
-  ('cmwpfg73h000ir4vnre77umc2', '923001234567', '935785', '2026-11-20 20:29:09.196', 1, '2026-11-20 20:24:09.197'),
-  ('cmwpfhf4i000sr4vnu0avqwc4', '92300555444333', '203048', '2026-11-20 20:30:06.258', 0, '2026-11-20 20:25:06.259'),
-  ('cmwpfnzao000tr4vn7lpe4a46', '923001234567', '474560', '2026-11-20 20:35:12.336', 1, '2026-11-20 20:30:12.337'),
-  ('cmwpgeken000ur4vn2c0eulri', '923009990839', '366013', '2026-11-20 20:55:52.751', 0, '2026-11-20 20:50:52.751'),
-  ('cmwpgeoz2000vr4vnb1toq81m', '923009999987', '408255', '2026-11-20 20:55:58.669', 1, '2026-11-20 20:50:58.670'),
-  ('cmwpgeyot000wr4vngfhokmen', '923009993909', '346156', '2026-11-20 20:56:11.260', 1, '2026-11-20 20:51:11.261'),
-  ('cmwpggwi90015r4vnnkt338ge', '923009995043', '527415', '2026-11-20 20:57:41.745', 0, '2026-11-20 20:52:41.746'),
-  ('cmwph1kuo0016r4vnlehh3wqn', '3009998888', '220793', '2026-11-20 21:13:46.415', 1, '2026-11-20 21:08:46.416');
-INSERT INTO `EmailOtp` (`id`, `email`, `code`, `purpose`, `expiresAt`, `consumed`, `createdAt`) VALUES
-  ('cmwpfgbxs000jr4vnxsx11lz4', 'test@example.com', '750567', 'verify', '2026-11-20 20:34:15.471', 1, '2026-11-20 20:24:15.472');
-INSERT INTO `Contact` (`id`, `ownerId`, `name`, `phone`, `createdAt`) VALUES
-  ('cmwpev7fo000hr4vn6ncxans9', 'cmwpeu4id0000r4vnatu9kolf', 'Test User 2A', '0309306009', '2026-11-20 20:07:49.861');
-INSERT INTO `Conversation` (`id`, `userAId`, `userBId`, `lastMessageAt`) VALUES
-  ('cmwpeuryi0008r4vnfa03uzmq', 'cmwpeury80003r4vnogm78ykk', 'cmwpeuryh0006r4vnugwqnwr2', '2026-11-20 20:07:29.805'),
-  ('cmwpfgjd7000or4vnicnqmss4', 'cmwpeuryh0006r4vnugwqnwr2', 'cmwpfgjcw000kr4vn0tco3tb6', '2026-11-20 20:24:25.101'),
-  ('cmwpgeyx00011r4vnzbsilrba', 'cmwpeuryh0006r4vnugwqnwr2', 'cmwpgeywq000xr4vndvbk1ri6', '2026-11-20 20:51:11.559'),
-  ('cmwph1l3r001br4vn2wdxjakz', 'cmwpeuryh0006r4vnugwqnwr2', 'cmwph1l3k0017r4vnj727yf8y', '2026-11-20 21:08:46.745');
-INSERT INTO `Message` (`id`, `conversationId`, `senderId`, `type`, `content`, `duration`, `createdAt`, `deliveredAt`, `readAt`, `deletedAt`, `forwarded`) VALUES
-  ('cmwpeuryk000ar4vnw7dhcl68', 'cmwpeuryi0008r4vnfa03uzmq', 'cmwpeuryh0006r4vnugwqnwr2', 'text', 'Welcome to CALL, Test! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video calls. If you ever need help, this official account is where the CALL team will reach you.', NULL, '2026-11-20 20:07:29.805', NULL, NULL, NULL, 0),
-  ('cmwpfgjd9000qr4vnsqcqximc', 'cmwpfgjd7000or4vnicnqmss4', 'cmwpeuryh0006r4vnugwqnwr2', 'text', 'Welcome to CALL, Test! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video calls. If you ever need help, this official account is where the CALL team will reach you.', NULL, '2026-11-20 20:24:25.101', NULL, NULL, NULL, 0),
-  ('cmwpgeyx30013r4vnsvnbnlw5', 'cmwpgeyx00011r4vnzbsilrba', 'cmwpeuryh0006r4vnugwqnwr2', 'text', 'Welcome to CALL, Google! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video calls. If you ever need help, this official account is where the CALL team will reach you.', NULL, '2026-11-20 20:51:11.559', NULL, NULL, NULL, 0),
-  ('cmwph1l3s001dr4vnruvushfq', 'cmwph1l3r001br4vn2wdxjakz', 'cmwpeuryh0006r4vnugwqnwr2', 'text', 'Welcome to CALL, Google! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video calls. If you ever need help, this official account is where the CALL team will reach you.', NULL, '2026-11-20 21:08:46.745', NULL, NULL, NULL, 0);
-INSERT INTO `Wallet` (`id`, `userId`, `available`, `reserved`, `totalReceived`, `totalEarned`, `totalWithdrawn`, `updatedAt`) VALUES
-  ('cmwpeu4jm0002r4vnnrggd9b6', 'cmwpeu4id0000r4vnatu9kolf', 0, 0, 0, 0, 0, '2026-11-20 20:06:59.458'),
-  ('cmwpeurya0005r4vnf5d6bu5b', 'cmwpeury80003r4vnogm78ykk', 0, 0, 0, 0, 0, '2026-11-20 20:07:29.795'),
-  ('cmwpfgjcz000mr4vn19uil1g8', 'cmwpfgjcw000kr4vn0tco3tb6', 0, 0, 0, 0, 0, '2026-11-20 20:24:25.091'),
-  ('cmwpgeywt000zr4vnln92ngvb', 'cmwpgeywq000xr4vndvbk1ri6', 0, 0, 0, 0, 0, '2026-11-20 20:51:11.549'),
-  ('cmwph1l3m0019r4vns1s5r4js', 'cmwph1l3k0017r4vnj727yf8y', 0, 0, 0, 0, 0, '2026-11-20 21:08:46.739');
-INSERT INTO `Notification` (`id`, `userId`, `kind`, `title`, `body`, `refType`, `refId`, `read`, `createdAt`) VALUES
-  ('cmwpeuryn000br4vnbziyh779', 'cmwpeury80003r4vnogm78ykk', 'message', 'CALL', 'Welcome to CALL, Test! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video c', 'chat', 'cmwpeuryh0006r4vnugwqnwr2', 0, '2026-11-20 20:07:29.807'),
-  ('cmwpfgjdd000rr4vnn1c259is', 'cmwpfgjcw000kr4vn0tco3tb6', 'message', 'CALL', 'Welcome to CALL, Test! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video c', 'chat', 'cmwpeuryh0006r4vnugwqnwr2', 0, '2026-11-20 20:24:25.105'),
-  ('cmwpgeyx50014r4vnmhftimf6', 'cmwpgeywq000xr4vndvbk1ri6', 'message', 'CALL', 'Welcome to CALL, Google! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video', 'chat', 'cmwpeuryh0006r4vnugwqnwr2', 0, '2026-11-20 20:51:11.562'),
-  ('cmwph1l3v001er4vni0ujui4l', 'cmwph1l3k0017r4vnj727yf8y', 'message', 'CALL', 'Welcome to CALL, Google! Your account is ready and calling is completely free. Add contacts, start chats and enjoy unlimited voice and video', 'chat', 'cmwpeuryh0006r4vnugwqnwr2', 0, '2026-11-20 21:08:46.747');
+  ('cmwqb6d65000gkkfkb1f8g4vb', '0000000001', 'admin@call.app', 1, 'scrypt:db2f17b19beb3695abd06af793cb76e2:3702af69f4ad1b4287378d53c4070c27ea54ed498ffec4c32fb45b1c8b462a99', NULL, 'admin', 0, 0, 'CALL Admin', 'calladmin', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-21 11:12:18.221', '2026-11-21 11:12:18.221'),
+  ('cmwqb6d72000hkkfkb51r0t2x', '0000000002', 'fahadqazi1111@gmail.com', 1, 'scrypt:7803cc4453dd68bdd470b0982b9d0f49:b98cea9c3539a0fb287eee67aa306fe26627c8f3048818ebfc74a81e25f71094', NULL, 'admin', 0, 0, 'Fahad Mazhar', 'fahadqazi', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-21 11:12:18.254', '2026-11-21 11:12:18.254');
 INSERT INTO `AdminSetting` (`key`, `value`, `updatedAt`) VALUES
-  ('otp', '{"smsProvider":"twilio","twilioAccountSid":"AC123","twilioAuthToken":"secrettoken123","twilioFromNumber":"+15555555555","whatsappApiKey":"EAAGnew"}', '2026-11-20 20:24:51.241');
-INSERT INTO `CoinWallet` (`id`, `userId`, `coins`, `totalPurchased`, `totalConverted`, `totalSpent`, `totalReceived`, `updatedAt`) VALUES
-  ('cmwpibidj0001r42wmjkoewy6', 'cmwpeu4id0000r4vnatu9kolf', 0, 0, 0, 0, 0, '2026-11-20 21:44:29.383');
+  ('finance', '{"currency":"USD","platformCommission":30,"roomHostPercent":70,"paymentFeePercent":2.9,"paymentFeeFixed":0.3,"minWithdrawal":25,"withdrawalMethods":["bank"]}', '2026-11-21 11:12:18.148'),
+  ('rooms', '{"maxSpeakers":5,"maxEntryFee":50,"allowPaidRooms":true}', '2026-11-21 11:12:18.150'),
+  ('live', '{"maxViewers":25,"battleDurations":[60,120,180],"allowBattles":true}', '2026-11-21 11:12:18.151'),
+  ('calls', '{"maxConferenceParticipants":5}', '2026-11-21 11:12:18.152'),
+  ('ai', '{"provider":"zai","defaultModel":"default","dailyTextLimit":100,"dailyImageLimit":10,"dailyVoiceLimit":40,"voiceReplies":true,"imageGen":true}', '2026-11-21 11:12:18.152'),
+  ('ads', '{"enabled":true,"placements":["chats","rooms","profile"]}', '2026-11-21 11:12:18.153'),
+  ('payments', '{"provider":"sandbox","stripeSecretKey":"","stripeWebhookSecret":""}', '2026-11-21 11:12:18.154'),
+  ('adminSetupCode', '"CALL-ADMIN-2024"', '2026-11-21 11:12:18.155');
+INSERT INTO `AdPackage` (`id`, `name`, `description`, `priceUsd`, `durationDays`, `placements`, `minBudget`, `active`, `order`) VALUES
+  ('cmwqb6d4v000ckkfky739ogud', 'Starter', '3-day campaign across one placement of your choice.', 5, 3, 'chats,rooms,profile', 0, 1, 1),
+  ('cmwqb6d4x000dkkfk6rx7u4kv', 'Growth', '7-day campaign, best for reaching new audiences.', 15, 7, 'chats,rooms,profile', 10, 1, 2),
+  ('cmwqb6d4y000ekkfks7hlhfux', 'Pro', '14-day campaign with priority rotation.', 40, 14, 'chats,rooms,profile', 25, 1, 3),
+  ('cmwqb6d50000fkkfkjvktop20', 'Premium', '30-day flagship campaign, maximum exposure.', 99, 30, 'chats,rooms,profile', 50, 1, 4);
 INSERT INTO `Gift` (`id`, `name`, `emoji`, `imageUrl`, `description`, `animKind`, `sound`, `category`, `priceUsd`, `priceCoins`, `currency`, `platformMap`, `durationMs`, `active`, `sortOrder`) VALUES
-  ('cmwpicb1c0000r46mc8c8jl8w', 'Rose', '🌹', NULL, '', 'rose', 'gift', 'both', 0.99, 100, 'USD', '{"android":null,"ios":null}', 2200, 1, 99),
-  ('cmwpicb220001r46mv6197jxh', 'Crown', '👑', NULL, '', 'crown', 'gift', 'both', 9.99, 1000, 'USD', '{"android":null,"ios":null}', 2200, 1, 99);
+  ('cmwqb6d4c0000kkfk07o3zlgw', 'Rose', '🌹', '/gifts/rose.png', 'Rose gift — delivered with a real-time animation.', 'rose', 'gift', 'both', 0.6, 60, 'USD', '{"android":"call_gift_rose","ios":"call_gift_rose"}', 2200, 1, 1),
+  ('cmwqb6d4e0001kkfke0qn7lwb', 'Flower', '🌺', '/gifts/rose.png', 'Flower gift — delivered with a real-time animation.', 'flower', 'gift', 'both', 1, 100, 'USD', '{"android":"call_gift_flower","ios":"call_gift_flower"}', 2200, 1, 2),
+  ('cmwqb6d4f0002kkfkma3kitf9', 'Heart', '❤️', '/gifts/heart.png', 'Heart gift — delivered with a real-time animation.', 'heart', 'gift', 'both', 1.5, 150, 'USD', '{"android":"call_gift_heart","ios":"call_gift_heart"}', 2200, 1, 3),
+  ('cmwqb6d4g0003kkfkpm6jkk6h', 'Bouquet', '💐', '/gifts/rose.png', 'Bouquet gift — delivered with a real-time animation.', 'flower', 'gift', 'both', 2.5, 250, 'USD', '{"android":"call_gift_flower","ios":"call_gift_flower"}', 2600, 1, 4),
+  ('cmwqb6d4i0004kkfk8htk0xpj', 'Crown', '👑', '/gifts/crown.png', 'Crown gift — delivered with a real-time animation.', 'crown', 'gift', 'both', 5, 500, 'USD', '{"android":"call_gift_crown","ios":"call_gift_crown"}', 2800, 1, 5),
+  ('cmwqb6d4l0005kkfktrbpmqz1', 'Race Car', '🏎️', '/gifts/car.png', 'Race Car gift — delivered with a real-time animation.', 'car', 'gift', 'both', 8, 800, 'USD', '{"android":"call_gift_car","ios":"call_gift_car"}', 3200, 1, 6),
+  ('cmwqb6d4n0006kkfk2hselmd9', 'Rocket', '🚀', '/gifts/rocket.png', 'Rocket gift — delivered with a real-time animation.', 'rocket', 'gift_big', 'both', 10, 1000, 'USD', '{"android":"call_gift_rocket","ios":"call_gift_rocket"}', 3500, 1, 7),
+  ('cmwqb6d4o0007kkfk0mde47j8', 'Fireworks', '🎆', '/gifts/fireworks.png', 'Fireworks gift — delivered with a real-time animation.', 'fireworks', 'gift_big', 'both', 15, 1500, 'USD', '{"android":"call_gift_fireworks","ios":"call_gift_fireworks"}', 4000, 1, 8),
+  ('cmwqb6d4q0008kkfkgu9zu5d4', 'Dragon', '🐉', '/gifts/dragon.png', 'Dragon gift — delivered with a real-time animation.', 'dragon', 'gift_big', 'both', 20, 2000, 'USD', '{"android":"call_gift_dragon","ios":"call_gift_dragon"}', 4000, 1, 9),
+  ('cmwqb6d4r0009kkfkgdoala1v', 'Lion', '🦁', '/gifts/lion.png', 'Lion gift — delivered with a real-time animation.', 'lion', 'gift_big', 'both', 30, 3000, 'USD', '{"android":"call_gift_lion","ios":"call_gift_lion"}', 4200, 1, 10),
+  ('cmwqb6d4s000akkfkeuvo4kbj', 'Magic Castle', '🏰', '/gifts/castle.png', 'Magic Castle gift — delivered with a real-time animation.', 'castle', 'gift_big', 'both', 50, 5000, 'USD', '{"android":"call_gift_castle","ios":"call_gift_castle"}', 5000, 1, 11),
+  ('cmwqb6d4t000bkkfkhcxg3i1l', 'Galaxy', '🌌', '/gifts/galaxy.png', 'Galaxy gift — delivered with a real-time animation.', 'superlion', 'gift_big', 'both', 99, 9900, 'USD', '{"android":"call_gift_superlion","ios":"call_gift_superlion"}', 5200, 1, 12);
 
 COMMIT;
 

@@ -81,6 +81,9 @@ async function main() {
           animKind: g.animKind,
           category: g.category,
           priceUsd: g.priceUsd,
+          // coins are bought at coinsPerUsd=100 (getCoinSettings default) —
+          // keep every gift purchasable with coins at the same real value
+          priceCoins: Math.round(Number(g.priceUsd) * 100),
           sortOrder: g.sortOrder,
           durationMs: g.durationMs,
           imageUrl: g.image,
@@ -92,8 +95,14 @@ async function main() {
           }),
         },
       })
-    } else if (!existing.imageUrl) {
-      await prisma.gift.update({ where: { id: existing.id }, data: { imageUrl: g.image } })
+    } else {
+      // self-heal: older rows may predate the coin feature or the image pass
+      const patch: { priceCoins?: number; imageUrl?: string } = {}
+      if (!existing.priceCoins) patch.priceCoins = Math.round(Number(g.priceUsd) * 100)
+      if (!existing.imageUrl) patch.imageUrl = g.image
+      if (Object.keys(patch).length) {
+        await prisma.gift.update({ where: { id: existing.id }, data: patch })
+      }
     }
   }
 
