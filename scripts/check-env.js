@@ -81,7 +81,10 @@ if (/^(file|sqlite):/i.test(dbUrl)) {
   )
 }
 if (/USER:PASSWORD@|DB_USER:DB_PASSWORD/i.test(dbUrl)) {
-  fail('ERROR: DATABASE_URL still contains placeholder credentials. Fill in the real DB user, password and name from your hosting panel.')
+  // Hostinger's build system runs `npm run build` and the user may still have
+  // placeholder credentials in .env at build time (the real DATABASE_URL is
+  // injected at runtime by the hosting panel env vars). Warn, don't fail.
+  console.warn('WARNING: DATABASE_URL appears to contain placeholder credentials. The app will fail at runtime if these are not replaced with real DB credentials from your hosting panel.')
 }
 
 const appUrl = effective('NEXT_PUBLIC_APP_URL')
