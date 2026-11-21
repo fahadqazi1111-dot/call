@@ -15,7 +15,7 @@
  * Pure Node — no bun required on the deploy machine.
  */
 const { spawnSync, execFileSync } = require('node:child_process')
-const { copyFileSync, existsSync, mkdirSync } = require('node:fs')
+const { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
 
 const root = process.cwd()
@@ -61,13 +61,57 @@ if (bunCheck.status === 0 && existsSync(serviceSrc)) {
   console.log('copy-production-runtime: used committed socket bundle (no bun)')
 }
 
-// 3. DO NOT overwrite the default standalone server.js.
-// Previously we overwrote .next/standalone/server.js with production-server.js
-// to attach socket.io. But production-server.js uses require('next') which
-// doesn't work in standalone mode (standome uses NextServer, not next()).
-// This caused 503 crashes on Hostinger.
-// Instead, we let the default server.js run (it works fine), and socket.io
-// is attached separately if possible.
-// The production-server.js is still copied (step 1) for manual/VPS deploys.
+// 3. PATCH the default standalone server.js to attach socket.io.
+// We inject a monkey-patch of http.createServer BEFORE startServer() is called.
+// When startServer calls http.createServer internally, our patch intercepts it,
+// attaches socket.io, and returns the server as normal.
+const standaloneServerJs = path.join(standalone, 'server.js')
+if (existsSync(standaloneServerJs)) {
+  let serverJsContent = readFileSync(standaloneServerJs, 'utf8')
+
+  // Check if already patched
+  if (serverJsContent.indexOf('CALL_REALTIME_ATTACHED') === -1) {
+    // Inject our socket.io attachment code right before startServer is called
+    // Find "startServer({" and inject before it
+    const patchCode = `
+// === CALL: attach socket.io to the HTTP server ===
+try {
+  var _http = require('http');
+  var _origCreate = _http.createServer;
+  var _attached = false;
+  _http.createServer = function() {
+    var srv = _origCreate.apply(this, arguments);
+    if (!_attached) {
+      _attached = true;
+      try {
+        var _bundle = require('./socket-service-bundle.cjs');
+        var _createCallService = _bundle.createCallService || _bundle.default || _bundle;
+        _createCallService({ httpServer: srv, socketPath: '/socket.io/', relayPort: null });
+        process.env.CALL_REALTIME_ATTACHED = '1';
+        console.log('[CALL] socket.io attached to Next.js server');
+      } catch(e) { console.error('[CALL] socket.io attach failed:', e.message); }
+    }
+    return srv;
+  };
+} catch(e) { console.error('[CALL] socket.io init failed:', e.message); }
+// === END CALL socket.io ===
+
+`
+    // Insert the patch code right before "startServer({"
+    const patched = serverJsContent.replace(
+      /startServer\(\{/,
+      patchCode + 'startServer({'
+    )
+
+    if (patched !== serverJsContent) {
+      writeFileSync(standaloneServerJs, patched)
+      console.log('copy-production-runtime: server.js patched with socket.io monkey-patch')
+    } else {
+      console.log('copy-production-runtime: WARNING - could not patch server.js')
+    }
+  } else {
+    console.log('copy-production-runtime: server.js already patched')
+  }
+}
 
 console.log('copy-production-runtime: done — start with `node .next/standalone/server.js`')
