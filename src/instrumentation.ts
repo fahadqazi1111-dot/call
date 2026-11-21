@@ -10,7 +10,7 @@
  */
 
 export async function register() {
-  // Only on the server, not during build
+  // Only on the server (nodejs runtime), not during build or edge runtime
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
   // Avoid double-attach in dev
   const g = globalThis as unknown as { __callSocketAttached?: boolean }
@@ -18,8 +18,11 @@ export async function register() {
   g.__callSocketAttached = true
 
   try {
-    const path = await import('node:path')
-    const fs = await import('node:fs')
+    // Use require directly — instrumentation runs in Node, not Edge
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('node:path')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('node:fs')
 
     // Find the socket-service-bundle.cjs
     const candidates = [
@@ -35,9 +38,9 @@ export async function register() {
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- instrumentation runs in plain Node, require is native
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createCallService } = require(bundlePath)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- same as above
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const http = require('node:http')
 
     // Monkey-patch http.createServer to intercept the server Next.js creates.
