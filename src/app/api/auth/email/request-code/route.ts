@@ -45,7 +45,17 @@ export async function POST(req: Request) {
         { status: 429 }
       )
     }
-    const purpose = body.purpose === 'reset' ? 'reset' : 'verify'
+    // `purpose` scopes the code so the verify + change-email flows can
+    // distinguish it from a generic `verify` (registration) or `reset`
+    // (forgot-password) code. Default to 'verify' to preserve the existing
+    // registration + verify-email behaviour when callers don't send one.
+    // When `change_email` is requested, the code is issued to the NEW email
+    // address supplied in `body.email` (this route already sends to
+    // `body.email`, so no destination override is needed — the change-email
+    // caller just passes the new address here directly).
+    const rawPurpose = typeof body.purpose === 'string' ? body.purpose : 'verify'
+    const purpose =
+      rawPurpose === 'reset' || rawPurpose === 'change_email' ? rawPurpose : 'verify'
     // Invalidate previous unconsumed codes for this email/purpose combo.
     await db.emailOtp.updateMany({
       where: { email, purpose, consumed: false },

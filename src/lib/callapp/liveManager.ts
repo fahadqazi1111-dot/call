@@ -1,7 +1,7 @@
 'use client'
 
 import { socketClient } from './socket'
-import { getIceConfig } from './ice'
+import { getIceConfig, classifyMediaErrorName, MediaFailure, type PreflightErrorKind } from './ice'
 import type { BattleParticipantInfo } from './types'
 
 function iceConfig(): RTCConfiguration {
@@ -123,23 +123,56 @@ class LiveManager {
 
   /* ---------------- host / participant ---------------- */
 
-  /** Broadcast constraints — shared by the preflight and the real publish so
-   *  the warmed stream from the "Go live" tap can be reused directly. */
-  private static readonly PUB_AUDIO: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true }
-  private static readonly PUB_VIDEO: MediaTrackConstraints = { width: { ideal: 720 }, height: { ideal: 1280 }, facingMode: 'user' }
+  /**
+   * getUserMedia constraints used for the live broadcast.
+   *
+   * Historically this used strict constraints: `width: { ideal: 720 }`,
+   * `height: { ideal: 1280 }` (portrait) and `facingMode: 'user'`.
+   * On desktops / laptops with a single webcam, `facingMode: 'user'` can
+   * throw `NotFoundError` or `OverconstrainedError` (the device has no
+   * defined facingMode), and combined with the strict portrait dimensions
+   * the whole request would fail — even though the camera clearly works.
+   * The browser was rejecting the request before we ever got a chance to
+   * ask the user for permission, so the UI showed the misleading
+   * "No camera or microphone was found" error.
+   *
+   * Fix: use the SIMPLE form `{ audio: true, video: true }`. The browser
+   * picks sensible defaults (640x480 landscape on desktop, front camera on
+   * mobile) and never rejects the request for constraint reasons. The
+   * portrait/canvas-styling is handled by the `<video>` element's
+   * `object-fit: cover` — we don't need a portrait-shaped capture.
+   *
+   * echoCancellation + noiseSuppression are the browser default anyway,
+   * so we don't lose anything by omitting them.
+   */
+  private static readonly PUB_AUDIO = true
+  private static readonly PUB_VIDEO = true
 
   /**
    * Capture camera + mic BEFORE the session row is created (called inside the
    * "Go live" tap, while the browser can still show its permission prompt on a
    * user gesture). The stream is kept — startPublishing() reuses it, so the
-   * device is never opened twice. Failure returns the real browser error so
-   * the UI can explain exactly what happened (no session is created then).
+   * device is never opened twice. Failure returns the real browser error name
+   * AND a coarse `errorKind` ('camera' | 'mic' | 'both' | 'permission' |
+   * 'busy' | 'unknown') so the UI can show a SPECIFIC, actionable message
+   * instead of the old generic "no camera or microphone was found".
+   *
+   * Why we probe each device separately on NotFoundError: a single
+   * `getUserMedia({ audio: true, video: true })` failure can't tell us
+   * WHICH device is missing (the DOMException itself has no `constraint`
+   * field populated reliably across browsers). Probing audio-only and
+   * video-only takes a few ms and lets us say "Camera not found" vs
+   * "Microphone not found" instead of the useless combined message.
    */
-  async preflightCamera(): Promise<{ ok: boolean; errorName?: string }> {
+  async preflightCamera(): Promise<{ ok: true } | { ok: false; errorName: string; errorKind: PreflightErrorKind }> {
     try {
       if (this.camStream && this.camStream.getVideoTracks().some((t) => t.readyState === 'live')) {
         return { ok: true }
       }
+      // Stop any stale tracks before re-capturing, otherwise a half-dead
+      // stream can keep the camera light on and block the new getUserMedia.
+      this.camStream?.getTracks().forEach((t) => t.stop())
+      this.camStream = null
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: LiveManager.PUB_AUDIO,
         video: LiveManager.PUB_VIDEO,
@@ -147,7 +180,35 @@ class LiveManager {
       this.camStream = stream
       return { ok: true }
     } catch (e) {
-      return { ok: false, errorName: e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError' }
+      const name = e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError'
+      const kind = classifyMediaErrorName(name)
+      // Probe each device separately to find out which one is missing — the
+      // combined getUserMedia failure can't tell us camera vs microphone.
+      if (kind === 'both') {
+        const hasVideo = await this.canCapture({ video: true, audio: false })
+        const hasAudio = await this.canCapture({ video: false, audio: true })
+        const refined: PreflightErrorKind = !hasVideo && !hasAudio
+          ? 'both'
+          : !hasVideo
+            ? 'camera'
+            : !hasAudio
+              ? 'mic'
+              : 'both'
+        return { ok: false, errorName: name, errorKind: refined }
+      }
+      return { ok: false, errorName: name, errorKind: kind }
+    }
+  }
+
+  /** Best-effort single-device probe — returns true if the device opens.
+   *  Stops the tracks immediately so the camera light never blinks on. */
+  private async canCapture(constraints: MediaStreamConstraints): Promise<boolean> {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia(constraints)
+      s.getTracks().forEach((t) => t.stop())
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -172,10 +233,34 @@ class LiveManager {
     // reuse the stream captured by preflightCamera() when its tracks are alive
     const warm = this.camStream && this.camStream.getTracks().every((t) => t.readyState === 'live')
     if (!warm) {
-      this.camStream = await navigator.mediaDevices.getUserMedia({
-        audio: LiveManager.PUB_AUDIO,
-        video: withVideo ? LiveManager.PUB_VIDEO : false,
-      })
+      try {
+        this.camStream?.getTracks().forEach((t) => t.stop())
+        this.camStream = null
+        this.camStream = await navigator.mediaDevices.getUserMedia({
+          audio: LiveManager.PUB_AUDIO,
+          video: withVideo ? LiveManager.PUB_VIDEO : false,
+        })
+      } catch (e) {
+        // Re-classify with the same probing logic preflightCamera uses, then
+        // re-throw as a MediaFailure so LiveHostScreen.startBroadcast can show
+        // a SPECIFIC error (camera vs microphone vs permission) instead of the
+        // old generic "no camera or microphone was found" toast.
+        const name = e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError'
+        const kind = classifyMediaErrorName(name)
+        if (kind === 'both' && withVideo) {
+          const hasVideo = await this.canCapture({ video: true, audio: false })
+          const hasAudio = await this.canCapture({ video: false, audio: true })
+          const refined: PreflightErrorKind = !hasVideo && !hasAudio
+            ? 'both'
+            : !hasVideo
+              ? 'camera'
+              : !hasAudio
+                ? 'mic'
+                : 'both'
+          throw new MediaFailure(name, refined)
+        }
+        throw new MediaFailure(name, kind)
+      }
     }
     this.state.cameraOn = withVideo
     // the server REQUIRES `user` on live:join (it keys presence by it) — a

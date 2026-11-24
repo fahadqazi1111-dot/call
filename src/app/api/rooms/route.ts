@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, getSetting, mediaUrl, rateLimit } from '@/lib/callapp/server'
+import { relayRoomSync } from '@/lib/callapp/roomSync'
 
 /** GET: live voice rooms with participant counts. */
 export async function GET(req: Request) {
@@ -78,6 +79,13 @@ export async function POST(req: Request) {
     await db.roomParticipant.create({
       data: { roomId: room.id, userId: me.id, role: 'host' },
     })
+    // Immediately sync the host's role to the socket service so the
+    // `room:join` verify round-trip AND the authoritative `room:state`
+    // both surface the creator as 'host' (never 'listener'). Without
+    // this push, a stale roomMembers entry from a previous join attempt
+    // can leave the host pinned as 'listener' until the next moderation
+    // action re-syncs the room.
+    await relayRoomSync(room.id)
     return NextResponse.json({ ok: true, room: { id: room.id, title: room.title } })
   } catch {
     return NextResponse.json({ error: 'Create room failed' }, { status: 500 })

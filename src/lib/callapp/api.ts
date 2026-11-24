@@ -148,7 +148,7 @@ export const api = {
       }
       delivery: { sms: boolean; whatsapp: boolean; email: boolean }
     }>('/api/auth/config'),
-  emailRequestCode: (email: string, purpose?: 'verify' | 'reset') =>
+  emailRequestCode: (email: string, purpose?: 'verify' | 'reset' | 'change_email') =>
     request<{
       ok: boolean
       email: string
@@ -167,10 +167,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, purpose }),
     }),
-  emailVerify: (email: string, code: string, linkToken?: string) =>
+  emailVerify: (email: string, code: string, linkToken?: string, purpose?: 'verify' | 'reset' | 'change_email') =>
     request<{ verified?: boolean; ok?: boolean; token?: string; user?: Me }>('/api/auth/email/verify', {
       method: 'POST',
-      body: JSON.stringify({ email, code, linkToken }),
+      body: JSON.stringify({ email, code, linkToken, purpose }),
     }),
   passwordRegister: (payload: {
     name: string
@@ -249,6 +249,26 @@ export const api = {
   /** Permanently delete the authenticated user's account (App Store / Play Store compliance). */
   deleteAccount: (body: { password?: string; confirm: boolean }) =>
     request<{ ok: boolean }>('/api/me/delete', { method: 'POST', body: JSON.stringify(body) }),
+  /**
+   * Swap the signed-in user's phone number. Requires a freshly-consumed
+   * phone OTP for `newPhone` (see /api/auth/otp + /api/auth/otp/verify).
+   * `clientKey` is the caller-generated idempotency tag.
+   */
+  changePhone: (body: { newPhone: string; code: string; clientKey: string }) =>
+    request<{ ok: boolean; user: Me }>('/api/me/change-phone', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /**
+   * Swap the signed-in user's email. Requires a freshly-consumed email OTP
+   * (purpose='change_email' or 'verify') for `newEmail`.
+   * `clientKey` is the caller-generated idempotency tag.
+   */
+  changeEmail: (body: { newEmail: string; code: string; clientKey: string }) =>
+    request<{ ok: boolean; user: Me }>('/api/me/change-email', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   /* ---------- chats ---------- */
   chats: () => request<{ chats: ChatSummary[] }>('/api/chats'),

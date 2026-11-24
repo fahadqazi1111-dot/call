@@ -20235,6 +20235,12 @@ function createCallService(opts = {}) {
   const presence = new Map;
   const names = new Map;
   const roomMembers = new Map;
+  const ROLE_RANK = {
+    listener: 0,
+    speaker: 1,
+    cohost: 2,
+    host: 3
+  };
   function socketsOf(userId) {
     return Array.from(presence.get(userId) ?? []);
   }
@@ -20465,6 +20471,10 @@ function createCallService(opts = {}) {
           existing.name = p.user.name;
           existing.avatarKey = p.user.avatarKey ?? 0;
           existing.avatarUrl = p.user.avatarUrl ?? null;
+          const newRank = ROLE_RANK[role] ?? 0;
+          const oldRank = ROLE_RANK[existing.role] ?? 0;
+          if (newRank > oldRank)
+            existing.role = role;
         } else {
           members.set(p.user.id, {
             userId: p.user.id,

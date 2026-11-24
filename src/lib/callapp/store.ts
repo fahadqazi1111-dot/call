@@ -115,6 +115,12 @@ interface AppState {
   updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) => Promise<void>
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
   markPasswordSet: () => void
+  /** Replace the signed-in user's phone after a successful OTP verification.
+   *  Updates `me` in-memory and in the persisted session. */
+  changePhone: (newPhone: string, code: string, clientKey: string) => Promise<void>
+  /** Replace the signed-in user's email after a successful OTP verification.
+   *  Updates `me` in-memory and in the persisted session. */
+  changeEmail: (newEmail: string, code: string, clientKey: string) => Promise<void>
   logout: () => void
   /** Permanently delete the authenticated user's account + all personal data.
    *  App Store / Play Store compliance. Requires `confirm: true` and, when the
@@ -326,6 +332,24 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => (s.me ? { me: { ...s.me, hasPassword: true } } : s))
     const sess = loadSession()
     if (sess && sess.user) saveSession({ ...sess, user: { ...sess.user, hasPassword: true } })
+  },
+
+  changePhone: async (newPhone, code, clientKey) => {
+    const { user } = await api.changePhone({ newPhone, code, clientKey })
+    set({ me: user })
+    const s = loadSession()
+    if (s) saveSession({ ...s, user })
+    // phone is used by chat peer-mirrors + contacts; refresh so the new
+    // number is reflected everywhere.
+    void get().loadChats()
+    void get().loadContacts()
+  },
+
+  changeEmail: async (newEmail, code, clientKey) => {
+    const { user } = await api.changeEmail({ newEmail, code, clientKey })
+    set({ me: user })
+    const s = loadSession()
+    if (s) saveSession({ ...s, user })
   },
 
   logout: () => {

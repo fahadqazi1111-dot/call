@@ -88,6 +88,118 @@ export function getIceConfig(): RTCConfiguration {
 }
 
 /**
+ * Coarse category of why a getUserMedia request failed, used by the live-broadcast
+ * preflight (`liveManager.preflightCamera`) so the UI can render a SPECIFIC,
+ * actionable error message instead of the old generic "no camera or microphone
+ * was found" toast.
+ *
+ *   - 'camera'     → no camera device matched the request (mic is fine)
+ *   - 'mic'        → no microphone device matched the request (camera is fine)
+ *   - 'both'       → neither device could be opened (handled before probing,
+ *                    or both probes failed)
+ *   - 'permission' → user denied permission / iframe blocked the request
+ *   - 'busy'       → NotReadableError / TrackStartError — another app holds it
+ *   - 'unknown'    → AbortError, TypeError (no mediaDevices API in this
+ *                    context), or anything else we don't recognise
+ */
+export type PreflightErrorKind = 'camera' | 'mic' | 'both' | 'permission' | 'busy' | 'unknown'
+
+/**
+ * Map a raw DOMException `.name` from a failed getUserMedia call to one of the
+ * coarse `PreflightErrorKind` categories. Synchronous — does NOT probe each
+ * device separately. When this returns `'both'`, the caller is expected to
+ * probe audio-only and video-only to refine the kind to `'camera' | 'mic' | 'both'`.
+ */
+export function classifyMediaErrorName(name: string): PreflightErrorKind {
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+    case 'PermissionDeniedError':
+      return 'permission'
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return 'busy'
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+    case 'DevicesNotFoundError':
+      return 'both'
+    default:
+      return 'unknown'
+  }
+}
+
+/**
+ * Custom Error thrown by `liveManager.startPublishing` when getUserMedia fails
+ * mid-broadcast-startup. It carries the original DOMException `name` (so the
+ * legacy switch statements that inspect `e.name` keep working) PLUS a coarse
+ * `kind` field for the new specific message rendering in LiveHostScreen.
+ */
+export class MediaFailure extends Error {
+  kind: PreflightErrorKind
+  constructor(name: string, kind: PreflightErrorKind) {
+    super(name)
+    this.name = name
+    this.kind = kind
+  }
+}
+
+/**
+ * Translate a `PreflightErrorKind` (optionally refined by probing) into a
+ * SPECIFIC user-facing { title, hint } pair for the Live broadcast screens.
+ *
+ * Used by both `LiveTab.GoLiveSheet` (the "Go live" sheet that runs preflight)
+ * and `LiveHostScreen.startBroadcast` (which catches `MediaFailure` thrown by
+ * `startPublishing` if the warm stream died between preflight and start).
+ *
+ * The strings here are intentionally short and actionable — they tell the
+ * user exactly which device is missing or which browser control to click,
+ * instead of the old generic "No camera or microphone was found on this device".
+ */
+export function describeLiveMediaError(
+  kind: PreflightErrorKind,
+  opts?: { embedded?: boolean }
+): { title: string; hint: string } {
+  const embedded = opts?.embedded ?? (typeof window !== 'undefined' && window.self !== window.top)
+  switch (kind) {
+    case 'camera':
+      return {
+        title: 'Camera not found',
+        hint: "Check your device has a camera and it's not in use by another app.",
+      }
+    case 'mic':
+      return {
+        title: 'Microphone not found',
+        hint: 'Check your device has a microphone.',
+      }
+    case 'both':
+      return {
+        title: 'Camera & microphone not found',
+        hint: 'Connect a working camera and microphone, then try again.',
+      }
+    case 'permission':
+      return {
+        title: 'Camera & microphone permission denied',
+        hint: embedded
+          ? 'Embedded preview panes can block the camera even when the site permission is granted. Open CALL in its own browser tab and try again.'
+          : 'Click the padlock icon in the address bar to allow camera + microphone for this site, then try again.',
+      }
+    case 'busy':
+      return {
+        title: 'Camera or microphone is busy',
+        hint: 'Another app (Zoom / Meet / another tab) is using it. Close that app and try again.',
+      }
+    case 'unknown':
+    default:
+      return {
+        title: 'Camera & microphone unavailable',
+        hint: embedded
+          ? 'Open CALL in its own browser tab and try again.'
+          : 'Reload the page or open CALL in a new tab, then try again.',
+      }
+  }
+}
+
+/**
  * Translate a getUserMedia failure into a user-facing { title, hint } pair.
  *
  * Returns null for unknown / non-DOMException errors so the caller can show a

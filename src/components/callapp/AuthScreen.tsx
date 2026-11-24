@@ -249,9 +249,9 @@ export function AuthScreen() {
   const [showPw2, setShowPw2] = useState(false)
   const resendTimer = useRef<number | null>(null)
 
-  // login: one smart identifier — email or phone
+  // login: explicit Email / Phone method toggle (default Phone) + identifier
+  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('phone')
   const [identifier, setIdentifier] = useState('')
-  const idIsEmail = identifier.includes('@')
   const idDigits = identifier.replace(/\D/g, '')
   const [password, setPassword] = useState('')
 
@@ -393,7 +393,7 @@ export function AuthScreen() {
   /* ---------- login submit (email or phone) ---------- */
 
   const submitLogin = () => {
-    if (idIsEmail) {
+    if (loginMethod === 'email') {
       if (!EMAIL_RE.test(identifier.trim()) || !password) return
       setBusy(true)
       setError('')
@@ -748,7 +748,7 @@ export function AuthScreen() {
 
   const loginEmailReady = EMAIL_RE.test(identifier.trim()) && password.length > 0
   const loginPhoneReady = idDigits.length >= 7
-  const loginReady = idIsEmail ? loginEmailReady : loginPhoneReady
+  const loginReady = loginMethod === 'email' ? loginEmailReady : loginPhoneReady
 
   const resetReady = EMAIL_RE.test(resetEmail.trim())
   const submitResetReady = resetCode.length === 6 && resetPw.length >= 8
@@ -788,9 +788,15 @@ export function AuthScreen() {
     setStep('start')
   }
 
+  const switchLoginMethod = (m: 'phone' | 'email') => {
+    setError('')
+    setLoginMethod(m)
+    setIdentifier('')
+  }
+
   const openForgot = () => {
     setError('')
-    setResetEmail(idIsEmail ? identifier.trim().toLowerCase() : '')
+    setResetEmail(loginMethod === 'email' ? identifier.trim().toLowerCase() : '')
     setResetCode('')
     setResetDevCode('')
     setResetPw('')
@@ -855,83 +861,140 @@ export function AuthScreen() {
             {/* ================= LOGIN ================= */}
             {step === 'start' && mode === 'login' && (
               <div className="mt-6">
-                <FieldLabel>Email or phone</FieldLabel>
-                <div className="flex gap-2.5">
-                  {!idIsEmail && <CountryPicker value={country} onChange={setCountry} />}
-                  <div className="relative min-w-0 flex-1">
-                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                      {idIsEmail ? <Mail size={18} /> : <Smartphone size={18} />}
-                    </span>
-                    <input
-                      className="app-input w-full has-icon"
-                      inputMode={idIsEmail ? 'email' : 'tel'}
-                      autoCapitalize="none"
-                      autoComplete="email"
-                      placeholder={idIsEmail ? 'you@example.com' : '3XX 1234567'}
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
-                    />
-                  </div>
+                {/* method toggle pills */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-[13.5px] font-bold transition ${
+                      loginMethod === 'email' ? 'bg-cbrand text-white' : 'bg-csoft text-cmut'
+                    }`}
+                    onClick={() => switchLoginMethod('email')}
+                    aria-pressed={loginMethod === 'email'}
+                  >
+                    <Mail size={16} /> Email
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-[13.5px] font-bold transition ${
+                      loginMethod === 'phone' ? 'bg-cbrand text-white' : 'bg-csoft text-cmut'
+                    }`}
+                    onClick={() => switchLoginMethod('phone')}
+                    aria-pressed={loginMethod === 'phone'}
+                  >
+                    <Phone size={16} /> Phone
+                  </button>
                 </div>
-                <p className="mt-1.5 text-[11.5px] leading-4 text-[#9AA8C7]">
-                  Type an email to log in with your password, or a number to get a one-time code.
-                </p>
 
-                {idIsEmail && (
-                  <div className="mt-4">
-                    <FieldLabel>Password</FieldLabel>
+                {loginMethod === 'email' ? (
+                  <div className="mt-5">
+                    <FieldLabel>Email</FieldLabel>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
-                        <Lock size={18} />
+                        <Mail size={18} />
                       </span>
                       <input
-                        className="app-input w-full has-icon has-trailing"
-                        type={showPw ? 'text' : 'password'}
-                        autoComplete="current-password"
-                        placeholder="Your password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        className="app-input w-full has-icon"
+                        inputMode="email"
+                        autoCapitalize="none"
+                        autoComplete="email"
+                        placeholder="you@example.com"
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
                       />
-                      <button
-                        type="button"
-                        className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
-                        onClick={() => setShowPw((v) => !v)}
-                        aria-label={showPw ? 'Hide password' : 'Show password'}
-                      >
-                        {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
-                      </button>
                     </div>
-                    <div className="mt-2 text-right">
-                      <button
-                        type="button"
-                        className="text-[13px] font-semibold text-cbrand hover:underline"
-                        onClick={openForgot}
-                      >
-                        Forgot password?
-                      </button>
+
+                    <div className="mt-4">
+                      <FieldLabel>Password</FieldLabel>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                          <Lock size={18} />
+                        </span>
+                        <input
+                          className="app-input w-full has-icon has-trailing"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="current-password"
+                          placeholder="Your password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-cmut transition hover:bg-cbg hover:text-cink"
+                          onClick={() => setShowPw((v) => !v)}
+                          aria-label={showPw ? 'Hide password' : 'Show password'}
+                        >
+                          {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-right">
+                        <button
+                          type="button"
+                          className="text-[13px] font-semibold text-cbrand hover:underline"
+                          onClick={openForgot}
+                        >
+                          Forgot password?
+                        </button>
+                      </div>
                     </div>
+
+                    <button
+                      className="btn-p mt-4 w-full disabled:opacity-50"
+                      disabled={busy || !loginReady}
+                      onClick={submitLogin}
+                    >
+                      {busy ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" /> Please wait…
+                        </>
+                      ) : (
+                        'Log in'
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-5">
+                    <FieldLabel>Phone number</FieldLabel>
+                    <div className="flex gap-2.5">
+                      <CountryPicker value={country} onChange={setCountry} />
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cmut">
+                          <Smartphone size={18} />
+                        </span>
+                        <input
+                          className="app-input w-full has-icon"
+                          inputMode="tel"
+                          autoCapitalize="none"
+                          autoComplete="tel"
+                          placeholder="3XX 1234567"
+                          value={identifier}
+                          onChange={(e) => setIdentifier(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && loginReady && !busy && submitLogin()}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-1.5 text-[11.5px] leading-4 text-[#9AA8C7]">
+                      We will send you a one-time code to verify your number.
+                    </p>
+
+                    <button
+                      className="btn-p mt-4 w-full disabled:opacity-50"
+                      disabled={busy || !loginReady}
+                      onClick={submitLogin}
+                    >
+                      {busy ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" /> Please wait…
+                        </>
+                      ) : (
+                        <>
+                          <Phone size={18} /> Send code
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
-
-                <button
-                  className="btn-p mt-4 w-full disabled:opacity-50"
-                  disabled={busy || !loginReady}
-                  onClick={submitLogin}
-                >
-                  {busy ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" /> Please wait…
-                    </>
-                  ) : idIsEmail ? (
-                    'Log in'
-                  ) : (
-                    <>
-                      <Phone size={18} /> Send code
-                    </>
-                  )}
-                </button>
 
                 <div className="my-5 flex items-center gap-3 text-[12.5px] text-cmut">
                   <div className="h-px flex-1 bg-cline" /> or <div className="h-px flex-1 bg-cline" />

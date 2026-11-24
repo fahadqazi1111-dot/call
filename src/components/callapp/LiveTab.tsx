@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
 import { liveManager } from '@/lib/callapp/liveManager'
+import { describeLiveMediaError, type PreflightErrorKind } from '@/lib/callapp/ice'
 import { Avatar } from './Avatar'
 import { AdBanner } from './GiftsUI'
 import { LiveHostScreen } from './LiveHostScreen'
@@ -330,33 +331,31 @@ function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (titl
 
   /** Explain a getUserMedia failure in plain language (the browser error name
    *  is the ground truth — permission prompts, OS-level device locks, iframe
-   *  policies and missing hardware all surface differently). */
-  const describeCamError = (name: string): { msg: string; hint: string } => {
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      return {
-        msg: 'Camera & microphone access was denied.',
-        hint:
-          window.self !== window.top
-            ? 'You are viewing CALL inside a preview pane — embedded frames can be blocked even when the site permission is granted. Open CALL in its own browser tab and try again.'
-            : 'Allow camera + microphone for this site in the address bar (padlock icon), then tap Go live again.',
-      }
+   *  policies and missing hardware all surface differently).
+   *
+   *  The richer `errorKind` (returned by `liveManager.preflightCamera` after
+   *  probing each device separately) lets us say SPECIFICALLY which device
+   *  is missing instead of the old generic "No camera or microphone was found
+   *  on this device" — which was actively misleading because the browser had
+   *  rejected the request for constraint reasons before the user even saw the
+   *  permission prompt. */
+  const describeCamError = (name: string, errorKind?: PreflightErrorKind): { msg: string; hint: string } => {
+    // Prefer the preflight's probed kind — it's the most actionable signal.
+    if (errorKind) {
+      const d = describeLiveMediaError(errorKind)
+      return { msg: d.title, hint: d.hint }
     }
-    if (name === 'NotReadableError' || name === 'TrackStartError') {
-      return {
-        msg: 'Your camera is busy in another app.',
-        hint: 'Close Zoom / Meet / FaceTime or any other tab using the camera, then tap Go live again.',
-      }
-    }
-    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-      return { msg: 'No camera or microphone was found on this device.', hint: 'Connect a camera and try again.' }
-    }
-    if (name === 'OverconstrainedError') {
-      return { msg: 'The camera does not support the broadcast quality.', hint: 'Try a different camera or device.' }
-    }
-    return {
-      msg: 'Camera & microphone could not start.',
-      hint: window.self !== window.top ? 'Open CALL in its own browser tab and try again.' : 'Reload the page and try again.',
-    }
+    // Fallback: classify by raw error name (the only info we have).
+    const d = describeLiveMediaError(
+      name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError'
+        ? 'permission'
+        : name === 'NotReadableError' || name === 'TrackStartError'
+          ? 'busy'
+          : name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError'
+            ? 'both'
+            : 'unknown'
+    )
+    return { msg: d.title, hint: d.hint }
   }
 
   const start = async () => {
@@ -370,7 +369,7 @@ function GoLiveSheet({ onClose, onStart }: { onClose: () => void; onStart: (titl
       const pre = await liveManager.preflightCamera()
       if (!pre.ok) {
         setPerm('failed')
-        const { msg, hint } = describeCamError(pre.errorName ?? 'UnknownError')
+        const { msg, hint } = describeCamError(pre.errorName, pre.errorKind)
         setError(msg)
         setErrorHint(hint)
         setBusy(false)

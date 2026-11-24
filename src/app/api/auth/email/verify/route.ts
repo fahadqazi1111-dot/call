@@ -21,8 +21,15 @@ export async function POST(req: Request) {
     if (!rateLimit(`emailverify:${email}`, 10, 60_000)) {
       return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 })
     }
+    // `purpose` scopes which kind of code is being verified. Defaults to
+    // 'verify' (registration / verify-email). The change-email flow sends
+    // purpose='change_email' so the OTP it requested (and now wants to
+    // consume) is the one that gets matched.
+    const rawPurpose = typeof body.purpose === 'string' ? body.purpose : 'verify'
+    const purpose =
+      rawPurpose === 'reset' || rawPurpose === 'change_email' ? rawPurpose : 'verify'
     const otp = await db.emailOtp.findFirst({
-      where: { email, consumed: false, code, purpose: 'verify' },
+      where: { email, consumed: false, code, purpose },
       orderBy: { createdAt: 'desc' },
     })
     if (!otp || otp.expiresAt.getTime() < Date.now()) {

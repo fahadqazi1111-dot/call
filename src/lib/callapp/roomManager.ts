@@ -76,9 +76,24 @@ class RoomManager {
       if ((p as { roomId: string }).roomId === this.state.roomId) void this.leave(true)
     })
     socketClient.on('connect', () => {
-      // re-join after reconnect
+      // re-join after reconnect — emit the SHAPE the server expects
+      // ({ id, name, avatarKey, avatarUrl }). `state.me` is a RoomUserState
+      // which uses `userId` (not `id`), so passing it directly made the
+      // server's `p.user.id` guard fail and silently dropped the re-join —
+      // the user stayed in the roomMembers map only until the disconnect
+      // handler removed them, after which they received no further
+      // room:state broadcasts (and never appeared in anyone's participant list).
       if (this.state.roomId && this.state.me) {
-        socketClient.emit('room:join', { roomId: this.state.roomId, user: this.state.me, role: this.state.me.role })
+        socketClient.emit('room:join', {
+          roomId: this.state.roomId,
+          user: {
+            id: this.state.me.userId,
+            name: this.state.me.name,
+            avatarKey: this.state.me.avatarKey,
+            avatarUrl: this.state.me.avatarUrl,
+          },
+          role: this.state.me.role,
+        })
       }
     })
   }

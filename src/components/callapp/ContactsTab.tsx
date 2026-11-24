@@ -611,53 +611,67 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
           }}
         >
           <div
-            className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-8 shadow-2xl`}
+            className={`bg-white shadow-2xl ${
+              desk
+                ? 'w-full max-w-md rounded-[24px] p-6 pb-8 max-h-[85dvh]'
+                : 'w-full rounded-t-[28px] p-5 pb-6 max-h-[80dvh]'
+            } overflow-y-auto overscroll-contain`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Contact access permission"
           >
-            {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+            {!desk && (
+              <div className="mx-auto mb-3 h-1.5 w-12 flex-none rounded-full bg-cline" />
+            )}
             <div className="flex flex-col items-center text-center">
-              <span className="flex h-[74px] w-[74px] items-center justify-center rounded-[24px] bg-csoft text-cbrand">
-                <Users size={36} />
+              <span className="flex h-[64px] w-[64px] flex-none items-center justify-center rounded-[20px] bg-csoft text-cbrand">
+                <Users size={32} />
               </span>
-              <h2 className="mt-4 text-xl font-extrabold text-cink">Find friends on CALL</h2>
-              <p className="mt-1.5 text-[15px] leading-6 text-cmut">
-                Allow CALL to read your contacts so friends already here show up automatically —
-                just like WhatsApp.
+              <h2 className="mt-3 text-[19px] font-extrabold leading-tight text-cink">
+                Find friends on CALL
+              </h2>
+              <p className="mt-1.5 text-[14px] leading-5 text-cmut">
+                Allow CALL to read your contacts so friends already here show up
+                automatically — just like WhatsApp.
               </p>
             </div>
 
-            <ul className="mt-5 space-y-3 text-left">
+            <ul className="mt-4 space-y-2.5 text-left">
               <li className="flex items-start gap-3">
-                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
-                  <ShieldCheck size={19} />
+                <span className="flex h-8 w-8 flex-none items-center justify-center rounded-[10px] bg-csoft text-cbrand">
+                  <ShieldCheck size={17} />
                 </span>
-                <div>
-                  <div className="text-[14px] font-bold text-cink">Private by design</div>
-                  <div className="text-[13px] text-cmut">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold leading-tight text-cink">
+                    Private by design
+                  </div>
+                  <div className="text-[12px] leading-snug text-cmut">
                     Numbers are only matched, never sold or posted anywhere.
                   </div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
-                  <Zap size={19} />
+                <span className="flex h-8 w-8 flex-none items-center justify-center rounded-[10px] bg-csoft text-cbrand">
+                  <Zap size={17} />
                 </span>
-                <div>
-                  <div className="text-[14px] font-bold text-cink">Instant friend list</div>
-                  <div className="text-[13px] text-cmut">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold leading-tight text-cink">
+                    Instant friend list
+                  </div>
+                  <div className="text-[12px] leading-snug text-cmut">
                     Anyone already registered appears with an ON CALL badge — ready to call or chat.
                   </div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[12px] bg-[#DFF3E7] text-[#0B8A46]">
-                  <Share2 size={19} />
+                <span className="flex h-8 w-8 flex-none items-center justify-center rounded-[10px] bg-[#DFF3E7] text-[#0B8A46]">
+                  <Share2 size={17} />
                 </span>
-                <div>
-                  <div className="text-[14px] font-bold text-cink">One-tap invite</div>
-                  <div className="text-[13px] text-cmut">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold leading-tight text-cink">
+                    One-tap invite
+                  </div>
+                  <div className="text-[12px] leading-snug text-cmut">
                     Friends not on CALL yet get an invite button — share via SMS or any app.
                   </div>
                 </div>
@@ -665,18 +679,18 @@ export function ContactsTab({ variant = 'mobile' }: { variant?: 'mobile' | 'desk
             </ul>
 
             {canPick ? (
-              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+              <button className="btn-p mt-5 min-h-[44px] w-full" disabled={permBusy} onClick={() => void runAccess()}>
                 {permBusy ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
                 {permBusy ? 'Waiting for permission…' : 'Allow contact access'}
               </button>
             ) : (
-              <button className="btn-p mt-6 w-full" disabled={permBusy} onClick={() => void runAccess()}>
+              <button className="btn-p mt-5 min-h-[44px] w-full" disabled={permBusy} onClick={() => void runAccess()}>
                 {permBusy ? <Loader2 size={18} className="animate-spin" /> : <FileUp size={18} />}
                 Choose how to import
               </button>
             )}
             <button
-              className="mt-3 h-11 w-full text-sm font-bold text-cmut transition hover:text-cink"
+              className="mt-2.5 min-h-[44px] w-full text-sm font-bold text-cmut transition hover:text-cink"
               onClick={() => {
                 rememberAsked()
                 setShowPerm(false)

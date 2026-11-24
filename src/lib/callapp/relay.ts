@@ -12,8 +12,19 @@ const RELAY_SECRET = 'call-internal-relay-v1'
 // is mounted on the same http server as Next.js + socket.io — Hostinger shared
 // hosting only allows ONE port per process). When CALL_RELAY_URL is set
 // explicitly (dev mode -> call-service on 3003), that takes precedence.
+//
+// DEV FALLBACK: in the sandbox the call-service runs on its own port (3003) and
+// Next.js runs on 3000, so `http://127.0.0.1:3000/internal/relay` returns 404.
+// Without this dev-mode default every relaySend (room:closed, internal:room_sync,
+// internal:room_closed, room:gift, …) silently fails — voice-room moderation,
+// end-room fan-out and gift broadcasts all break. Detect dev mode and target the
+// call-service port directly.
+const DEV_RELAY_URL = 'http://127.0.0.1:3003/internal/relay'
 const RELAY_URL =
-  process.env.CALL_RELAY_URL || `http://127.0.0.1:${process.env.PORT || '3000'}/internal/relay`
+  process.env.CALL_RELAY_URL ||
+  (process.env.NODE_ENV === 'production'
+    ? `http://127.0.0.1:${process.env.PORT || '3000'}/internal/relay`
+    : DEV_RELAY_URL)
 
 /** targets: ['user:<id>', 'room:<id>', 'live:<id>', 'all'] */
 export async function relaySend(targets: string[], event: string, data: unknown): Promise<boolean> {

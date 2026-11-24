@@ -11,6 +11,7 @@ import { liveManager, battleManager, type LiveManagerState } from '@/lib/callapp
 import { socketClient } from '@/lib/callapp/socket'
 import { soundKit } from '@/lib/callapp/sound'
 import { preloadGiftMedia } from '@/lib/callapp/giftMedia'
+import { describeLiveMediaError, MediaFailure, type PreflightErrorKind } from '@/lib/callapp/ice'
 import { Avatar } from './Avatar'
 import { GiftPickerSheet, GiftAnimationLayer, animFromPayload, type GiftAnim } from './GiftsUI'
 import { BattleInviteSheet, type Person } from './BattleInviteSheet'
@@ -151,18 +152,21 @@ export function LiveHostScreen({
         }
       } catch {}
     } catch (e) {
+      // The warm preflight stream might die between Go-live and LiveHostScreen
+      // mount (device unplugged, OS put it to sleep, another tab grabbed it).
+      // startPublishing re-runs getUserMedia in that case and throws a
+      // MediaFailure carrying both the original DOMException name AND a coarse
+      // `kind` ('camera' | 'mic' | 'both' | 'permission' | 'busy' | 'unknown')
+      // — so we can render a SPECIFIC, actionable message instead of the old
+      // generic "No camera or microphone was found on this device".
       const name = e instanceof DOMException ? e.name : e instanceof Error ? e.name : 'UnknownError'
-      const hint =
-        name === 'NotAllowedError' || name === 'PermissionDeniedError'
-          ? window.self !== window.top
-            ? 'Embedded preview panes can block the camera even when the site permission is granted. Open CALL in its own browser tab and start the live there.'
-            : 'Allow camera + microphone for this site in the address bar (padlock icon), then try again.'
-          : name === 'NotReadableError' || name === 'TrackStartError'
-            ? 'The camera is busy in another app (Zoom / Meet / another tab). Close it and try again.'
-            : name === 'NotFoundError'
-              ? 'No camera or microphone was found on this device.'
-              : 'Reload the page or open CALL in a new tab, then try again.'
-      setCamError({ title: 'Camera & microphone unavailable', hint, retrying: false })
+      const kind: PreflightErrorKind = e instanceof MediaFailure ? e.kind : 'unknown'
+      const d = describeLiveMediaError(kind)
+      // Keep the original DOMException name visible to the host (useful when
+      // filing a bug report) but only if it's something specific; for the
+      // probed kinds the title already tells the whole story.
+      const title = kind === 'unknown' && name && name !== 'UnknownError' ? `${d.title} (${name})` : d.title
+      setCamError({ title, hint: d.hint, retrying: false })
     }
   }
 

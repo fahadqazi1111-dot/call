@@ -341,6 +341,16 @@ interface RoomUser {
 // roomId -> Map<userId, RoomUser>
 const roomMembers = new Map<string, Map<string, RoomUser>>()
 
+/** Privilege ladder for voice-room roles — used to decide whether a verify-driven
+ *  `room:join` may UPGRADE a stale roomMembers entry (e.g. listener → host)
+ *  without ever downgrading an authoritative moderation decision. */
+const ROLE_RANK: Record<string, number> = {
+  listener: 0,
+  speaker: 1,
+  cohost: 2,
+  host: 3,
+}
+
 function socketsOf(userId: string): string[] {
   return Array.from(presence.get(userId) ?? [])
 }
@@ -611,10 +621,17 @@ io.on('connection', (socket: Socket) => {
       const existing = members.get(p.user.id)
       if (existing) {
         // already present (authoritative sync landed while the verify fetch
-        // was in flight) — refresh identity only, NEVER downgrade the role
+        // was in flight) — refresh identity, and UPGRADE the role if verify
+        // now reports a higher-privilege role (e.g. a stale 'listener' entry
+        // left over from a previous failed join, now being rejoined as
+        // 'host'). Downgrades are still ignored here — they are authoritative
+        // via the moderation sync path (relayRoomSync after every action).
         existing.name = p.user.name
         existing.avatarKey = p.user.avatarKey ?? 0
         existing.avatarUrl = p.user.avatarUrl ?? null
+        const newRank = ROLE_RANK[role as keyof typeof ROLE_RANK] ?? 0
+        const oldRank = ROLE_RANK[existing.role as keyof typeof ROLE_RANK] ?? 0
+        if (newRank > oldRank) existing.role = role
       } else {
         members.set(p.user.id, {
           userId: p.user.id,
