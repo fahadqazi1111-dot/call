@@ -74,6 +74,48 @@ function fmtCountdown(ms: number): string {
   return `${m}m`
 }
 
+/**
+ * Mask a phone string for display in the "verify your current number" step.
+ * The phone is stored WITHOUT a leading "+", e.g. `923001234567`. We keep the
+ * country code (first 1-3 leading digits, heuristically) and the last 4
+ * digits; everything in between becomes `*`.
+ *
+ *   `923001234567` -> `+92 *** ***4567`
+ *   `923331234567` -> `+92 *** ***4567`
+ */
+function maskPhone(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (digits.length <= 4) return '+' + digits
+  // heuristic: country code is the first 1-3 digits that are not "0"
+  const ccLen = digits.startsWith('1') ? 1 : digits.length >= 11 ? 2 : 1
+  const cc = digits.slice(0, ccLen)
+  const tail = digits.slice(-4)
+  const masked = '*'.repeat(Math.max(3, digits.length - ccLen - 4))
+  return `+${cc} ${masked.slice(0, 4)} ${tail}`.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Mask an email for the "verify your current email" step. Keeps the first
+ * character of the local part + the first 2 characters of each domain label
+ * (rounded out with `*`), so the user can recognise the address without it
+ * being fully disclosed.
+ *
+ *   `john.doe@example.com` -> `j****@e******.com`
+ */
+function maskEmail(email: string): string {
+  const e = String(email || '').trim().toLowerCase()
+  if (!e) return ''
+  const [local, domain] = e.split('@')
+  if (!domain) return e
+  const domParts = domain.split('.').map((p, i) =>
+    i === domParts.length - 1 || domParts.length === 1
+      ? p // keep TLD intact (e.g. `.com`)
+      : p.slice(0, 2) + '*'.repeat(Math.max(2, p.length - 2)),
+  )
+  const maskedLocal = (local || '?').slice(0, 1) + '*'.repeat(Math.max(3, (local || '').length - 1))
+  return `${maskedLocal}@${domParts.join('.')}`
+}
+
 /** Center-crop an image file to a square and downscale to max 512px (jpeg). */
 function fileToSizedBlob(file: File, max = 512): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -131,8 +173,18 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const fileRef = useRef<HTMLInputElement>(null)
   const desk = variant === 'desktop'
 
-  // change-phone dialog state
+  // change-phone dialog state — 2-step flow:
+  //   step 1 = verify CURRENT phone (proof-of-possession)
+  //   step 2 = enter NEW phone + verify it, then commit
   const [showChangePhone, setShowChangePhone] = useState(false)
+  const [cpStep, setCpStep] = useState<1 | 2>(1)
+  // step 1 — current phone verification
+  const [cpCurrentCode, setCpCurrentCode] = useState('')
+  const [cpCurrentSending, setCpCurrentSending] = useState(false)
+  const [cpCurrentVerifying, setCpCurrentVerifying] = useState(false)
+  const [cpCurrentResendIn, setCpCurrentResendIn] = useState(0)
+  const [cpCurrentDevCode, setCpCurrentDevCode] = useState('')
+  // step 2 — new phone + verification
   const [cpCountry, setCpCountry] = useState('+92')
   const [cpDigits, setCpDigits] = useState('')
   const [cpCode, setCpCode] = useState('')
@@ -141,8 +193,17 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const [cpSending, setCpSending] = useState(false)
   const [cpResendIn, setCpResendIn] = useState(0)
 
-  // change-email dialog state
+  // change-email dialog state — same 2-step pattern (step 1 is skipped when
+  // the account has no email yet — phone-only signup).
   const [showChangeEmail, setShowChangeEmail] = useState(false)
+  const [ceStep, setCeStep] = useState<1 | 2>(1)
+  // step 1 — current email verification
+  const [ceCurrentCode, setCeCurrentCode] = useState('')
+  const [ceCurrentSending, setCeCurrentSending] = useState(false)
+  const [ceCurrentVerifying, setCeCurrentVerifying] = useState(false)
+  const [ceCurrentResendIn, setCeCurrentResendIn] = useState(0)
+  const [ceCurrentDevCode, setCeCurrentDevCode] = useState('')
+  // step 2 — new email + verification
   const [ceEmail, setCeEmail] = useState('')
   const [ceCode, setCeCode] = useState('')
   const [ceDevCode, setCeDevCode] = useState('')
@@ -198,6 +259,17 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     const t = window.setTimeout(() => setCeResendIn((s) => s - 1), 1000)
     return () => window.clearTimeout(t)
   }, [ceResendIn])
+  // step-1 (verify current) cooldown countdowns — same 60s pattern
+  useEffect(() => {
+    if (cpCurrentResendIn <= 0) return
+    const t = window.setTimeout(() => setCpCurrentResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [cpCurrentResendIn])
+  useEffect(() => {
+    if (ceCurrentResendIn <= 0) return
+    const t = window.setTimeout(() => setCeCurrentResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [ceCurrentResendIn])
 
   // keep the money stats fresh
   useEffect(() => {
@@ -403,10 +475,20 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     }
   }
 
-  /* ---------- change phone number (OTP-gated) ---------- */
+  /* ---------- change phone number — 2-step verify-then-commit ---------- */
+  /*   step 1: verify the CURRENT phone (proof-of-possession)               */
+  /*   step 2: verify the NEW phone + commit                                */
   const cpFullPhone = () => `${cpCountry}${cpDigits.replace(/\D/g, '')}`
 
   const openChangePhone = () => {
+    setCpStep(1)
+    // step 1 state
+    setCpCurrentCode('')
+    setCpCurrentSending(false)
+    setCpCurrentVerifying(false)
+    setCpCurrentResendIn(0)
+    setCpCurrentDevCode('')
+    // step 2 state
     setCpCountry('+92')
     setCpDigits('')
     setCpCode('')
@@ -417,13 +499,56 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     setShowChangePhone(true)
   }
 
+  /** Send an OTP to the user's CURRENT phone number (proof-of-possession). */
+  const sendCpCurrentCode = async () => {
+    if (!me.phone) return
+    setCpCurrentSending(true)
+    try {
+      const res = await api.requestOtp(me.phone)
+      setCpCurrentDevCode(res.devCode || '')
+      setCpCurrentResendIn(60)
+      setCpCurrentCode('')
+      if (res.sandbox) {
+        toast.info('Sandbox mode — code is shown below.')
+      } else {
+        toast.success(`Code sent to ${maskPhone(me.phone)}`)
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setCpCurrentSending(false)
+    }
+  }
+
+  /** Verify the OTP for the CURRENT phone and advance to step 2. */
+  const verifyCpCurrent = async () => {
+    if (!me.phone) return
+    if (cpCurrentCode.length !== 6) {
+      toast.error('Enter the 6-digit code')
+      return
+    }
+    setCpCurrentVerifying(true)
+    try {
+      // The verify endpoint consumes the OTP row (consumed = true) — this is
+      // the proof the change-phone backend later re-checks within 10 min.
+      await api.verifyPhoneOtp(me.phone, cpCurrentCode)
+      setCpStep(2)
+      toast.success('Current number verified. Now enter your new number.')
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not verify code')
+    } finally {
+      setCpCurrentVerifying(false)
+    }
+  }
+
+  /** Send an OTP to the NEW phone number (step 2). */
   const sendCpCode = async () => {
     const full = cpFullPhone()
     if (cpDigits.replace(/\D/g, '').length < 7) {
       toast.error('Enter a valid phone number first')
       return
     }
-    if (full === me.phone) {
+    if (full === `+${me.phone}` || full === me.phone) {
       toast.error('This is already your phone number')
       return
     }
@@ -445,6 +570,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     }
   }
 
+  /** Verify the NEW phone OTP and commit the change. */
   const verifyAndChangePhone = async () => {
     const full = cpFullPhone()
     if (cpDigits.replace(/\D/g, '').length < 7) {
@@ -455,14 +581,20 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       toast.error('Enter the 6-digit code')
       return
     }
+    if (!cpCurrentCode) {
+      toast.error('Verify your current number first.')
+      setCpStep(1)
+      return
+    }
     setCpBusy(true)
     try {
       // 1) consume the OTP via the verify endpoint — this proves the user
       //    controls the new phone number before we mutate the account.
       await api.verifyPhoneOtp(full, cpCode)
-      // 2) swap the phone on the account (the consumed OTP is the proof).
+      // 2) swap the phone on the account. The backend re-checks BOTH
+      //    consumed OTPs (current + new) within the 10-min window.
       const clientKey = `changephone:${me.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
-      await changePhone(full, cpCode, clientKey)
+      await changePhone(cpCurrentCode, full, cpCode, clientKey)
       toast.success('Phone number updated')
       setShowChangePhone(false)
     } catch (e) {
@@ -472,9 +604,21 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     }
   }
 
-  /* ---------- change email (OTP-gated) ---------- */
+  /* ---------- change email — 2-step verify-then-commit ---------- */
+  /*   step 1: verify the CURRENT email (skipped if no email)              */
+  /*   step 2: verify the NEW email + commit                               */
   const openChangeEmail = () => {
-    setCeEmail(me.email ?? '')
+    // Phone-only accounts (no email yet) skip step 1 — there is nothing
+    // to prove possession of.
+    setCeStep(me.email ? 1 : 2)
+    // step 1 state
+    setCeCurrentCode('')
+    setCeCurrentSending(false)
+    setCeCurrentVerifying(false)
+    setCeCurrentResendIn(0)
+    setCeCurrentDevCode('')
+    // step 2 state
+    setCeEmail('')
     setCeCode('')
     setCeDevCode('')
     setCeBusy(false)
@@ -483,6 +627,49 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     setShowChangeEmail(true)
   }
 
+  /** Send an OTP to the user's CURRENT email (purpose='verify'). */
+  const sendCeCurrentCode = async () => {
+    if (!me.email) return
+    setCeCurrentSending(true)
+    try {
+      const res = await api.emailRequestCode(me.email, 'verify')
+      setCeCurrentDevCode(res.devCode || '')
+      setCeCurrentResendIn(60)
+      setCeCurrentCode('')
+      if (res.sandbox) {
+        toast.info('Sandbox mode — code is shown below.')
+      } else {
+        toast.success(`Code emailed to ${maskEmail(me.email)}`)
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setCeCurrentSending(false)
+    }
+  }
+
+  /** Verify the OTP for the CURRENT email and advance to step 2. */
+  const verifyCeCurrent = async () => {
+    if (!me.email) return
+    if (ceCurrentCode.length !== 6) {
+      toast.error('Enter the 6-digit code')
+      return
+    }
+    setCeCurrentVerifying(true)
+    try {
+      // Consumes the EmailOtp row — this is the proof the change-email
+      // backend re-checks within 10 min when committing the swap.
+      await api.emailVerify(me.email, ceCurrentCode, undefined, 'verify')
+      setCeStep(2)
+      toast.success('Current email verified. Now enter your new email.')
+    } catch (e) {
+      toast.error((e as Error).message || 'Could not verify code')
+    } finally {
+      setCeCurrentVerifying(false)
+    }
+  }
+
+  /** Send an OTP to the NEW email (step 2). */
   const sendCeCode = async () => {
     const e = ceEmail.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) {
@@ -511,6 +698,7 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     }
   }
 
+  /** Verify the NEW email OTP and commit the change. */
   const verifyAndChangeEmail = async () => {
     const e = ceEmail.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) {
@@ -521,14 +709,20 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
       toast.error('Enter the 6-digit code')
       return
     }
+    if (me.email && !ceCurrentCode) {
+      toast.error('Verify your current email first.')
+      setCeStep(1)
+      return
+    }
     setCeBusy(true)
     try {
       // 1) consume the OTP via the verify endpoint with the matching
       //    purpose so a 'change_email' code can be matched + consumed.
       await api.emailVerify(e, ceCode, undefined, 'change_email')
-      // 2) swap the email on the account (the consumed OTP is the proof).
+      // 2) swap the email on the account. The backend re-checks BOTH
+      //    consumed OTPs (current + new) within the 10-min window.
       const clientKey = `changeemail:${me.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
-      await changeEmail(e, ceCode, clientKey)
+      await changeEmail(me.email ? ceCurrentCode : '', e, ceCode, clientKey)
       toast.success('Email updated')
       setShowChangeEmail(false)
     } catch (err) {
@@ -1187,13 +1381,13 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         </div>
       )}
 
-      {/* ---------- change phone number dialog ---------- */}
+      {/* ---------- change phone number dialog (2-step) ---------- */}
       {showChangePhone && (
         <div
           className={`inset-0 z-50 flex bg-black/45 ${
             desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
           }`}
-          onClick={() => !cpBusy && !cpSending && setShowChangePhone(false)}
+          onClick={() => !cpBusy && !cpSending && !cpCurrentSending && !cpCurrentVerifying && setShowChangePhone(false)}
         >
           <div
             className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-[max(env(safe-area-inset-bottom),28px)] shadow-2xl`}
@@ -1209,91 +1403,199 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
               </span>
               <div>
                 <h2 className="text-xl font-extrabold text-cink">Change phone number</h2>
-                <p className="mt-0.5 text-[12.5px] text-cmut">We text a 6-digit code to your new number.</p>
+                <p className="mt-0.5 text-[12.5px] text-cmut">
+                  Verify your current number, then add the new one.
+                </p>
               </div>
             </div>
 
-            <p className="mt-3 text-[12.5px] text-cmut">
-              Current: <b className="text-cink">+{me.phone}</b>
-            </p>
+            <StepIndicator
+              step={cpStep}
+              labels={['Verify current', 'Set new number']}
+            />
 
-            <div className="mt-5 space-y-3">
-              <div>
-                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">New phone number</label>
-                <div className="flex gap-2">
-                  <CountryPicker value={cpCountry} onChange={setCpCountry} />
-                  <input
-                    className="app-input flex-1"
-                    inputMode="tel"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    placeholder="712 3456789"
-                    value={cpDigits}
-                    onChange={(e) => setCpDigits(e.target.value.replace(/\D/g, ''))}
-                    maxLength={14}
-                    disabled={cpBusy}
-                  />
+            {cpStep === 1 && (
+              <>
+                <p className="mt-3 text-[12.5px] text-cmut">
+                  Current number: <b className="text-cink">{maskPhone(me.phone)}</b>
+                </p>
+                <p className="mt-1 text-[12px] leading-4 text-[#9AA8C7]">
+                  For your security, we text a 6-digit code to your current number before allowing any change.
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {cpCurrentDevCode && (
+                    <SandboxBanner
+                      code={cpCurrentDevCode}
+                      channel="phone"
+                      onFill={() => setCpCurrentCode(cpCurrentDevCode)}
+                    />
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      Verification code
+                    </label>
+                    <OtpInput
+                      value={cpCurrentCode}
+                      onChange={setCpCurrentCode}
+                      disabled={cpCurrentVerifying}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {cpDevCode && (
-                <SandboxBanner code={cpDevCode} channel="phone" onFill={() => setCpCode(cpDevCode)} />
-              )}
+                <button
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
+                  type="button"
+                  disabled={cpCurrentSending || cpCurrentVerifying || cpCurrentResendIn > 0}
+                  onClick={() => void sendCpCurrentCode()}
+                >
+                  {cpCurrentSending ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Sending…
+                    </>
+                  ) : cpCurrentResendIn > 0 ? (
+                    `Resend code in ${cpCurrentResendIn}s`
+                  ) : cpCurrentDevCode ? (
+                    'Resend code'
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} /> Send code to current number
+                    </>
+                  )}
+                </button>
 
-              <div>
-                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Verification code</label>
-                <OtpInput value={cpCode} onChange={setCpCode} disabled={cpBusy} />
-              </div>
-            </div>
+                <button
+                  className="btn-p mt-3 w-full disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    cpCurrentVerifying ||
+                    cpCurrentSending ||
+                    cpCurrentCode.length !== 6
+                  }
+                  onClick={() => void verifyCpCurrent()}
+                >
+                  {cpCurrentVerifying ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Verifying…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} /> Verify current number
+                    </>
+                  )}
+                </button>
+              </>
+            )}
 
-            <button
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
-              type="button"
-              disabled={cpSending || cpBusy || cpDigits.replace(/\D/g, '').length < 7 || cpResendIn > 0}
-              onClick={() => void sendCpCode()}
-            >
-              {cpSending ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" /> Sending…
-                </>
-              ) : cpResendIn > 0 ? (
-                `Resend code in ${cpResendIn}s`
-              ) : cpDevCode ? (
-                'Resend code'
-              ) : (
-                <>
-                  <ShieldCheck size={16} /> Send code
-                </>
-              )}
-            </button>
+            {cpStep === 2 && (
+              <>
+                <p className="mt-3 flex items-center gap-1.5 rounded-xl bg-[#E7F6EC] px-3 py-2 text-[12.5px] font-semibold text-[#1E7E45]">
+                  <CheckCircle2 size={14} /> Current number verified. Now enter your new number.
+                </p>
 
-            <button
-              className="btn-p mt-3 w-full disabled:opacity-50"
-              type="button"
-              disabled={cpBusy || cpSending || cpCode.length !== 6 || cpDigits.replace(/\D/g, '').length < 7}
-              onClick={() => void verifyAndChangePhone()}
-            >
-              {cpBusy ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" /> Verifying…
-                </>
-              ) : (
-                <>
-                  <ShieldCheck size={18} /> Verify &amp; change
-                </>
-              )}
-            </button>
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      New phone number
+                    </label>
+                    <div className="flex gap-2">
+                      <CountryPicker value={cpCountry} onChange={setCpCountry} />
+                      <input
+                        className="app-input flex-1"
+                        inputMode="tel"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        placeholder="712 3456789"
+                        value={cpDigits}
+                        onChange={(e) => setCpDigits(e.target.value.replace(/\D/g, ''))}
+                        maxLength={14}
+                        disabled={cpBusy}
+                      />
+                    </div>
+                  </div>
+
+                  {cpDevCode && (
+                    <SandboxBanner code={cpDevCode} channel="phone" onFill={() => setCpCode(cpDevCode)} />
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      Verification code
+                    </label>
+                    <OtpInput value={cpCode} onChange={setCpCode} disabled={cpBusy} />
+                  </div>
+                </div>
+
+                <button
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    cpSending ||
+                    cpBusy ||
+                    cpDigits.replace(/\D/g, '').length < 7 ||
+                    cpResendIn > 0
+                  }
+                  onClick={() => void sendCpCode()}
+                >
+                  {cpSending ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Sending…
+                    </>
+                  ) : cpResendIn > 0 ? (
+                    `Resend code in ${cpResendIn}s`
+                  ) : cpDevCode ? (
+                    'Resend code'
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} /> Send code to new number
+                    </>
+                  )}
+                </button>
+
+                <button
+                  className="btn-p mt-3 w-full disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    cpBusy ||
+                    cpSending ||
+                    cpCode.length !== 6 ||
+                    cpDigits.replace(/\D/g, '').length < 7
+                  }
+                  onClick={() => void verifyAndChangePhone()}
+                >
+                  {cpBusy ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Updating…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} /> Change phone number
+                    </>
+                  )}
+                </button>
+
+                <button
+                  className="mt-1 w-full text-center text-[12.5px] font-semibold text-[#9AA8C7] transition hover:text-cink"
+                  type="button"
+                  disabled={cpBusy || cpSending}
+                  onClick={() => setCpStep(1)}
+                >
+                  Back to step 1
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* ---------- change email dialog ---------- */}
+      {/* ---------- change email dialog (2-step) ---------- */}
       {showChangeEmail && (
         <div
           className={`inset-0 z-50 flex bg-black/45 ${
             desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'
           }`}
-          onClick={() => !ceBusy && !ceSending && setShowChangeEmail(false)}
+          onClick={() => !ceBusy && !ceSending && !ceCurrentSending && !ceCurrentVerifying && setShowChangeEmail(false)}
         >
           <div
             className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-6 pb-[max(env(safe-area-inset-bottom),28px)] shadow-2xl`}
@@ -1309,80 +1611,192 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
               </span>
               <div>
                 <h2 className="text-xl font-extrabold text-cink">Change email</h2>
-                <p className="mt-0.5 text-[12.5px] text-cmut">We email a 6-digit code to your new address.</p>
+                <p className="mt-0.5 text-[12.5px] text-cmut">
+                  {me.email
+                    ? 'Verify your current email, then add the new one.'
+                    : 'Add an email address to your account.'}
+                </p>
               </div>
             </div>
 
-            {me.email && (
-              <p className="mt-3 text-[12.5px] text-cmut">
-                Current: <b className="text-cink">{me.email}</b>
-              </p>
+            <StepIndicator
+              step={ceStep}
+              labels={['Verify current', 'Set new email']}
+            />
+
+            {ceStep === 1 && me.email && (
+              <>
+                <p className="mt-3 text-[12.5px] text-cmut">
+                  Current email: <b className="text-cink">{maskEmail(me.email)}</b>
+                </p>
+                <p className="mt-1 text-[12px] leading-4 text-[#9AA8C7]">
+                  For your security, we email a 6-digit code to your current address before allowing any change.
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {ceCurrentDevCode && (
+                    <SandboxBanner
+                      code={ceCurrentDevCode}
+                      channel="email"
+                      onFill={() => setCeCurrentCode(ceCurrentDevCode)}
+                    />
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      Verification code
+                    </label>
+                    <OtpInput
+                      value={ceCurrentCode}
+                      onChange={setCeCurrentCode}
+                      disabled={ceCurrentVerifying}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
+                  type="button"
+                  disabled={ceCurrentSending || ceCurrentVerifying || ceCurrentResendIn > 0}
+                  onClick={() => void sendCeCurrentCode()}
+                >
+                  {ceCurrentSending ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Sending…
+                    </>
+                  ) : ceCurrentResendIn > 0 ? (
+                    `Resend code in ${ceCurrentResendIn}s`
+                  ) : ceCurrentDevCode ? (
+                    'Resend code'
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} /> Send code to current email
+                    </>
+                  )}
+                </button>
+
+                <button
+                  className="btn-p mt-3 w-full disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    ceCurrentVerifying ||
+                    ceCurrentSending ||
+                    ceCurrentCode.length !== 6
+                  }
+                  onClick={() => void verifyCeCurrent()}
+                >
+                  {ceCurrentVerifying ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Verifying…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} /> Verify current email
+                    </>
+                  )}
+                </button>
+              </>
             )}
 
-            <div className="mt-5 space-y-3">
-              <div>
-                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">New email address</label>
-                <input
-                  className="app-input w-full"
-                  type="email"
-                  inputMode="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="you@example.com"
-                  value={ceEmail}
-                  onChange={(e) => setCeEmail(e.target.value)}
-                  disabled={ceBusy}
-                />
-              </div>
+            {ceStep === 2 && (
+              <>
+                {me.email && (
+                  <p className="mt-3 flex items-center gap-1.5 rounded-xl bg-[#E7F6EC] px-3 py-2 text-[12.5px] font-semibold text-[#1E7E45]">
+                    <CheckCircle2 size={14} /> Current email verified. Now enter your new email.
+                  </p>
+                )}
 
-              {ceDevCode && (
-                <SandboxBanner code={ceDevCode} channel="email" onFill={() => setCeCode(ceDevCode)} />
-              )}
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      New email address
+                    </label>
+                    <input
+                      className="app-input w-full"
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="you@example.com"
+                      value={ceEmail}
+                      onChange={(e) => setCeEmail(e.target.value)}
+                      disabled={ceBusy}
+                    />
+                  </div>
 
-              <div>
-                <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">Verification code</label>
-                <OtpInput value={ceCode} onChange={setCeCode} disabled={ceBusy} />
-              </div>
-            </div>
+                  {ceDevCode && (
+                    <SandboxBanner code={ceDevCode} channel="email" onFill={() => setCeCode(ceDevCode)} />
+                  )}
 
-            <button
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
-              type="button"
-              disabled={ceSending || ceBusy || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ceEmail.trim().toLowerCase()) || ceResendIn > 0}
-              onClick={() => void sendCeCode()}
-            >
-              {ceSending ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" /> Sending…
-                </>
-              ) : ceResendIn > 0 ? (
-                `Resend code in ${ceResendIn}s`
-              ) : ceDevCode ? (
-                'Resend code'
-              ) : (
-                <>
-                  <ShieldCheck size={16} /> Send code
-                </>
-              )}
-            </button>
+                  <div>
+                    <label className="mb-2 block text-[13px] font-semibold text-[#4A5568]">
+                      Verification code
+                    </label>
+                    <OtpInput value={ceCode} onChange={setCeCode} disabled={ceBusy} />
+                  </div>
+                </div>
 
-            <button
-              className="btn-p mt-3 w-full disabled:opacity-50"
-              type="button"
-              disabled={ceBusy || ceSending || ceCode.length !== 6 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ceEmail.trim().toLowerCase())}
-              onClick={() => void verifyAndChangeEmail()}
-            >
-              {ceBusy ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" /> Verifying…
-                </>
-              ) : (
-                <>
-                  <ShieldCheck size={18} /> Verify &amp; change
-                </>
-              )}
-            </button>
+                <button
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-4 py-3 text-[14px] font-bold text-cbrand transition hover:bg-cbg disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    ceSending ||
+                    ceBusy ||
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ceEmail.trim().toLowerCase()) ||
+                    ceResendIn > 0
+                  }
+                  onClick={() => void sendCeCode()}
+                >
+                  {ceSending ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Sending…
+                    </>
+                  ) : ceResendIn > 0 ? (
+                    `Resend code in ${ceResendIn}s`
+                  ) : ceDevCode ? (
+                    'Resend code'
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} /> Send code to new email
+                    </>
+                  )}
+                </button>
+
+                <button
+                  className="btn-p mt-3 w-full disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    ceBusy ||
+                    ceSending ||
+                    ceCode.length !== 6 ||
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ceEmail.trim().toLowerCase())
+                  }
+                  onClick={() => void verifyAndChangeEmail()}
+                >
+                  {ceBusy ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Updating…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} /> Change email
+                    </>
+                  )}
+                </button>
+
+                {me.email && (
+                  <button
+                    className="mt-1 w-full text-center text-[12.5px] font-semibold text-[#9AA8C7] transition hover:text-cink"
+                    type="button"
+                    disabled={ceBusy || ceSending}
+                    onClick={() => setCeStep(1)}
+                  >
+                    Back to step 1
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1449,6 +1863,59 @@ function OtpInput({
           ))}
         </InputOTPGroup>
       </InputOTP>
+    </div>
+  )
+}
+
+/**
+ * Two-step progress indicator rendered at the top of the change-phone /
+ * change-email dialogs. Highlights the current step and shows a one-line
+ * description so the user always knows where they are in the flow.
+ *
+ *   step=1, labels=['Verify current','Set new number']
+ *   => renders "Step 1 of 2 — Verify current" (active) + "Set new number" (muted)
+ */
+function StepIndicator({
+  step,
+  labels,
+}: {
+  step: 1 | 2
+  labels: [string, string]
+}) {
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2" role="group" aria-label="Step indicator">
+        <span
+          className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[11px] font-extrabold transition ${
+            step >= 1 ? 'bg-cbrand text-white' : 'bg-csoft text-cbrand'
+          }`}
+          aria-current={step === 1 ? 'step' : undefined}
+        >
+          {step > 1 ? <CheckCircle2 size={13} /> : '1'}
+        </span>
+        <span
+          className={`flex-1 text-[12.5px] font-semibold ${step === 1 ? 'text-cink' : 'text-[#9AA8C7]'}`}
+        >
+          {labels[0]}
+        </span>
+        <span className="h-px flex-none w-6 bg-cline" />
+        <span
+          className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[11px] font-extrabold transition ${
+            step >= 2 ? 'bg-cbrand text-white' : 'bg-csoft text-cbrand'
+          }`}
+          aria-current={step === 2 ? 'step' : undefined}
+        >
+          2
+        </span>
+        <span
+          className={`flex-1 text-[12.5px] font-semibold ${step === 2 ? 'text-cink' : 'text-[#9AA8C7]'}`}
+        >
+          {labels[1]}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[11.5px] font-medium text-[#9AA8C7]">
+        Step {step} of 2 — {step === 1 ? labels[0] : labels[1]}
+      </p>
     </div>
   )
 }

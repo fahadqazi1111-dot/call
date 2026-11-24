@@ -7,17 +7,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 /**
  * POST: change the signed-in user's email address.
  *
- * Security model — two-step verify-then-commit, mirrors `/api/me/change-phone`:
+ * Security model — THREE-step verify-then-commit (mirrors change-phone):
  *
- *   1. The user requests an email OTP for the NEW address with
- *      `purpose: 'change_email'` (`POST /api/auth/email/request-code`).
- *   2. They verify it (`POST /api/auth/email/verify`) — that route marks the
- *      `EmailOtp` row as `consumed: true`. The verify route also accepts the
- *      `purpose` field so a `change_email`-scoped code can be matched.
- *   3. They submit here with `{ newEmail, code, clientKey }`. We re-check
- *      that a consumed, unexpired OTP exists for that email+code pair within
- *      the last 10 minutes, uniqueness of the new email across users, then
- *      swap the email AND mark `emailVerified: true`.
+ *   1. Verify CURRENT email — user requests an OTP to their current email
+ *      and verifies it. Prevents account takeover by session-token thieves.
+ *   2. Verify NEW email — user requests an OTP to the NEW address with
+ *      `purpose: 'change_email'` and verifies it.
+ *   3. Submit here with `{ currentCode, newEmail, code, clientKey }`.
+ *      We re-check BOTH OTPs, uniqueness, then swap the email.
  *
  * Rate-limited to 5 attempts per hour per user.
  */
@@ -34,11 +31,18 @@ export async function POST(req: Request) {
     const body = await req.json()
     const newEmail = String(body.newEmail || '').trim().toLowerCase()
     const code = String(body.code || '').trim()
+    const currentCode = String(body.currentCode || '').trim()
     if (!EMAIL_RE.test(newEmail)) {
       return NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 })
     }
     if (!/^\d{6}$/.test(code)) {
-      return NextResponse.json({ error: 'Enter the 6-digit code' }, { status: 400 })
+      return NextResponse.json({ error: 'Enter the 6-digit code sent to your new email' }, { status: 400 })
+    }
+    if (!/^\d{6}$/.test(currentCode)) {
+      return NextResponse.json(
+        { error: 'Enter the 6-digit code sent to your current email' },
+        { status: 400 },
+      )
     }
     if (me.email && me.email.toLowerCase() === newEmail) {
       return NextResponse.json(
@@ -47,11 +51,30 @@ export async function POST(req: Request) {
       )
     }
 
-    // Proof-of-possession: a code was issued to the new address AND verified
-    // (consumed) within the last 10 minutes. Accept either 'change_email'
-    // (preferred, scoped) or the legacy 'verify' purpose for back-compat
-    // with callers that don't pass a purpose on the request-code call.
+    // STEP 1: Verify the CURRENT email.
+    // Only required if the user already has an email set. Phone-only
+    // accounts (no email) skip this step.
     const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000)
+    if (me.email) {
+      const currentOtp = await db.emailOtp.findFirst({
+        where: {
+          email: me.email,
+          code: currentCode,
+          consumed: true,
+          createdAt: { gte: tenMinAgo },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      })
+      if (!currentOtp) {
+        return NextResponse.json(
+          { error: 'Verify your current email first. Request a code to your current email and enter it.' },
+          { status: 400 },
+        )
+      }
+    }
+
+    // STEP 2: Verify the NEW email.
     const otp = await db.emailOtp.findFirst({
       where: {
         email: newEmail,

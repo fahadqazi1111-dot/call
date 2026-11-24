@@ -254,7 +254,7 @@ export const api = {
    * phone OTP for `newPhone` (see /api/auth/otp + /api/auth/otp/verify).
    * `clientKey` is the caller-generated idempotency tag.
    */
-  changePhone: (body: { newPhone: string; code: string; clientKey: string }) =>
+  changePhone: (body: { currentCode: string; newPhone: string; code: string; clientKey: string }) =>
     request<{ ok: boolean; user: Me }>('/api/me/change-phone', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -264,7 +264,7 @@ export const api = {
    * (purpose='change_email' or 'verify') for `newEmail`.
    * `clientKey` is the caller-generated idempotency tag.
    */
-  changeEmail: (body: { newEmail: string; code: string; clientKey: string }) =>
+  changeEmail: (body: { currentCode: string; newEmail: string; code: string; clientKey: string }) =>
     request<{ ok: boolean; user: Me }>('/api/me/change-email', {
       method: 'POST',
       body: JSON.stringify(body),
