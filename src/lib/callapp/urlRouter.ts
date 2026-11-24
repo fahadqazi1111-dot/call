@@ -1,17 +1,11 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useApp, type AppTab, type AppOverlay } from '@/lib/callapp/store'
 
 /**
  * URL Router — syncs the browser URL with the app's tab/overlay state.
- *
- * This gives every "page" its own URL so:
- *   - Refresh keeps you on the same page (not back to home)
- *   - Browser back/forward buttons work
- *   - URLs are shareable and SEO-friendly
- *   - Each route has proper meta tags (title, description, OG)
  *
  * Route structure:
  *   /                → home (redirects to /chats if logged in, /login if not)
@@ -20,21 +14,30 @@ import { useApp, type AppTab, type AppOverlay } from '@/lib/callapp/store'
  *   /chat/[peerId]   → specific chat with a peer
  *   /calls           → calls history tab
  *   /rooms           → voice rooms tab
- *   /room/[id]       → specific voice room (when in a room)
  *   /live            → live streams tab
- *   /live/[id]       → specific live stream (when viewing/hosting)
  *   /contacts        → contacts tab
  *   /profile         → profile tab
  *   /wallet          → wallet overlay
  *   /coins           → coin store overlay
  *   /ai              → AI assistant overlay
- *   /admin           → admin panel overlay
+ *   /admin           → admin panel overlay (staff only)
  *   /notifications   → notification center overlay
- *   /settings        → settings (part of profile)
  *
- * The router works BOTH ways:
- *   - App state change → URL updates (so the URL always reflects current view)
- *   - URL change (back/forward/refresh) → App state updates
+ * CRITICAL: single source of truth to prevent the "refresh glitch" where
+ * the app flips between admin and wallet. The router has TWO phases:
+ *
+ *   1. INITIAL LOAD (first render after phase becomes 'main'):
+ *      URL → State ONLY. We read the URL and set the tab/overlay to match.
+ *      We do NOT push the state back to the URL (that would cause a loop).
+ *
+ *   2. SUBSEQUENT NAVIGATION (user clicks a tab/overlay):
+ *      State → URL. We update the URL to match the new state.
+ *      We do NOT re-read the URL (the state is already correct).
+ *
+ * The `initializedRef` flag distinguishes the two phases. Once the initial
+ * sync is done, the router only pushes state→URL on subsequent changes.
+ * Back/forward button (which changes the URL without changing state) is
+ * handled by the `pathname` dependency.
  */
 
 const TAB_TO_PATH: Record<AppTab, string> = {
@@ -75,6 +78,47 @@ const PATH_TO_OVERLAY: Record<string, AppOverlay> = {
   '/stories/new': 'story-composer',
 }
 
+/** Compute the URL path that matches the current app state. */
+function stateToPath(tab: AppTab, overlay: AppOverlay, openPeerId: string | null): string {
+  if (overlay) {
+    return OVERLAY_TO_PATH[overlay] || TAB_TO_PATH[tab]
+  }
+  if (openPeerId) {
+    return `/chat/${openPeerId}`
+  }
+  return TAB_TO_PATH[tab] || '/chats'
+}
+
+/** Apply the current URL path to the app state (URL → State). */
+function applyUrlToState(
+  path: string,
+  setTab: (t: AppTab) => void,
+  setOverlay: (o: AppOverlay) => void
+) {
+  // Overlay path?
+  if (PATH_TO_OVERLAY[path]) {
+    setOverlay(PATH_TO_OVERLAY[path])
+    return
+  }
+  // Chat detail path?
+  const chatMatch = path.match(/^\/chat\/(.+)$/)
+  if (chatMatch) {
+    // The chat store will open the chat based on openPeerId
+    return
+  }
+  // Tab path?
+  if (PATH_TO_TAB[path]) {
+    setTab(PATH_TO_TAB[path])
+    setOverlay(null)
+    return
+  }
+  // Home or unknown — go to chats
+  if (path === '/' || path === '' || path === '/login') {
+    setTab('chats')
+    setOverlay(null)
+  }
+}
+
 export function useUrlRouter() {
   const router = useRouter()
   const pathname = usePathname()
@@ -85,58 +129,58 @@ export function useUrlRouter() {
   const setOverlay = useApp((s) => s.setOverlay)
   const openPeerId = useApp((s) => s.openPeerId)
 
-  // App state → URL (when tab/overlay changes, update URL)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (phase !== 'main') return // Only sync URL when in the main app
+  // Track whether we've done the initial URL→State sync.
+  // Before this is true, we only do URL→State (on first load).
+  // After it's true, we only do State→URL (on user navigation).
+  const initializedRef = useRef(false)
+  // Track the last path we pushed, so we don't re-apply our own push.
+  const lastPushedPathRef = useRef<string | null>(null)
 
-    let targetPath: string
-
-    if (overlay) {
-      targetPath = OVERLAY_TO_PATH[overlay] || TAB_TO_PATH[tab]
-    } else if (openPeerId) {
-      targetPath = `/chat/${openPeerId}`
-    } else {
-      targetPath = TAB_TO_PATH[tab] || '/chats'
-    }
-
-    // Only update if different (prevents loops)
-    if (window.location.pathname !== targetPath) {
-      router.replace(targetPath, { scroll: false })
-    }
-  }, [tab, overlay, phase, openPeerId, router])
-
-  // URL → App state (on back/forward/refresh)
+  // === MAIN EFFECT: runs on every relevant state/URL change ===
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (phase !== 'main') return
 
-    const path = window.location.pathname
+    const currentPath = window.location.pathname
+    const statePath = stateToPath(tab, overlay, openPeerId)
 
-    // Check if it's an overlay path
-    if (PATH_TO_OVERLAY[path]) {
-      setOverlay(PATH_TO_OVERLAY[path])
+    // PHASE 1: INITIAL LOAD — URL → State only
+    if (!initializedRef.current) {
+      initializedRef.current = true
+      // Only apply URL→State if the URL is a known route (not '/')
+      // If URL is '/' or '/login', keep the default state (chats tab)
+      if (currentPath !== '/' && currentPath !== '/login') {
+        applyUrlToState(currentPath, setTab, setOverlay)
+      }
+      // Record the state path so we don't immediately push it
+      lastPushedPathRef.current = statePath
       return
     }
 
-    // Check if it's a chat detail path
-    const chatMatch = path.match(/^\/chat\/(.+)$/)
-    if (chatMatch) {
-      // The chat will be opened via the store
-      return
+    // PHASE 2: SUBSEQUENT — State → URL
+    // Only push if the state-derived path differs from the current URL
+    // AND we didn't just push this path ourselves (prevents loops)
+    if (statePath !== currentPath && statePath !== lastPushedPathRef.current) {
+      lastPushedPathRef.current = statePath
+      router.replace(statePath, { scroll: false })
     }
+  }, [tab, overlay, phase, openPeerId, router, setTab, setOverlay])
 
-    // Check if it's a tab path
-    if (PATH_TO_TAB[path]) {
-      setTab(PATH_TO_TAB[path])
-      setOverlay(null)
-      return
-    }
+  // === BACK/FORWARD BUTTON: URL → State ===
+  // This fires when the user clicks browser back/forward (pathname changes
+  // without a state change). We apply the URL to state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (phase !== 'main') return
+    if (!initializedRef.current) return // skip on initial load (handled above)
 
-    // Home or unknown path — go to chats tab
-    if (path === '/' || path === '') {
-      setTab('chats')
-      setOverlay(null)
-    }
+    const currentPath = window.location.pathname
+
+    // If this pathname change was caused by our own push, skip
+    if (currentPath === lastPushedPathRef.current) return
+
+    // It's a back/forward navigation — apply URL to state
+    applyUrlToState(currentPath, setTab, setOverlay)
+    lastPushedPathRef.current = currentPath
   }, [pathname, phase, setTab, setOverlay])
 }
