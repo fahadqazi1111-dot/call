@@ -1,6 +1,6 @@
 -- ============================================================
 -- CALL — full MySQL dump (schema + data) for phpMyAdmin import
--- Generated 2026-11-21T11:12:35.947Z
+-- Generated 2026-11-24T02:55:44.308Z
 -- All DateTime values are UTC.
 -- ============================================================
 
@@ -10,7 +10,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
 
 -- Drop existing tables (re-import safe)
-DROP TABLE IF EXISTS `User`, `Otp`, `EmailOtp`, `Contact`, `Conversation`, `Message`, `MessageHide`, `ConversationState`, `UserBlock`, `UserReport`, `Call`, `Wallet`, `LedgerEntry`, `CoinWallet`, `CoinLedgerEntry`, `Payment`, `Gift`, `GiftSend`, `BankAccount`, `Withdrawal`, `Story`, `StoryView`, `StoryReaction`, `VoiceRoom`, `RoomParticipant`, `RoomMessage`, `LiveSession`, `LiveComment`, `Battle`, `BattleParticipant`, `Group`, `GroupMember`, `GroupMessage`, `Notification`, `AiConversation`, `AiMessage`, `AiUsage`, `AdminSetting`, `AdPackage`, `Ad`, `AdEvent`, `Broadcast`, `BroadcastDelivery`;
+DROP TABLE IF EXISTS `User`, `Otp`, `EmailOtp`, `Contact`, `Conversation`, `Message`, `MessageHide`, `ConversationState`, `UserBlock`, `UserReport`, `Call`, `Wallet`, `LedgerEntry`, `CoinWallet`, `CoinLedgerEntry`, `Payment`, `Gift`, `GiftSend`, `BankAccount`, `Withdrawal`, `Story`, `StoryView`, `StoryReaction`, `VoiceRoom`, `RoomParticipant`, `RoomMessage`, `LiveSession`, `LiveComment`, `Battle`, `BattleParticipant`, `Group`, `GroupMember`, `GroupMessage`, `Notification`, `DeviceToken`, `AiConversation`, `AiMessage`, `AiUsage`, `AdminSetting`, `AdPackage`, `Ad`, `AdEvent`, `Broadcast`, `BroadcastDelivery`;
 
 -- CreateTable
 CREATE TABLE `User` (
@@ -589,6 +589,20 @@ CREATE TABLE `Notification` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `DeviceToken` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `token` VARCHAR(191) NOT NULL,
+    `platform` TEXT NOT NULL DEFAULT 'web',
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `lastUsed` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `DeviceToken_token_key`(`token`),
+    INDEX `DeviceToken_userId_idx`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `AiConversation` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
@@ -817,6 +831,8 @@ CREATE TABLE `BroadcastDelivery` (
 
 -- AddForeignKey
 
+-- AddForeignKey
+
 -- ============================================================
 -- DATA
 -- ============================================================
@@ -824,35 +840,28 @@ CREATE TABLE `BroadcastDelivery` (
 START TRANSACTION;
 
 INSERT INTO `User` (`id`, `phone`, `email`, `emailVerified`, `passwordHash`, `googleId`, `role`, `isOfficial`, `blocked`, `name`, `username`, `usernameChangedAt`, `about`, `avatarKey`, `avatarUrl`, `allowNonContacts`, `createdAt`, `lastSeen`) VALUES
-  ('cmwqb6d65000gkkfkb1f8g4vb', '0000000001', 'admin@call.app', 1, 'scrypt:db2f17b19beb3695abd06af793cb76e2:3702af69f4ad1b4287378d53c4070c27ea54ed498ffec4c32fb45b1c8b462a99', NULL, 'admin', 0, 0, 'CALL Admin', 'calladmin', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-21 11:12:18.221', '2026-11-21 11:12:18.221'),
-  ('cmwqb6d72000hkkfkb51r0t2x', '0000000002', 'fahadqazi1111@gmail.com', 1, 'scrypt:7803cc4453dd68bdd470b0982b9d0f49:b98cea9c3539a0fb287eee67aa306fe26627c8f3048818ebfc74a81e25f71094', NULL, 'admin', 0, 0, 'Fahad Mazhar', 'fahadqazi', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-21 11:12:18.254', '2026-11-21 11:12:18.254');
-INSERT INTO `AdminSetting` (`key`, `value`, `updatedAt`) VALUES
-  ('finance', '{"currency":"USD","platformCommission":30,"roomHostPercent":70,"paymentFeePercent":2.9,"paymentFeeFixed":0.3,"minWithdrawal":25,"withdrawalMethods":["bank"]}', '2026-11-21 11:12:18.148'),
-  ('rooms', '{"maxSpeakers":5,"maxEntryFee":50,"allowPaidRooms":true}', '2026-11-21 11:12:18.150'),
-  ('live', '{"maxViewers":25,"battleDurations":[60,120,180],"allowBattles":true}', '2026-11-21 11:12:18.151'),
-  ('calls', '{"maxConferenceParticipants":5}', '2026-11-21 11:12:18.152'),
-  ('ai', '{"provider":"zai","defaultModel":"default","dailyTextLimit":100,"dailyImageLimit":10,"dailyVoiceLimit":40,"voiceReplies":true,"imageGen":true}', '2026-11-21 11:12:18.152'),
-  ('ads', '{"enabled":true,"placements":["chats","rooms","profile"]}', '2026-11-21 11:12:18.153'),
-  ('payments', '{"provider":"sandbox","stripeSecretKey":"","stripeWebhookSecret":""}', '2026-11-21 11:12:18.154'),
-  ('adminSetupCode', '"CALL-ADMIN-2024"', '2026-11-21 11:12:18.155');
-INSERT INTO `AdPackage` (`id`, `name`, `description`, `priceUsd`, `durationDays`, `placements`, `minBudget`, `active`, `order`) VALUES
-  ('cmwqb6d4v000ckkfky739ogud', 'Starter', '3-day campaign across one placement of your choice.', 5, 3, 'chats,rooms,profile', 0, 1, 1),
-  ('cmwqb6d4x000dkkfk6rx7u4kv', 'Growth', '7-day campaign, best for reaching new audiences.', 15, 7, 'chats,rooms,profile', 10, 1, 2),
-  ('cmwqb6d4y000ekkfks7hlhfux', 'Pro', '14-day campaign with priority rotation.', 40, 14, 'chats,rooms,profile', 25, 1, 3),
-  ('cmwqb6d50000fkkfkjvktop20', 'Premium', '30-day flagship campaign, maximum exposure.', 99, 30, 'chats,rooms,profile', 50, 1, 4);
-INSERT INTO `Gift` (`id`, `name`, `emoji`, `imageUrl`, `description`, `animKind`, `sound`, `category`, `priceUsd`, `priceCoins`, `currency`, `platformMap`, `durationMs`, `active`, `sortOrder`) VALUES
-  ('cmwqb6d4c0000kkfk07o3zlgw', 'Rose', '🌹', '/gifts/rose.png', 'Rose gift — delivered with a real-time animation.', 'rose', 'gift', 'both', 0.6, 60, 'USD', '{"android":"call_gift_rose","ios":"call_gift_rose"}', 2200, 1, 1),
-  ('cmwqb6d4e0001kkfke0qn7lwb', 'Flower', '🌺', '/gifts/rose.png', 'Flower gift — delivered with a real-time animation.', 'flower', 'gift', 'both', 1, 100, 'USD', '{"android":"call_gift_flower","ios":"call_gift_flower"}', 2200, 1, 2),
-  ('cmwqb6d4f0002kkfkma3kitf9', 'Heart', '❤️', '/gifts/heart.png', 'Heart gift — delivered with a real-time animation.', 'heart', 'gift', 'both', 1.5, 150, 'USD', '{"android":"call_gift_heart","ios":"call_gift_heart"}', 2200, 1, 3),
-  ('cmwqb6d4g0003kkfkpm6jkk6h', 'Bouquet', '💐', '/gifts/rose.png', 'Bouquet gift — delivered with a real-time animation.', 'flower', 'gift', 'both', 2.5, 250, 'USD', '{"android":"call_gift_flower","ios":"call_gift_flower"}', 2600, 1, 4),
-  ('cmwqb6d4i0004kkfk8htk0xpj', 'Crown', '👑', '/gifts/crown.png', 'Crown gift — delivered with a real-time animation.', 'crown', 'gift', 'both', 5, 500, 'USD', '{"android":"call_gift_crown","ios":"call_gift_crown"}', 2800, 1, 5),
-  ('cmwqb6d4l0005kkfktrbpmqz1', 'Race Car', '🏎️', '/gifts/car.png', 'Race Car gift — delivered with a real-time animation.', 'car', 'gift', 'both', 8, 800, 'USD', '{"android":"call_gift_car","ios":"call_gift_car"}', 3200, 1, 6),
-  ('cmwqb6d4n0006kkfk2hselmd9', 'Rocket', '🚀', '/gifts/rocket.png', 'Rocket gift — delivered with a real-time animation.', 'rocket', 'gift_big', 'both', 10, 1000, 'USD', '{"android":"call_gift_rocket","ios":"call_gift_rocket"}', 3500, 1, 7),
-  ('cmwqb6d4o0007kkfk0mde47j8', 'Fireworks', '🎆', '/gifts/fireworks.png', 'Fireworks gift — delivered with a real-time animation.', 'fireworks', 'gift_big', 'both', 15, 1500, 'USD', '{"android":"call_gift_fireworks","ios":"call_gift_fireworks"}', 4000, 1, 8),
-  ('cmwqb6d4q0008kkfkgu9zu5d4', 'Dragon', '🐉', '/gifts/dragon.png', 'Dragon gift — delivered with a real-time animation.', 'dragon', 'gift_big', 'both', 20, 2000, 'USD', '{"android":"call_gift_dragon","ios":"call_gift_dragon"}', 4000, 1, 9),
-  ('cmwqb6d4r0009kkfkgdoala1v', 'Lion', '🦁', '/gifts/lion.png', 'Lion gift — delivered with a real-time animation.', 'lion', 'gift_big', 'both', 30, 3000, 'USD', '{"android":"call_gift_lion","ios":"call_gift_lion"}', 4200, 1, 10),
-  ('cmwqb6d4s000akkfkeuvo4kbj', 'Magic Castle', '🏰', '/gifts/castle.png', 'Magic Castle gift — delivered with a real-time animation.', 'castle', 'gift_big', 'both', 50, 5000, 'USD', '{"android":"call_gift_castle","ios":"call_gift_castle"}', 5000, 1, 11),
-  ('cmwqb6d4t000bkkfkhcxg3i1l', 'Galaxy', '🌌', '/gifts/galaxy.png', 'Galaxy gift — delivered with a real-time animation.', 'superlion', 'gift_big', 'both', 99, 9900, 'USD', '{"android":"call_gift_superlion","ios":"call_gift_superlion"}', 5200, 1, 12);
+  ('cmwtzu3g50000n7xfg2r02vgc', '923332560178', 'fahadqazi1111@gmail.com', 1, 'scrypt:9bc7fb58a8237a126eff592fe0488d17:32986ca92a466816144cc732eedd83d00f6bf339b78b2a796d32ca0774140c8c', NULL, 'admin', 0, 0, 'Fahad Mazhar', 'fahadqazi', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-24 01:05:54.678', '2026-11-24 02:01:00.645'),
+  ('cmwu0aszy0009n7xfhsw02ora', '0000000000', 'official@call.app', 0, NULL, NULL, 'user', 1, 0, 'CALL', 'official', NULL, 'The official CALL account. Messages from the CALL team are sent from here.', 0, NULL, 0, '2026-11-24 01:18:54.287', '2026-11-24 01:18:54.287');
+INSERT INTO `Otp` (`id`, `phone`, `code`, `expiresAt`, `consumed`, `createdAt`) VALUES
+  ('cmwu1wuqo001an7xfbs8gogte', '920000000002', '923885', '2026-11-24 02:09:02.591', 1, '2026-11-24 02:04:02.592'),
+  ('cmwu1x67l001bn7xfc20rl8qy', '923332560178', '800813', '2026-11-24 02:09:17.456', 1, '2026-11-24 02:04:17.457');
+INSERT INTO `Wallet` (`id`, `userId`, `available`, `reserved`, `totalReceived`, `totalEarned`, `totalWithdrawn`, `updatedAt`) VALUES
+  ('cmwtzu3hb0002n7xf986h3ysf', 'cmwtzu3g50000n7xfg2r02vgc', 0, 0, 0, 0, 0, '2026-11-24 01:05:54.719');
+INSERT INTO `CoinWallet` (`id`, `userId`, `coins`, `totalPurchased`, `totalConverted`, `totalSpent`, `totalReceived`, `updatedAt`) VALUES
+  ('cmwtzu48o0004n7xfo0qfvwrb', 'cmwtzu3g50000n7xfg2r02vgc', 0, 0, 0, 0, 0, '2026-11-24 01:05:55.705');
+INSERT INTO `VoiceRoom` (`id`, `hostId`, `title`, `description`, `coverUrl`, `isPaid`, `entryFee`, `status`, `createdAt`, `endedAt`) VALUES
+  ('cmwtzug490006n7xfq5s3o5pd', 'cmwtzu3g50000n7xfg2r02vgc', 'dd', '', NULL, 0, 0, 'ended', '2026-11-24 01:06:11.097', '2026-11-24 01:06:28.454'),
+  ('cmwu10v2j000bn7xfwvwifnut', 'cmwtzu3g50000n7xfg2r02vgc', 'TESTFLOW-1795484350013', '', NULL, 0, 0, 'ended', '2026-11-24 01:39:10.027', '2026-11-24 02:06:24.747'),
+  ('cmwu13hks000fn7xftns9yfaz', 'cmwtzu3g50000n7xfg2r02vgc', 'TESTFLOW-1795484472496', '', NULL, 0, 0, 'live', '2026-11-24 01:41:12.508', NULL);
+INSERT INTO `RoomParticipant` (`id`, `roomId`, `userId`, `role`, `muted`, `handRaised`, `stageInvite`, `invitedAt`, `blocked`, `entryPaid`, `joinedAt`, `leftAt`) VALUES
+  ('cmwtzug4b0008n7xf08t01dx9', 'cmwtzug490006n7xfq5s3o5pd', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 0, '2026-11-24 01:06:11.100', '2026-11-24 01:06:23.073'),
+  ('cmwu10v2k000dn7xf6r8uan66', 'cmwu10v2j000bn7xfwvwifnut', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 1, '2026-11-24 01:39:10.029', '2026-11-24 02:06:24.749'),
+  ('cmwu13hkt000hn7xfkqoq63i5', 'cmwu13hks000fn7xftns9yfaz', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 0, '2026-11-24 01:41:12.509', NULL);
+INSERT INTO `AiConversation` (`id`, `userId`, `title`, `createdAt`, `updatedAt`) VALUES
+  ('cmwu1w4kh0013n7xfkpx6xu0j', 'cmwtzu3g50000n7xfg2r02vgc', 'hi', '2026-11-24 02:03:28.674', '2026-11-24 02:03:28.674'),
+  ('cmwu1w8ck0017n7xfn7kxtolj', 'cmwtzu3g50000n7xfg2r02vgc', 'hi', '2026-11-24 02:03:33.572', '2026-11-24 02:03:33.572');
+INSERT INTO `AiUsage` (`id`, `userId`, `day`, `textCount`, `imageCount`, `voiceCount`, `updatedAt`) VALUES
+  ('cmwu1w4kd0012n7xfh44amqay', 'cmwtzu3g50000n7xfg2r02vgc', '2026-11-24', 0, 0, 0, '2026-11-24 02:03:28.670');
 
 COMMIT;
 

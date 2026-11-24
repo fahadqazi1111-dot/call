@@ -644,6 +644,9 @@ model Notification {
 
 /**
  * ==================== PUSH NOTIFICATIONS (Firebase Cloud Messaging) ====================
+ * Each user can have multiple device tokens (phone, tablet, web browser, etc.).
+ * When a notification should be pushed, we send to ALL the user's tokens.
+ * Tokens are registered by the client (web via FCM SDK, mobile via Capacitor FCM plugin).
  */
 model DeviceToken {
   id        String   @id @default(cuid())
