@@ -7,7 +7,7 @@ import {
   Loader2, Ban, DollarSign, Radio, Clapperboard, Trash2, Plus, Mail, Send,
   LogOut, LayoutDashboard, UserPlus, ShieldCheck, KeyRound, Smartphone,
   Landmark, FlaskConical, TrendingUp, Percent, ReceiptText, Wallet, Check, Flag, PhoneCall, Sparkles,
-  MessageSquare, Coins,
+  MessageSquare, Coins, Bell, Settings,
 } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { useApp } from '@/lib/callapp/store'
@@ -16,7 +16,7 @@ import { StaffTick } from './StaffTick'
 import { ConfirmDialog, InputDialog, FormDialog } from './admin/AdminDialogs'
 import type { AdminPaymentRow, AdminReportRow, AdminWithdrawalRow, BroadcastRow, CoinPack, CoinSettings, FinanceSummary, GiftItem } from '@/lib/callapp/types'
 
-type Section = 'overview' | 'users' | 'team' | 'gifts' | 'coins' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp' | 'auth'
+type Section = 'overview' | 'users' | 'team' | 'gifts' | 'coins' | 'finance' | 'withdrawals' | 'moderation' | 'ai' | 'ads' | 'calls' | 'app' | 'broadcast' | 'smtp' | 'auth' | 'push'
 
 interface StaffMember {
   id: string
@@ -83,6 +83,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
       { id: 'app', label: 'App experience', Icon: Sparkles, adminOnly: true },
       { id: 'ads', label: 'Ads', Icon: ImageIcon, adminOnly: false },
       { id: 'broadcast', label: 'Messages', Icon: Megaphone, adminOnly: true },
+      { id: 'push', label: 'Push', Icon: Bell, adminOnly: true },
       { id: 'auth', label: 'Authentication', Icon: ShieldCheck, adminOnly: true },
       { id: 'smtp', label: 'Email / SMTP', Icon: Mail, adminOnly: true },
     ] as const
@@ -154,6 +155,7 @@ export function AdminPanel({ onClose, mode = 'overlay' }: { onClose?: () => void
           {section === 'app' && isAdmin && <AppSection />}
           {section === 'ads' && <AdsSection />}
           {section === 'broadcast' && isAdmin && <BroadcastSection />}
+          {section === 'push' && isAdmin && <PushSection />}
           {section === 'auth' && isAdmin && <AuthSection />}
           {section === 'smtp' && isAdmin && <SmtpSection />}
         </div>
@@ -3227,6 +3229,363 @@ function SmtpSection() {
 }
 
 function SmtpField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">{label}</span>
+      <input
+        className="h-11 w-full rounded-[12px] bg-[#F0F3FA] px-4 text-[14px] font-medium outline-none placeholder:text-[#8a94a8]"
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  )
+}
+
+/* =========================================================================
+ *  Push Notifications section
+ *  - Firebase config card: admin pastes the service-account JSON (or fills
+ *    fields individually) and saves it. Status badge reflects readiness.
+ *    A "test" button sends a real push to the admin's own device(s).
+ *  - Custom push card: title/body/optional userId/optional imageUrl →
+ *    /api/admin/push, with the success toast showing how many devices
+ *    received the message.
+ * ======================================================================= */
+
+interface FirebaseConfigForm {
+  projectId: string
+  clientEmail: string
+  privateKey: string
+  apiKey: string
+  authDomain: string
+  messagingSenderId: string
+  appId: string
+}
+
+const FIREBASE_EMPTY: FirebaseConfigForm = {
+  projectId: '',
+  clientEmail: '',
+  privateKey: '',
+  apiKey: '',
+  authDomain: '',
+  messagingSenderId: '',
+  appId: '',
+}
+
+function PushSection() {
+  const me = useApp((s) => s.me)
+  const [form, setForm] = useState<FirebaseConfigForm | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [configured, setConfigured] = useState(false)
+  const [jsonPaste, setJsonPaste] = useState('')
+  const [jsonOpen, setJsonOpen] = useState(false)
+
+  // ---- custom push ----
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const [userId, setUserId] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    queueMicrotask(async () => {
+      try {
+        const res = await api.adminSettings()
+        const f = (res.settings.firebase ?? {}) as Partial<FirebaseConfigForm>
+        const next: FirebaseConfigForm = {
+          projectId: String(f.projectId ?? ''),
+          clientEmail: String(f.clientEmail ?? ''),
+          privateKey: String(f.privateKey ?? ''),
+          apiKey: String(f.apiKey ?? ''),
+          authDomain: String(f.authDomain ?? ''),
+          messagingSenderId: String(f.messagingSenderId ?? ''),
+          appId: String(f.appId ?? ''),
+        }
+        setForm(next)
+        setConfigured(
+          Boolean(next.projectId && next.clientEmail && next.privateKey && next.apiKey && next.appId)
+        )
+      } catch {
+        setForm(FIREBASE_EMPTY)
+      }
+    })
+  }, [])
+
+  if (!form) return <Loader2 className="mx-auto animate-spin text-cbrand" size={22} />
+
+  const set = <K extends keyof FirebaseConfigForm>(k: K, v: FirebaseConfigForm[K]) =>
+    setForm({ ...form, [k]: v })
+
+  // Parse a pasted Firebase service-account JSON (downloaded from the
+  // Firebase console → Project settings → Service accounts → Generate new
+  // private key) and fill the server-side fields. The web SDK fields still
+  // need to be entered manually from "Your apps → Web app config".
+  const applyServiceAccountJson = () => {
+    const raw = jsonPaste.trim()
+    if (!raw) {
+      toast.error('Paste the service account JSON first')
+      return
+    }
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>
+      const projectId = String(obj.project_id || '')
+      const clientEmail = String(obj.client_email || '')
+      const privateKey = String(obj.private_key || '')
+      if (!projectId || !clientEmail || !privateKey) {
+        toast.error('JSON missing project_id / client_email / private_key')
+        return
+      }
+      setForm({
+        ...form,
+        projectId,
+        clientEmail,
+        privateKey,
+        // Auto-derive authDomain if the admin hasn't set it yet.
+        authDomain: form.authDomain || (projectId ? `${projectId}.firebaseapp.com` : ''),
+      })
+      setJsonOpen(false)
+      setJsonPaste('')
+      toast.success('Service account fields filled. Verify the web config below and Save.')
+    } catch {
+      toast.error('Invalid JSON — paste the file you downloaded from Firebase Console')
+    }
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.adminSaveSettings('firebase', { ...form })
+      setConfigured(
+        Boolean(form.projectId && form.clientEmail && form.privateKey && form.apiKey && form.appId)
+      )
+      toast.success('Firebase settings saved')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Send a test push to the admin's own registered device(s).
+  const runTest = async () => {
+    if (!me?.id) {
+      toast.error('Could not resolve your user id')
+      return
+    }
+    setTesting(true)
+    try {
+      const res = await api.adminPush({
+        title: 'CALL test push',
+        body: 'If you can read this, Firebase Cloud Messaging is working.',
+        userId: me.id,
+      })
+      if (res.sent > 0) toast.success(`Test push sent to ${res.sent} device(s).`)
+      else toast.warning('Push returned 0 devices — register your browser first (log in & allow notifications).')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const sendPush = async () => {
+    if (!title.trim() || !body.trim()) {
+      toast.error('Title and body are required')
+      return
+    }
+    setSending(true)
+    try {
+      const res = await api.adminPush({
+        title: title.trim(),
+        body: body.trim(),
+        userId: userId.trim() || undefined,
+        imageUrl: imageUrl.trim() || undefined,
+      })
+      toast.success(`Sent to ${res.sent} device(s)`)
+      setTitle('')
+      setBody('')
+      setUserId('')
+      setImageUrl('')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex flex-wrap items-center gap-2 pb-1">
+        <h3 className="text-[15px] font-extrabold text-cink">Push notifications</h3>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+            configured ? 'bg-[#EDFAF3] text-[#067647]' : 'bg-cbg text-cmut'
+          }`}
+        >
+          {configured ? 'Configured' : 'Not configured'}
+        </span>
+      </div>
+      <p className="pb-4 text-[12px] leading-5 text-cmut">
+        Firebase Cloud Messaging delivers push notifications to web, Android and iOS clients. The
+        service-account <b>private key</b> stays server-side and is never sent to the browser.
+      </p>
+
+      {/* ---- Firebase config card ---- */}
+      <div className="rounded-[16px] border border-cline p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Settings size={16} className="text-cbrand" />
+          <h4 className="text-[13.5px] font-extrabold text-cink">Firebase configuration</h4>
+        </div>
+
+        <div className="mb-4 rounded-[12px] bg-cbg p-3 text-[12px] leading-5 text-cmut">
+          <p className="font-semibold text-cink">Quick start</p>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+            <li>Open the Firebase console → Project settings → Service accounts → <b>Generate new private key</b>.</li>
+            <li>Paste that JSON below to auto-fill the server-side fields.</li>
+            <li>From Project settings → General → Your apps → Web app, copy the <code>apiKey</code>, <code>messagingSenderId</code> and <code>appId</code> into the form below.</li>
+            <li>Save, then hit <b>Test push</b> — your own browser will receive a notification.</li>
+          </ol>
+          <button
+            className="mt-2.5 rounded-full bg-white px-3 py-1.5 text-[11.5px] font-bold text-cbrand shadow-sm"
+            onClick={() => setJsonOpen((v) => !v)}
+          >
+            {jsonOpen ? 'Hide JSON paste' : 'Paste service account JSON'}
+          </button>
+          {jsonOpen && (
+            <div className="mt-2.5">
+              <textarea
+                className="app-input min-h-[110px] w-full font-mono text-[11.5px]"
+                placeholder='{ "type": "service_account", "project_id": "…", "private_key": "-----BEGIN PRIVATE KEY-----\n…", "client_email": "…@….iam.gserviceaccount.com", … }'
+                value={jsonPaste}
+                onChange={(e) => setJsonPaste(e.target.value)}
+              />
+              <button
+                className="mt-2 rounded-full bg-cbrand px-3 py-1.5 text-[11.5px] font-bold text-white"
+                onClick={applyServiceAccountJson}
+              >
+                Fill fields from JSON
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <PushField label="Project ID" value={form.projectId} onChange={(v) => set('projectId', v)} placeholder="my-call-app" />
+          <PushField label="Client email" value={form.clientEmail} onChange={(v) => set('clientEmail', v)} placeholder="firebase-adminsdk-xxx@my-call-app.iam.gserviceaccount.com" />
+          <PushField label="Private key" value={form.privateKey} onChange={(v) => set('privateKey', v)} placeholder="-----BEGIN PRIVATE KEY-----\n…" type="password" />
+          <PushField label="API key (web)" value={form.apiKey} onChange={(v) => set('apiKey', v)} placeholder="AIzaSy…" />
+          <PushField label="Auth domain" value={form.authDomain} onChange={(v) => set('authDomain', v)} placeholder="my-call-app.firebaseapp.com" />
+          <PushField label="Messaging sender ID" value={form.messagingSenderId} onChange={(v) => set('messagingSenderId', v)} placeholder="1234567890" />
+          <div className="sm:col-span-2">
+            <PushField label="App ID" value={form.appId} onChange={(v) => set('appId', v)} placeholder="1:1234567890:web:abcdef" />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+          <button
+            className="h-11 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+            disabled={saving}
+            onClick={() => void save()}
+          >
+            {saving ? <Loader2 className="mx-auto animate-spin" size={17} /> : 'Save settings'}
+          </button>
+          <button
+            className="flex h-11 items-center justify-center gap-2 rounded-[14px] border border-cline bg-white px-5 text-[13.5px] font-bold text-cink shadow-sm disabled:opacity-50"
+            disabled={testing || !configured}
+            onClick={() => void runTest()}
+          >
+            {testing ? <Loader2 className="animate-spin" size={16} /> : <Send size={15} className="text-cbrand" />}
+            Test push (send to my device)
+          </button>
+        </div>
+      </div>
+
+      {/* ---- Custom push card ---- */}
+      <div className="mt-5 rounded-[16px] border border-cline p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Bell size={16} className="text-cbrand" />
+          <h4 className="text-[13.5px] font-extrabold text-cink">Send a custom push</h4>
+        </div>
+        <p className="pb-3 text-[12px] leading-5 text-cmut">
+          Leave <b>User ID</b> empty to broadcast to every registered device on the platform.
+          Sending to a single user only delivers to devices they have logged in on.
+        </p>
+
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Title</span>
+            <input
+              className="app-input w-full"
+              placeholder="Push title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={120}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Body</span>
+            <textarea
+              className="app-input min-h-[88px] w-full"
+              placeholder="Push body text"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              maxLength={500}
+            />
+          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">User ID (optional)</span>
+              <input
+                className="app-input w-full"
+                placeholder="Leave empty for broadcast"
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-[12.5px] font-semibold text-[#4A5568]">Image URL (optional)</span>
+              <input
+                className="app-input w-full"
+                placeholder="https://…/banner.png"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-[14px] bg-brand-grad px-6 text-[13.5px] font-bold text-white disabled:opacity-50"
+              disabled={sending || !title.trim() || !body.trim()}
+              onClick={() => void sendPush()}
+            >
+              {sending ? <Loader2 className="animate-spin" size={16} /> : <Send size={15} />}
+              Send push
+            </button>
+            <span className="text-[12px] text-cmut">
+              {userId.trim() ? 'Targets one user' : 'Broadcasts to all devices'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PushField({
   label,
   value,
   onChange,

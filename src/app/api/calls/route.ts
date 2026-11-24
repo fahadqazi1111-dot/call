@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/callapp/server'
 import { getOrCreateConversation } from '@/lib/callapp/conv'
+import { sendPushToUser } from '@/lib/callapp/firebase'
 
 /** GET: call history for me (both directions), newest first. */
 export async function GET(req: Request) {
@@ -84,6 +85,22 @@ export async function POST(req: Request) {
         createdAt: msg.createdAt.toISOString(),
         readAt: null,
         mine: true,
+      }
+    }
+
+    // FCM push for missed calls only — answered/declined calls already drove
+    // the call screen over realtime, so a system notification would just
+    // spam the recipient. Missed/no-answer is the one case where the callee
+    // needs to be told offline: "X tried to call you".
+    if (status === 'missed' || status === 'no-answer') {
+      try {
+        await sendPushToUser(peerId, {
+          title: 'Missed call',
+          body: `${me.name} tried to call you`,
+          data: { refType: 'call', refId: call.id, callType: type, status },
+        })
+      } catch {
+        // best-effort — never break the call log
       }
     }
     return NextResponse.json({ ok: true, callId: call.id, message })

@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { applyLedgerDelta, ensureWallet, getFinance, providerFeeFor, round2, applyCoinLedgerDelta } from './server'
 import { relayToLive, relayToRoom, relayToUser } from './relay'
 import { safeJson } from './payments'
+import { sendPushToUser } from './firebase'
 
 /**
  * Financial fulfillment — the ONLY path that turns a verified payment into
@@ -439,6 +440,28 @@ export async function deliverGift(args: DeliverGiftArgs): Promise<FulfillResult>
       createdAt: new Date().toISOString(),
     },
   })
+
+  // FCM push — best-effort, never blocks delivery. Fires for every gift
+  // regardless of payment method (card/wallet/coins) since delivery always
+  // flows through this single function. Idempotent on the delivery side
+  // (idempotencyTag), so a duplicate trigger never double-charges; the push
+  // itself is also harmless to receive twice.
+  try {
+    await sendPushToUser(recipient.id, {
+      title: 'You received a gift!',
+      body: `${sender.name} sent you a ${gift.name} ${gift.emoji}`,
+      data: {
+        refType: 'gift',
+        refId: send.id,
+        context,
+        ...(args.roomId ? { roomId: args.roomId } : {}),
+        ...(args.liveId ? { liveId: args.liveId } : {}),
+      },
+      ...(gift.imageUrl ? { imageUrl: gift.imageUrl } : {}),
+    })
+  } catch {
+    // best-effort — never break gift delivery
+  }
 
   return { ok: true, sendId: send.id, wallet: credit.wallet }
 }

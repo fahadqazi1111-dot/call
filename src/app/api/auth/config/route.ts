@@ -3,6 +3,7 @@ import { getSetting } from '@/lib/callapp/server'
 import { getOtpConfig, maskOtpConfig } from '@/lib/callapp/otpDelivery'
 import type { AuthPolicy } from '@/lib/callapp/authPolicy'
 import { DEFAULT_AUTH_POLICY } from '@/lib/callapp/authPolicy'
+import type { FirebaseConfig } from '@/lib/callapp/firebase'
 
 /**
  * GET /api/auth/config — public auth configuration for the sign-in screen.
@@ -16,6 +17,10 @@ import { DEFAULT_AUTH_POLICY } from '@/lib/callapp/authPolicy'
  *   - Whether an SMS provider / SMTP is configured (boolean only, never the
  *     credentials themselves) so the UI can decide whether to show the
  *     "sandbox mode" banner up front.
+ *   - The Firebase *web* config (apiKey, authDomain, projectId,
+ *     messagingSenderId, appId) so the client can initialize FCM and
+ *     register a device token. The private_key + client_email stay
+ *     server-side only.
  *
  * Nothing about credentials is ever exposed here.
  */
@@ -37,6 +42,26 @@ export async function GET() {
       (otp.smsProvider === 'vonage' &&
         !!(otp.vonageApiKey && otp.vonageApiSecret && otp.vonageFromNumber))
     const whatsappConfigured = !!(otp.whatsappApiKey && otp.whatsappPhoneNumberId)
+
+    // Firebase web config (public values only — private_key / client_email
+    // are NEVER sent to the browser).
+    const fb = await getSetting<Partial<FirebaseConfig>>('firebase', {} as Partial<FirebaseConfig>)
+    const firebaseEnabled = !!(
+      fb.apiKey &&
+      fb.projectId &&
+      fb.messagingSenderId &&
+      fb.appId
+    )
+    const firebase = firebaseEnabled
+      ? {
+          apiKey: fb.apiKey as string,
+          authDomain: fb.authDomain || `${fb.projectId}.firebaseapp.com`,
+          projectId: fb.projectId as string,
+          messagingSenderId: fb.messagingSenderId as string,
+          appId: fb.appId as string,
+        }
+      : null
+
     return NextResponse.json({
       googleClientId: authCfg.googleClientId || null,
       googleEnabled: Boolean(authCfg.googleClientId),
@@ -48,6 +73,8 @@ export async function GET() {
         // just reads `delivered` / `sandbox` from each request-code response.
         email: false,
       },
+      firebaseEnabled,
+      firebase,
     })
   } catch {
     return NextResponse.json({
@@ -55,6 +82,8 @@ export async function GET() {
       googleEnabled: false,
       policy: DEFAULT_AUTH_POLICY,
       delivery: { sms: false, whatsapp: false, email: false },
+      firebaseEnabled: false,
+      firebase: null,
     })
   }
 }

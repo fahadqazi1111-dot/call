@@ -6,6 +6,12 @@ import { useApp, bindGlobalSocketHandlers } from '@/lib/callapp/store'
 import { socketClient } from '@/lib/callapp/socket'
 import { callManager } from '@/lib/callapp/callManager'
 import { soundKit } from '@/lib/callapp/sound'
+import { api } from '@/lib/callapp/api'
+import {
+  initFirebaseMessaging,
+  registerServiceWorker,
+  requestNotificationPermission,
+} from '@/lib/callapp/firebaseClient'
 import { Toaster, toast } from 'sonner'
 import { SplashScreen } from './SplashScreen'
 import { OnboardingScreen } from './OnboardingScreen'
@@ -108,6 +114,40 @@ export function AppRoot() {
       void useApp.getState().loadChats()
     }, 20000)
     return () => window.clearInterval(t)
+  }, [me])
+
+  /* ---------- FCM: register the SW, init messaging, and push the
+   * device token to the backend so the user can receive pushes.
+   * Everything is best-effort and must NEVER block the app load:
+   *   - Service worker + token request are deferred 3s after login.
+   *   - If Firebase isn't configured by an admin, the helpers no-op.
+   *   - If the user denies notification permission, we silently move on.
+   */
+  useEffect(() => {
+    if (!me) return
+    let cancelled = false
+    const run = async () => {
+      try {
+        const cfg = await api.authConfig()
+        if (cancelled || !cfg.firebaseEnabled || !cfg.firebase) return
+        await initFirebaseMessaging(cfg.firebase)
+        if (cancelled) return
+        await registerServiceWorker()
+        if (cancelled) return
+        // Give the rest of the app a moment to settle before prompting.
+        await new Promise((r) => setTimeout(r, 3000))
+        if (cancelled) return
+        const token = await requestNotificationPermission()
+        if (cancelled || !token) return
+        await api.pushRegister({ token, platform: 'web' })
+      } catch {
+        // Push is best-effort; never surface an error to the user.
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
   }, [me])
 
   const isStaff = !!me && (me.role === 'admin' || me.role === 'team')

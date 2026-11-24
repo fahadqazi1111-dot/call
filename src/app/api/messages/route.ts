@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, isContactOf } from '@/lib/callapp/server'
 import { getOrCreateConversation } from '@/lib/callapp/conv'
+import { sendPushToUser } from '@/lib/callapp/firebase'
 
 /**
  * POST: send a message { to, type: 'text'|'voice'|'call'|'image', content, duration?, callMeta? }
@@ -92,6 +93,27 @@ export async function POST(req: Request) {
     })
     await db.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: msg.createdAt } })
     await db.user.update({ where: { id: me.id }, data: { lastSeen: new Date() } })
+
+    // FCM push to the recipient — best-effort, never blocks the send.
+    // Preview is friendly per message type so voice/image/video don't leak a
+    // mediaId as the notification body.
+    const PREVIEW: Record<string, string> = {
+      text: content,
+      voice: 'Voice message',
+      image: 'Photo',
+      video: 'Video',
+      call: 'Call',
+    }
+    const preview = (PREVIEW[type] || content).slice(0, 120)
+    try {
+      await sendPushToUser(peer.id, {
+        title: me.name,
+        body: preview,
+        data: { refType: 'message', refId: msg.id, conversationId: conv.id },
+      })
+    } catch {
+      // best-effort — never break the send
+    }
 
     return NextResponse.json({
       message: {

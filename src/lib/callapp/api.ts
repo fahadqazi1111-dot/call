@@ -147,6 +147,14 @@ export const api = {
         allowPhoneOnlyRegistration: boolean
       }
       delivery: { sms: boolean; whatsapp: boolean; email: boolean }
+      firebaseEnabled: boolean
+      firebase: {
+        apiKey: string
+        authDomain: string
+        projectId: string
+        messagingSenderId: string
+        appId: string
+      } | null
     }>('/api/auth/config'),
   emailRequestCode: (email: string, purpose?: 'verify' | 'reset' | 'change_email') =>
     request<{
@@ -866,4 +874,15 @@ export const api = {
     request<{ ok: boolean }>('/api/admin/adpackages', { method: 'PUT', body: JSON.stringify({ id, ...patch }) }),
   adminAdPackageDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/adpackages?id=${id}`, { method: 'DELETE' }),
+
+  /* ---------- push notifications (FCM) ---------- */
+  /** Register a web/mobile device token so the backend can target it. */
+  pushRegister: (body: { token: string; platform: string }) =>
+    request<{ ok: boolean }>('/api/push/register', { method: 'POST', body: JSON.stringify(body) }),
+  /** Unregister a device token (e.g. on logout). */
+  pushUnregister: (body: { token: string }) =>
+    request<{ ok: boolean }>('/api/push/unregister', { method: 'POST', body: JSON.stringify(body) }),
+  /** Admin sends a custom push — broadcast or to a single user. */
+  adminPush: (body: { title: string; body: string; userId?: string; imageUrl?: string }) =>
+    request<{ ok: boolean; sent: number }>('/api/admin/push', { method: 'POST', body: JSON.stringify(body) }),
 }

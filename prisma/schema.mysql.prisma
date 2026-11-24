@@ -39,6 +39,7 @@ model User {
   storyViews       StoryView[]    @relation("UserStoryViews")
   wallet           Wallet?
   coinWallet       CoinWallet?
+  deviceTokens     DeviceToken[]
   bankAccounts     BankAccount[]
   payments         Payment[]      @relation("UserPayments")
   giftSent         GiftSend[]     @relation("GiftSender")
@@ -639,6 +640,21 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read, createdAt])
+}
+
+/**
+ * ==================== PUSH NOTIFICATIONS (Firebase Cloud Messaging) ====================
+ */
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique // FCM registration token
+  platform  String   @default("web") @db.Text // web | android | ios
+  createdAt DateTime @default(now())
+  lastUsed  DateTime @default(now())
+
+  @@index([userId])
 }
 
 /**
