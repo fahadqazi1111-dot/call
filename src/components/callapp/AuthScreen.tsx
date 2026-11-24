@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CallWordmark } from './CallLogo'
+import { LegalFooter } from './LegalFooter'
 import { CountryPicker } from './CountryPicker'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
@@ -1596,6 +1597,7 @@ export function AuthScreen() {
         <p className="mt-auto pt-8 text-center text-[12.5px] text-cmut md:pt-6">
           Secure peer-to-peer calls · Free &amp; unlimited
         </p>
+        <LegalFooter />
       </div>
     </div>
   )
