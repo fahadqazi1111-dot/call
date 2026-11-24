@@ -8,13 +8,38 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "CALL — One World. One Call.",
+  title: {
+    default: "CALL — One World. One Call.",
+    template: "%s — CALL",
+  },
   description:
     "CALL is a free & unlimited calling app: HD video calls, voice calls, messages and voice notes — peer-to-peer, zero budget, no limits.",
   keywords: ["CALL", "calls", "video call", "voice call", "messaging", "voice messages", "free calls"],
   icons: {
     icon: "/logo.svg",
     apple: "/logo.svg",
+  },
+  openGraph: {
+    title: "CALL — One World. One Call.",
+    description: "Free & unlimited HD video calls, voice calls, messages and voice notes.",
+    type: "website",
+    siteName: "CALL",
+    images: [{ url: "/logo.svg", width: 512, height: 512, alt: "CALL" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CALL — One World. One Call.",
+    description: "Free & unlimited HD video calls, voice calls, messages and voice notes.",
+    images: ["/logo.svg"],
+  },
+  metadataBase: new URL("https://callapp.in"),
+  alternates: {
+    canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true },
   },
 };
 

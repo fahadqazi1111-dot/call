@@ -13,6 +13,7 @@ import {
   requestNotificationPermission,
 } from '@/lib/callapp/firebaseClient'
 import { Toaster, toast } from 'sonner'
+import { useUrlRouter } from '@/lib/callapp/urlRouter'
 import { SplashScreen } from './SplashScreen'
 import { OnboardingScreen } from './OnboardingScreen'
 import { AuthScreen } from './AuthScreen'
@@ -82,6 +83,9 @@ export function AppRoot() {
   const staffView = useApp((s) => s.staffView)
   const splashEnabled = useApp((s) => s.splashEnabled)
   const isDesktop = useIsDesktop()
+
+  // Sync browser URL with app state (so refresh/back/forward work)
+  useUrlRouter()
 
   useEffect(() => {
     if (!handlersBound) {
