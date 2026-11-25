@@ -268,12 +268,17 @@ export const useApp = create<AppState>((set, get) => ({
       persistToken(s.token)
       const { user } = await api.me()
       const staff = user.role === 'admin' || user.role === 'team'
+      // Same URL-aware staffView logic as loginSuccess (see comment there)
+      const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/'
+      const nonConsolePaths = ['/wallet', '/coins', '/ai', '/notifications', '/ads', '/stories/new', '/chats', '/calls', '/rooms', '/live', '/contacts', '/profile']
+      const isNonConsolePath = nonConsolePaths.some(p => currentPath === p || currentPath.startsWith(p + '/') || currentPath.startsWith('/chat/'))
+      const shouldGoConsole = staff && !isNonConsolePath && (currentPath === '/' || currentPath === '/admin' || currentPath === '')
       set({
         token: s.token,
         me: user,
         phase: 'main',
         booted: true,
-        staffView: staff ? 'console' : 'app',
+        staffView: shouldGoConsole ? 'console' : 'app',
       })
       void get().loadWallet()
       socketClient.connect(user.id, user.name)
@@ -298,7 +303,15 @@ export const useApp = create<AppState>((set, get) => ({
     persistToken(token)
     saveSession({ token, user })
     const staff = user.role === 'admin' || user.role === 'team'
-    set({ token, me: user, phase: 'main', staffView: staff ? 'console' : 'app' })
+    // CRITICAL: check the URL BEFORE setting staffView. If the user refreshed
+    // on /wallet, /coins, /chats, etc., we must NOT force the admin console
+    // (staffView='console') — that would override the URL and send them back
+    // to admin. Only go to console if the URL is /admin or / (home).
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/'
+    const nonConsolePaths = ['/wallet', '/coins', '/ai', '/notifications', '/ads', '/stories/new', '/chats', '/calls', '/rooms', '/live', '/contacts', '/profile']
+    const isNonConsolePath = nonConsolePaths.some(p => currentPath === p || currentPath.startsWith(p + '/') || currentPath.startsWith('/chat/'))
+    const shouldGoConsole = staff && !isNonConsolePath && (currentPath === '/' || currentPath === '/admin' || currentPath === '')
+    set({ token, me: user, phase: 'main', staffView: shouldGoConsole ? 'console' : 'app' })
     socketClient.connect(user.id, user.name)
     callManager.setMe({ id: user.id, name: user.name })
     conferenceManager.setMe({ id: user.id, name: user.name, avatarKey: user.avatarKey, avatarUrl: user.avatarUrl })
