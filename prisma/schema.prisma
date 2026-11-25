@@ -24,6 +24,12 @@ model User {
   avatarKey        Int            @default(0)
   avatarUrl        String?
   allowNonContacts Boolean        @default(false) // privacy: allow message requests from people not in contacts
+  // Privacy settings (WhatsApp-style: everyone | contacts | nobody)
+  privacyLastSeen    String   @default("everyone") // everyone | contacts | nobody
+  privacyProfilePic  String   @default("everyone") // everyone | contacts | nobody
+  privacyAbout       String   @default("everyone") // everyone | contacts | nobody
+  privacyGroups      String   @default("contacts") // who can add you to groups: everyone | contacts | nobody
+  hidePhoneNumber    Boolean  @default(false)      // hide number from non-contacts
   createdAt        DateTime       @default(now())
   lastSeen         DateTime       @default(now())
   contacts         Contact[]      @relation("ContactOwner")
@@ -118,6 +124,9 @@ model Message {
   readAt         DateTime?
   deletedAt      DateTime? // "unsent for everyone" — content is wiped, tombstone remains
   forwarded      Boolean      @default(false)
+  // disappearing messages (WhatsApp-style "View Once" / "24 hours"):
+  expiresAt      DateTime? // null = never expire; set = auto-delete after this time
+  viewOnce       Boolean      @default(false) // true = delete after first view
   hides          MessageHide[]
 
   @@index([conversationId, createdAt])

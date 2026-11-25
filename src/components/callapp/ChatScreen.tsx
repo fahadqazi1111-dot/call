@@ -11,7 +11,7 @@ import { socketClient } from '@/lib/callapp/socket'
 import { fmtDuration, fmtTime, lastSeenLabel } from '@/lib/callapp/utils'
 import { StaffTick } from './StaffTick'
 import { SponsoredAdCard, type ServedAd } from './GiftsUI'
-import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan, Copy, Forward, Undo2, CheckSquare, X, Search, ClipboardCheck, ImageIcon, Film, Loader2 } from 'lucide-react'
+import { ChevronLeft, Mic, Phone, Plus, Send, Smile, Square, Trash2, Video, Check, CheckCheck, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, MoreVertical, Archive, ArchiveRestore, Ban, Bell, BellOff, CircleUserRound, Flag, ShieldBan, Copy, Forward, Undo2, CheckSquare, X, Search, ClipboardCheck, ImageIcon, Film, Loader2, Clock, Eye, TimerOff } from 'lucide-react'
 import { api } from '@/lib/callapp/api'
 import { toast } from 'sonner'
 import { PeerProfileSheet } from './PeerProfileSheet'
@@ -27,9 +27,16 @@ import {
   type PendingAction,
 } from './ChatActions'
 import type { Message } from '@/lib/callapp/types'
+import type { DisappearingMode } from '@/lib/callapp/types'
 
 const EMOJIS = ['😀', '😂', '🥰', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😭', '😮', '🤝']
 const EMPTY_MESSAGES: Message[] = []
+
+const DISAPPEARING_LABEL: Record<DisappearingMode, string> = {
+  off: 'Off',
+  '24h': '24 hours',
+  once: 'View once',
+}
 
 export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; variant?: 'mobile' | 'desktop' }) {
   const me = useApp((s) => s.me)
@@ -71,6 +78,12 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const [draft, setDraft] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [sending, setSending] = useState(false)
+  /** disappearing-messages composer mode (WhatsApp "View Once" / "24 hours") */
+  const [disappearing, setDisappearing] = useState<DisappearingMode>('off')
+  const [showDisappearingMenu, setShowDisappearingMenu] = useState(false)
+  /** screenshot deterrent — true while window is unfocused in disappearing mode */
+  const [chatBlurred, setChatBlurred] = useState(false)
+  const disappearingWrapRef = useRef<HTMLDivElement>(null)
   /** sponsored ads config (admin-controlled message intervals) */
   const [adCfg, setAdCfg] = useState({ firstAfter: 10, interval: 20 })
   const [chatAds, setChatAds] = useState<ServedAd[]>([])
@@ -86,7 +99,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   const submitMedia = async (media: { blob: Blob; ext: string; durationSec?: number }, kind: 'image' | 'video') => {
     setMediaBusy(true)
     try {
-      await sendMedia(peerId, kind, media.blob, media.durationSec)
+      await sendMedia(peerId, kind, media.blob, media.durationSec, { disappearing })
       setMediaCompose(null)
     } catch (e) {
       toast.error((e as Error).message || 'Could not send')
@@ -160,6 +173,51 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
     }
   }, [peer])
 
+  /* ---------- disappearing messages: screenshot deterrent ----------
+   * Browsers can't truly block screenshots, but we make it harder:
+   *  - blur the chat canvas while the window is blurred (defeats alt-tab OS
+   *    screenshot tools that capture the foreground window)
+   *  - clear the clipboard the instant PrintScreen is released
+   *  - surface a warning toast so users know it's discouraged
+   * Only armed while disappearing mode (24h or once) is active. */
+  const disappearingActive = disappearing !== 'off'
+  useEffect(() => {
+    if (!disappearingActive) {
+      setChatBlurred(false)
+      return
+    }
+    const onBlur = () => setChatBlurred(true)
+    const onFocus = () => setChatBlurred(false)
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'PrintScreen') {
+        // wipe whatever the OS just wrote to the clipboard
+        try {
+          void navigator.clipboard?.writeText('')
+        } catch {}
+        toast.warning('Screenshots are not allowed in disappearing messages')
+      }
+    }
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [disappearingActive])
+
+  /* close the disappearing-mode popup when clicking outside */
+  useEffect(() => {
+    if (!showDisappearingMenu) return
+    const onDoc = (e: MouseEvent) => {
+      const el = disappearingWrapRef.current
+      if (el && !el.contains(e.target as Node)) setShowDisappearingMenu(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [showDisappearingMenu])
+
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -186,7 +244,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       emitTyping(false)
       setDraft('')
       setShowEmoji(false)
-      await sendText(peerId, text)
+      await sendText(peerId, text, { disappearing })
     } catch (e) {
       setDraft(text)
       // surfaces server rejections too (e.g. 403 "You blocked this contact…")
@@ -201,7 +259,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
     const res = await recorder.stop()
     if (!res) return
     try {
-      await sendVoice(peerId, res.blob, res.durationSec)
+      await sendVoice(peerId, res.blob, res.durationSec, undefined, { disappearing })
     } catch (e) {
       toast.error(e instanceof Error && e.message ? e.message : 'Voice message failed to upload. Try again.')
     }
@@ -471,7 +529,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
       {/* messages */}
       <div
         ref={scrollRef}
-        className={`app-scroll flex-1 overflow-y-auto ${desk ? 'chat-canvas desk-scroll px-6 py-6 md:px-10' : 'px-4 pb-4 pt-4'}`}
+        className={`app-scroll flex-1 overflow-y-auto transition-[filter] duration-150 ${desk ? 'chat-canvas desk-scroll px-6 py-6 md:px-10' : 'px-4 pb-4 pt-4'} ${chatBlurred ? '[filter:blur(12px)]' : ''}`}
       >
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
@@ -495,7 +553,7 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
                       <button
                         key={q}
                         className="rounded-full bg-white px-4 py-2 text-sm font-medium text-cbrand shadow-sm"
-                        onClick={() => void sendText(peerId, q)}
+                        onClick={() => void sendText(peerId, q, { disappearing })}
                       >
                         {q}
                       </button>
@@ -610,6 +668,24 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
               ))}
             </div>
           )}
+          {/* disappearing-messages banner — visible whenever a non-off mode is selected */}
+          {disappearing !== 'off' && (
+            <div className="mb-2 flex items-center gap-2.5 rounded-xl bg-[#FFF7E6] px-3.5 py-2 text-[12.5px] font-semibold text-[#9A6700]">
+              {disappearing === 'once' ? <Eye size={14} className="flex-none" /> : <Clock size={14} className="flex-none" />}
+              <span className="min-w-0 flex-1">
+                Disappearing messages: {DISAPPEARING_LABEL[disappearing]}
+                {disappearing === 'once' ? ' — deleted after the recipient opens it' : ' — auto-deletes after 24 hours'}
+              </span>
+              <button
+                type="button"
+                className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-[#9A6700] transition hover:bg-[#FFEFC2]"
+                onClick={() => setDisappearing('off')}
+                aria-label="Turn off disappearing messages"
+              >
+                Turn off
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2.5">
             {/* WhatsApp-style attachments: photo (crop) / video (trim) */}
             <button
@@ -660,6 +736,60 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
             >
               <Smile size={21} />
             </button>
+            {/* disappearing-messages toggle — clock icon with a small popup */}
+            <div className="relative flex-none" ref={disappearingWrapRef}>
+              <button
+                type="button"
+                className={`flex h-11 w-11 items-center justify-center rounded-full disabled:opacity-50 ${
+                  disappearing === 'off' ? 'bg-csoft text-cbrand' : 'bg-[#FFEFC2] text-[#9A6700]'
+                }`}
+                aria-label="Disappearing messages"
+                aria-haspopup="menu"
+                aria-expanded={showDisappearingMenu}
+                title="Disappearing messages"
+                disabled={composerLocked}
+                onClick={() => setShowDisappearingMenu((s) => !s)}
+              >
+                {disappearing === 'once' ? <Eye size={20} /> : disappearing === '24h' ? <Clock size={20} /> : <TimerOff size={20} />}
+              </button>
+              {showDisappearingMenu && (
+                <div
+                  role="menu"
+                  className="absolute bottom-[52px] left-0 z-30 w-[200px] overflow-hidden rounded-2xl border border-cline bg-white py-1 shadow-xl"
+                >
+                  <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-cmut">Disappearing messages</p>
+                  {([
+                    { key: 'off' as const, label: 'Off', icon: <TimerOff size={17} /> },
+                    { key: '24h' as const, label: '24 hours', icon: <Clock size={17} /> },
+                    { key: 'once' as const, label: 'View once', icon: <Eye size={17} /> },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.key}
+                      role="menuitemradio"
+                      aria-checked={disappearing === opt.key}
+                      className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13.5px] font-semibold transition hover:bg-cbg ${
+                        disappearing === opt.key ? 'text-cbrand' : 'text-cink'
+                      }`}
+                      onClick={() => {
+                        setDisappearing(opt.key)
+                        setShowDisappearingMenu(false)
+                        if (opt.key !== 'off') {
+                          toast.info(`Disappearing messages: ${DISAPPEARING_LABEL[opt.key]}`)
+                        }
+                      }}
+                    >
+                      <span className="flex-none">{opt.icon}</span>
+                      <span className="min-w-0 flex-1">{opt.label}</span>
+                      {disappearing === opt.key && <Check size={15} className="flex-none text-cbrand" />}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-cline" />
+                  <p className="px-3 py-1.5 text-[11px] leading-[1.4] text-cmut">
+                    Screenshots are discouraged while this is on.
+                  </p>
+                </div>
+              )}
+            </div>
             <div className="flex h-12 flex-1 items-center rounded-[24px] bg-[#F0F3FA] px-4">
               <input
                 ref={inputRef}
@@ -782,6 +912,19 @@ export function ChatScreen({ peerId, variant = 'mobile' }: { peerId: string; var
   )
 }
 
+/** tiny badge shown next to the timestamp on disappearing messages — a clock
+ *  icon for "24h" auto-expire, an eye icon for "View once". */
+function DisappearingBadge({ msg, mine }: { msg: Message; mine: boolean }) {
+  if (!msg.viewOnce && !msg.expiresAt) return null
+  const Icon = msg.viewOnce ? Eye : Clock
+  const cls = mine ? 'text-[#9FE8C1]' : 'text-cbrand'
+  return (
+    <span className={`flex items-center ${cls}`} aria-label={msg.viewOnce ? 'View once' : 'Disappearing message'} title={msg.viewOnce ? 'View once' : 'Disappearing message'}>
+      <Icon size={12} />
+    </span>
+  )
+}
+
 /** photo / video message bubble — resolves the private media URL for display */
 function MediaMessageRow({
   msg,
@@ -899,6 +1042,7 @@ function MediaMessageRow({
           )}
         </div>
         <div className={`flex items-center justify-end gap-1.5 pt-0.5 text-[11px] ${mine ? 'text-[#9AA8C7]' : 'text-cmut'}`}>
+          <DisappearingBadge msg={msg} mine={mine} />
           {msg.duration ? <span>{fmtDuration(msg.duration)}</span> : null}
           <span>{fmtTime(msg.createdAt)}</span>
           {mine && (msg.readAt ? <CheckCheck size={13} className="text-cbrand" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-[#9AA8C7]" /> : <Check size={13} />)}
@@ -1052,6 +1196,7 @@ function MessageRow({
           {forwardedChip}
           <VoiceBubble msg={msg} mine={mine} />
           <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
+            <DisappearingBadge msg={msg} mine={mine} />
             <span>{fmtTime(msg.createdAt)}</span>
             {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
           </div>
@@ -1079,6 +1224,7 @@ function MessageRow({
         {forwardedChip}
         <p className="whitespace-pre-wrap break-words text-[15px] leading-[21px]">{msg.content}</p>
         <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] opacity-75">
+          <DisappearingBadge msg={msg} mine={mine} />
           <span>{fmtTime(msg.createdAt)}</span>
           {mine && (msg.readAt ? <CheckCheck size={13} className="text-[#9FE8C1]" /> : msg.deliveredAt ? <CheckCheck size={13} className="text-white/60" /> : <Check size={13} />)}
         </div>

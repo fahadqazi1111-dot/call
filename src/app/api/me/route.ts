@@ -29,7 +29,20 @@ export async function PUT(req: Request) {
   if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const body = await req.json()
-    const data: { name?: string; about?: string; avatarKey?: number; avatarUrl?: string | null; username?: string; usernameChangedAt?: Date; allowNonContacts?: boolean } = {}
+    const data: {
+      name?: string
+      about?: string
+      avatarKey?: number
+      avatarUrl?: string | null
+      username?: string
+      usernameChangedAt?: Date
+      allowNonContacts?: boolean
+      privacyLastSeen?: string
+      privacyProfilePic?: string
+      privacyAbout?: string
+      privacyGroups?: string
+      hidePhoneNumber?: boolean
+    } = {}
     if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim().slice(0, 40)
     if (typeof body.about === 'string') data.about = body.about.slice(0, 120)
     if (typeof body.allowNonContacts === 'boolean') data.allowNonContacts = body.allowNonContacts
@@ -38,6 +51,23 @@ export async function PUT(req: Request) {
     if (typeof body.avatarUrl === 'string' && /^\/api\/media\/[a-f0-9]{32}$/.test(body.avatarUrl)) {
       data.avatarUrl = body.avatarUrl
     }
+
+    /* ---------- WhatsApp-style privacy settings ----------
+     * Each visibility selector accepts one of: everyone | contacts | nobody.
+     * `hidePhoneNumber` is a simple boolean toggle. We validate strictly so a
+     * bad client request can never persist an unknown value. */
+    const VISIBILITY = new Set(['everyone', 'contacts', 'nobody'])
+    const pickVisibility = (v: unknown): string | undefined =>
+      typeof v === 'string' && VISIBILITY.has(v) ? v : undefined
+    const ls = pickVisibility(body.privacyLastSeen)
+    if (ls) data.privacyLastSeen = ls
+    const pp = pickVisibility(body.privacyProfilePic)
+    if (pp) data.privacyProfilePic = pp
+    const ab = pickVisibility(body.privacyAbout)
+    if (ab) data.privacyAbout = ab
+    const gr = pickVisibility(body.privacyGroups)
+    if (gr) data.privacyGroups = gr
+    if (typeof body.hidePhoneNumber === 'boolean') data.hidePhoneNumber = body.hidePhoneNumber
 
     /* ---------- username change (1-week cooldown rule) ----------
      * Every user has one globally unique @username.

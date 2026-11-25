@@ -47,6 +47,9 @@ import {
   LifeBuoy,
   Phone,
   KeyRound,
+  PhoneOff,
+  Check,
+  Users2,
 } from 'lucide-react'
 import { RINGTONE_OPTIONS, getSelectedRingtone, setRingtone } from '@/lib/callapp/ringtones'
 import { CountryPicker } from './CountryPicker'
@@ -62,6 +65,13 @@ function nextChangeAt(me: { usernameChangedAt?: string | null; createdAt?: strin
 
 function fmtDate(ms: number): string {
   return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** Human-readable label for a WhatsApp-style visibility selector. */
+function visibilityLabel(level: 'everyone' | 'contacts' | 'nobody' | undefined): string {
+  if (level === 'contacts') return 'My contacts'
+  if (level === 'nobody') return 'Nobody'
+  return 'Everyone'
 }
 
 function fmtCountdown(ms: number): string {
@@ -242,6 +252,19 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
   const [showDelPwd, setShowDelPwd] = useState(false)
   const deleteAccount = useApp((s) => s.deleteAccount)
 
+  /* ---------- WhatsApp-style privacy selectors ----------
+   * One bottom sheet, reused for last-seen / profile photo / about / groups.
+   * `privacySheet` holds the field being edited + its current value; tapping
+   * an option fires `updateMe` immediately and closes the sheet. */
+  type PrivacyField = 'privacyLastSeen' | 'privacyProfilePic' | 'privacyAbout' | 'privacyGroups'
+  type VisibilityLevel = 'everyone' | 'contacts' | 'nobody'
+  const [privacySheet, setPrivacySheet] = useState<{
+    field: PrivacyField
+    title: string
+    value: VisibilityLevel
+  } | null>(null)
+  const [privacyBusy, setPrivacyBusy] = useState(false)
+
   useEffect(() => {
     if (!showUsername) return
     const t = window.setInterval(() => setNowTick(Date.now()), 30_000)
@@ -390,6 +413,38 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
     setEditName(me.name)
     setEditAbout(me.about)
     setShowEdit(true)
+  }
+
+  /** Save a WhatsApp-style privacy selector (last seen / photo / about / groups). */
+  const savePrivacy = async (field: PrivacyField, value: VisibilityLevel) => {
+    setPrivacyBusy(true)
+    try {
+      const patch: {
+        privacyLastSeen?: VisibilityLevel
+        privacyProfilePic?: VisibilityLevel
+        privacyAbout?: VisibilityLevel
+        privacyGroups?: VisibilityLevel
+      } = {}
+      patch[field] = value
+      await updateMe(patch)
+      toast.success('Privacy setting updated')
+      setPrivacySheet(null)
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not update the setting')
+    } finally {
+      setPrivacyBusy(false)
+    }
+  }
+
+  /** Toggle the "hide my phone number from non-contacts" switch. */
+  const toggleHidePhone = async () => {
+    const next = !me.hidePhoneNumber
+    try {
+      await updateMe({ hidePhoneNumber: next })
+      toast.success(next ? 'Phone number hidden from non-contacts' : 'Phone number visible')
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not update the setting')
+    }
   }
 
   const isStaff = me.role === 'admin' || me.role === 'team'
@@ -909,6 +964,84 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
         </div>
       </section>
 
+      {/* ============ privacy ============ */}
+      <section className={`mt-5 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Privacy">
+        <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Privacy</h2>
+        <div className="overflow-hidden rounded-[22px] border border-cline bg-white shadow-[0_1px_3px_rgba(16,32,72,0.04)]">
+          <Row
+            Icon={Clock3}
+            label="Last seen"
+            sub={visibilityLabel(me.privacyLastSeen)}
+            onClick={() =>
+              setPrivacySheet({
+                field: 'privacyLastSeen',
+                title: 'Last seen',
+                value: (me.privacyLastSeen ?? 'everyone') as VisibilityLevel,
+              })
+            }
+          />
+          <Row
+            Icon={Camera}
+            label="Profile photo"
+            sub={visibilityLabel(me.privacyProfilePic)}
+            onClick={() =>
+              setPrivacySheet({
+                field: 'privacyProfilePic',
+                title: 'Profile photo',
+                value: (me.privacyProfilePic ?? 'everyone') as VisibilityLevel,
+              })
+            }
+          />
+          <Row
+            Icon={User}
+            label="About"
+            sub={visibilityLabel(me.privacyAbout)}
+            onClick={() =>
+              setPrivacySheet({
+                field: 'privacyAbout',
+                title: 'About',
+                value: (me.privacyAbout ?? 'everyone') as VisibilityLevel,
+              })
+            }
+          />
+          <Row
+            Icon={Users2}
+            label="Groups"
+            sub={`${visibilityLabel(me.privacyGroups)} · who can add you`}
+            onClick={() =>
+              setPrivacySheet({
+                field: 'privacyGroups',
+                title: 'Groups',
+                value: (me.privacyGroups ?? 'contacts') as VisibilityLevel,
+              })
+            }
+          />
+          <button
+            className="flex w-full items-center gap-3.5 border-b border-cline px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-csoft"
+            type="button"
+            onClick={toggleHidePhone}
+          >
+            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[12px] bg-csoft text-cbrand">
+              {me.hidePhoneNumber ? <PhoneOff size={18} /> : <Phone size={18} />}
+            </span>
+            <span className="flex-1">
+              <span className="block text-[15px] font-semibold text-cink">Hide phone number</span>
+              <span className="block text-xs text-cmut">
+                {me.hidePhoneNumber ? 'Hidden from non-contacts' : 'Visible to everyone'}
+              </span>
+            </span>
+            <span
+              className={`relative h-6 w-11 flex-none rounded-full transition ${me.hidePhoneNumber ? 'bg-cgreen' : 'bg-[#C9D2E4]'}`}
+              aria-hidden
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${me.hidePhoneNumber ? 'left-[22px]' : 'left-0.5'}`}
+              />
+            </span>
+          </button>
+        </div>
+      </section>
+
       {/* ============ privacy & support ============ */}
       <section className={`mt-5 px-5 ${desk ? 'mx-auto max-w-2xl' : ''}`} aria-label="Privacy and support">
         <h2 className="mb-2.5 px-1 text-[13px] font-bold uppercase tracking-wider text-[#9AA8C7]">Privacy & support</h2>
@@ -1008,6 +1141,18 @@ export function ProfileTab({ variant = 'mobile' }: { variant?: 'mobile' | 'deskt
 
       {/* ---------- call ringtone sheet ---------- */}
       {ringtoneOpen && <RingtoneSheet desk={desk} onClose={() => setRingtoneOpen(false)} />}
+
+      {/* ---------- privacy visibility selector sheet ---------- */}
+      {privacySheet && (
+        <PrivacySheet
+          desk={desk}
+          title={privacySheet.title}
+          value={privacySheet.value}
+          busy={privacyBusy}
+          onClose={() => setPrivacySheet(null)}
+          onPick={(v) => void savePrivacy(privacySheet.field, v)}
+        />
+      )}
 
       {/* ---------- edit profile sheet ---------- */}
       {showEdit && (
@@ -1954,6 +2099,86 @@ function SandboxBanner({
           Configure an {channel === 'email' ? 'SMTP server' : 'SMS provider'} in Admin →
           Authentication to send real {channel === 'email' ? 'emails' : 'messages'}.
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ================= WhatsApp-style privacy selector sheet ================= */
+
+const PRIVACY_OPTIONS: { value: 'everyone' | 'contacts' | 'nobody'; label: string; hint: string }[] = [
+  { value: 'everyone', label: 'Everyone', hint: 'Visible to anyone on CALL' },
+  { value: 'contacts', label: 'My contacts', hint: 'Only people in your contact book' },
+  { value: 'nobody', label: 'Nobody', hint: 'Hidden from everyone' },
+]
+
+function PrivacySheet({
+  desk,
+  title,
+  value,
+  busy,
+  onClose,
+  onPick,
+}: {
+  desk?: boolean
+  title: string
+  value: 'everyone' | 'contacts' | 'nobody'
+  busy: boolean
+  onClose: () => void
+  onPick: (v: 'everyone' | 'contacts' | 'nobody') => void
+}) {
+  return (
+    <div
+      className={`inset-0 z-50 flex bg-black/45 ${desk ? 'fixed items-center justify-center p-6' : 'absolute items-end'}`}
+      onClick={() => !busy && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${title} privacy`}
+    >
+      <div
+        className={`${desk ? 'w-full max-w-md rounded-[24px]' : 'w-full rounded-t-[28px]'} bg-white p-5 pb-[max(env(safe-area-inset-bottom),18px)] shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {!desk && <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-cline" />}
+        <h3 className="mb-1 text-center text-[17px] font-extrabold text-cink">{title}</h3>
+        <p className="mb-4 text-center text-xs text-cmut">Choose who can see your {title.toLowerCase()}</p>
+        <div className="overflow-hidden rounded-2xl border border-cline">
+          {PRIVACY_OPTIONS.map((opt, i) => {
+            const active = opt.value === value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(opt.value)}
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors last:border-b-0 disabled:opacity-60 ${
+                  i < PRIVACY_OPTIONS.length - 1 ? 'border-b border-cline' : ''
+                } ${active ? 'bg-csoft' : 'hover:bg-csoft'}`}
+              >
+                <span className="flex-1">
+                  <span className="block text-[15px] font-semibold text-cink">{opt.label}</span>
+                  <span className="block text-xs text-cmut">{opt.hint}</span>
+                </span>
+                <span
+                  className={`flex h-6 w-6 flex-none items-center justify-center rounded-full border-2 transition ${
+                    active ? 'border-cgreen bg-cgreen text-white' : 'border-[#DDE3EE] text-transparent'
+                  }`}
+                  aria-hidden
+                >
+                  <Check size={14} strokeWidth={3} />
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onClose}
+          className="mt-4 w-full rounded-2xl bg-csoft py-3 text-[14px] font-bold text-cink transition hover:bg-cline disabled:opacity-60"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   )

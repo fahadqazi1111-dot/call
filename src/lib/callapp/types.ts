@@ -7,12 +7,22 @@ export interface Me {
   about: string
   avatarKey: number
   avatarUrl: string | null
-  lastSeen: string
+  lastSeen: string | null
   email?: string | null
   emailVerified?: boolean
   role?: string
   isOfficial?: boolean
   allowNonContacts?: boolean
+  /** WhatsApp-style privacy: who can see this user's "last seen" timestamp. */
+  privacyLastSeen?: 'everyone' | 'contacts' | 'nobody'
+  /** who can see this user's profile photo. */
+  privacyProfilePic?: 'everyone' | 'contacts' | 'nobody'
+  /** who can see this user's "about" line. */
+  privacyAbout?: 'everyone' | 'contacts' | 'nobody'
+  /** who can add this user to groups. */
+  privacyGroups?: 'everyone' | 'contacts' | 'nobody'
+  /** hide phone number from non-contacts. */
+  hidePhoneNumber?: boolean
   createdAt?: string | null
   hasPassword?: boolean
 }
@@ -27,9 +37,16 @@ export interface Message {
   readAt?: string | null
   deletedAt?: string | null
   forwarded?: boolean
+  /** disappearing messages — null = never expire, set = auto-delete after this time */
+  expiresAt?: string | null
+  /** WhatsApp "View Once" — true = deleted after first view by the recipient */
+  viewOnce?: boolean
   mine: boolean
   mediaUrl?: string | null
 }
+
+/** Frontend-only toggle state for the disappearing messages composer. */
+export type DisappearingMode = 'off' | '24h' | 'once'
 
 export interface ChatSummary {
   conversationId: string

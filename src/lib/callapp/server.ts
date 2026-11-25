@@ -490,42 +490,100 @@ export async function matchRegisteredUsers(
   return result
 }
 
-export function publicUser(u: {
-  id: string
-  name: string
-  username: string
-  usernameChangedAt?: Date | null
-  phone: string
-  about: string
-  avatarKey: number
-  avatarUrl: string | null
-  lastSeen: Date
-  email?: string | null
-  emailVerified?: boolean
-  role?: string
-  isOfficial?: boolean
-  allowNonContacts?: boolean
-  createdAt?: Date
-  passwordHash?: string | null
-}) {
+export function publicUser(
+  u: {
+    id: string
+    name: string
+    username: string
+    usernameChangedAt?: Date | null
+    phone: string
+    about: string
+    avatarKey: number
+    avatarUrl: string | null
+    lastSeen: Date
+    email?: string | null
+    emailVerified?: boolean
+    role?: string
+    isOfficial?: boolean
+    allowNonContacts?: boolean
+    privacyLastSeen?: string
+    privacyProfilePic?: string
+    privacyAbout?: string
+    privacyGroups?: string
+    hidePhoneNumber?: boolean
+    createdAt?: Date
+    passwordHash?: string | null
+  },
+  /**
+   * Optional viewer. When omitted (the legacy behaviour) every field is
+   * returned unfiltered — used for the user's own profile and auth flows.
+   *
+   * When supplied, WhatsApp-style privacy filtering is applied:
+   *   - `everyone`  → visible to this viewer
+   *   - `contacts`  → visible only when `viewer.isContact === true`
+   *   - `nobody`    → never visible to this viewer
+   * The caller is expected to pre-compute `isContact` (server-side, via
+   * {@link isContactOf} / {@link areContacts}) because that requires a DB
+   * lookup and `publicUser` itself stays synchronous to avoid breaking the
+   * many existing call sites. A viewer always sees their own profile in full
+   * (`viewer.id === u.id` short-circuits the filters).
+   */
+  viewer?: { id: string; isContact?: boolean }
+) {
+  const self = !viewer || viewer.id === u.id
+  const isContact = self || viewer?.isContact === true
+
+  const ls = u.privacyLastSeen ?? 'everyone'
+  const pp = u.privacyProfilePic ?? 'everyone'
+  const ab = u.privacyAbout ?? 'everyone'
+
+  // A field is visible to the viewer when its privacy level is "everyone",
+  // or when the viewer is a contact (the "contacts" level grants access).
+  // "nobody" hides the field from everyone except the user themselves.
+  const see = (level: string): boolean => self || level === 'everyone' || (level === 'contacts' && isContact)
+
   return {
     id: u.id,
     name: u.name,
     username: u.username,
     usernameChangedAt: u.usernameChangedAt ? u.usernameChangedAt.toISOString() : null,
-    phone: u.phone,
-    about: u.about,
+    phone: !self && u.hidePhoneNumber && !isContact ? '' : u.phone,
+    about: see(ab) ? u.about : '',
     avatarKey: u.avatarKey,
-    avatarUrl: u.avatarUrl,
-    lastSeen: u.lastSeen.toISOString(),
+    avatarUrl: see(pp) ? u.avatarUrl : null,
+    lastSeen: see(ls) ? u.lastSeen.toISOString() : null,
     email: u.email ?? null,
     emailVerified: u.emailVerified ?? false,
     role: u.role ?? 'user',
     isOfficial: u.isOfficial ?? false,
     allowNonContacts: u.allowNonContacts ?? false,
+    privacyLastSeen: u.privacyLastSeen ?? 'everyone',
+    privacyProfilePic: u.privacyProfilePic ?? 'everyone',
+    privacyAbout: u.privacyAbout ?? 'everyone',
+    privacyGroups: u.privacyGroups ?? 'contacts',
+    hidePhoneNumber: u.hidePhoneNumber ?? false,
     createdAt: u.createdAt ? u.createdAt.toISOString() : null,
     hasPassword: !!u.passwordHash,
   }
+}
+
+/**
+ * Privacy-aware wrapper around {@link publicUser} for the common case where
+ * the caller only knows the viewer's identity and needs the server to resolve
+ * whether they are a contact of the user (which itself requires a DB lookup).
+ *
+ * - A viewer always sees their own profile in full.
+ * - Otherwise we check whether the viewer's phone is saved in the user's
+ *   contact book (`isContactOf`) — that is the WhatsApp "contacts" gate.
+ *
+ * Returns the filtered public user object.
+ */
+export async function publicUserForViewer(
+  u: Parameters<typeof publicUser>[0],
+  viewer: { id: string; phone: string }
+) {
+  const isContact = viewer.id === u.id ? true : await isContactOf(u.id, viewer.phone)
+  return publicUser(u, { id: viewer.id, isContact })
 }
 
 export function makeOtp(): string {

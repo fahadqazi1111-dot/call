@@ -252,7 +252,18 @@ export const api = {
 
   /* ---------- me ---------- */
   me: () => request<{ user: Me; wallet?: { available: number; reserved: number; totalEarned: number } }>('/api/me'),
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) =>
+  updateMe: (patch: {
+    name?: string
+    about?: string
+    avatarUrl?: string | null
+    username?: string
+    allowNonContacts?: boolean
+    privacyLastSeen?: 'everyone' | 'contacts' | 'nobody'
+    privacyProfilePic?: 'everyone' | 'contacts' | 'nobody'
+    privacyAbout?: 'everyone' | 'contacts' | 'nobody'
+    privacyGroups?: 'everyone' | 'contacts' | 'nobody'
+    hidePhoneNumber?: boolean
+  }) =>
     request<{ user: Me; nextChangeAt?: string }>('/api/me', { method: 'PUT', body: JSON.stringify(patch) }),
   /** Permanently delete the authenticated user's account (App Store / Play Store compliance). */
   deleteAccount: (body: { password?: string; confirm: boolean }) =>
@@ -285,7 +296,7 @@ export const api = {
   deleteChat: (peerId: string) => request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'DELETE' }),
   chatState: (peerId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute') =>
     request<{ ok: boolean }>(`/api/chats/${peerId}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
-  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image' | 'video'; content: string; duration?: number; forwarded?: boolean }) =>
+  sendMessage: (payload: { to: string; type: 'text' | 'voice' | 'call' | 'image' | 'video'; content: string; duration?: number; forwarded?: boolean; disappearing?: 'off' | '24h' | 'once' }) =>
     request<{ message: Message }>('/api/messages', { method: 'POST', body: JSON.stringify(payload) }),
   deleteMessage: (id: string, scope: 'everyone' | 'me') =>
     request<{ ok: boolean; scope: string; deletedAt?: string }>(`/api/messages/${id}?scope=${scope}`, { method: 'DELETE' }),

@@ -16,6 +16,11 @@ CREATE TABLE `User` (
     `avatarKey` INTEGER NOT NULL DEFAULT 0,
     `avatarUrl` TEXT NULL,
     `allowNonContacts` BOOLEAN NOT NULL DEFAULT false,
+    `privacyLastSeen` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyProfilePic` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyAbout` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyGroups` TEXT NOT NULL DEFAULT 'contacts',
+    `hidePhoneNumber` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `lastSeen` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
@@ -89,6 +94,8 @@ CREATE TABLE `Message` (
     `readAt` DATETIME(3) NULL,
     `deletedAt` DATETIME(3) NULL,
     `forwarded` BOOLEAN NOT NULL DEFAULT false,
+    `expiresAt` DATETIME(3) NULL,
+    `viewOnce` BOOLEAN NOT NULL DEFAULT false,
 
     INDEX `Message_conversationId_createdAt_idx`(`conversationId`, `createdAt`),
     PRIMARY KEY (`id`)

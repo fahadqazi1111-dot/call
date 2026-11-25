@@ -112,7 +112,18 @@ interface AppState {
   setStaffView: (v: StaffView) => void
   bootstrap: () => Promise<void>
   loginSuccess: (token: string, user: Me) => void
-  updateMe: (patch: { name?: string; about?: string; avatarUrl?: string | null; username?: string; allowNonContacts?: boolean }) => Promise<void>
+  updateMe: (patch: {
+    name?: string
+    about?: string
+    avatarUrl?: string | null
+    username?: string
+    allowNonContacts?: boolean
+    privacyLastSeen?: 'everyone' | 'contacts' | 'nobody'
+    privacyProfilePic?: 'everyone' | 'contacts' | 'nobody'
+    privacyAbout?: 'everyone' | 'contacts' | 'nobody'
+    privacyGroups?: 'everyone' | 'contacts' | 'nobody'
+    hidePhoneNumber?: boolean
+  }) => Promise<void>
   updateAvatar: (blob: Blob, mime: string) => Promise<void>
   markPasswordSet: () => void
   /** Replace the signed-in user's phone after the CURRENT phone has been
@@ -135,10 +146,10 @@ interface AppState {
   openChat: (peerId: string | null) => void
   closeChat: () => void
   loadMessages: (peerId: string) => Promise<void>
-  sendText: (peerId: string, text: string) => Promise<void>
-  sendVoice: (peerId: string, blob: Blob, durationSec: number, effect?: string) => Promise<void>
+  sendText: (peerId: string, text: string, opts?: { disappearing?: 'off' | '24h' | 'once' }) => Promise<void>
+  sendVoice: (peerId: string, blob: Blob, durationSec: number, effect?: string, opts?: { disappearing?: 'off' | '24h' | 'once' }) => Promise<void>
   /** photo / video message — blob already cropped/trimmed by the MediaComposer */
-  sendMedia: (peerId: string, kind: 'image' | 'video', blob: Blob, durationSec?: number) => Promise<void>
+  sendMedia: (peerId: string, kind: 'image' | 'video', blob: Blob, durationSec?: number, opts?: { disappearing?: 'off' | '24h' | 'once' }) => Promise<void>
   markReadIfOpen: (peerId: string) => Promise<void>
   handleIncomingMessage: (fromId: string | null, message: Message) => Promise<void>
   /** unsend (everyone) or delete-for-me; relays `msg:deleted` for everyone-scope */
@@ -484,11 +495,11 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {}
   },
 
-  sendText: async (peerId, text) => {
+  sendText: async (peerId, text, opts) => {
     const trimmed = text.trim()
     if (!trimmed) return
     try {
-      const { message } = await api.sendMessage({ to: peerId, type: 'text', content: trimmed })
+      const { message } = await api.sendMessage({ to: peerId, type: 'text', content: trimmed, disappearing: opts?.disappearing })
       set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
       socketClient.emit('msg:new', { to: peerId, message })
       soundKit.pop(true)
@@ -498,7 +509,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  sendVoice: async (peerId, blob, durationSec, effect) => {
+  sendVoice: async (peerId, blob, durationSec, effect, opts) => {
     try {
       const up = await api.uploadVoice(blob)
       const { message } = await api.sendMessage({
@@ -506,6 +517,7 @@ export const useApp = create<AppState>((set, get) => ({
         type: 'voice',
         content: up.id,
         duration: durationSec,
+        disappearing: opts?.disappearing,
       })
       if (effect && effect !== 'original') {
         // annotate the message locally only (effect name is cosmetic info)
@@ -519,7 +531,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  sendMedia: async (peerId, kind, blob, durationSec) => {
+  sendMedia: async (peerId, kind, blob, durationSec, opts) => {
     try {
       const up = kind === 'image' ? await api.uploadImage(blob) : await api.uploadVideo(blob)
       const { message } = await api.sendMessage({
@@ -527,6 +539,7 @@ export const useApp = create<AppState>((set, get) => ({
         type: kind,
         content: up.id,
         duration: durationSec,
+        disappearing: opts?.disappearing,
       })
       set((st) => ({ messages: { ...st.messages, [peerId]: [...(st.messages[peerId] ?? []), message] } }))
       socketClient.emit('msg:new', { to: peerId, message })

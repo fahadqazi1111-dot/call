@@ -1,6 +1,6 @@
 -- ============================================================
 -- CALL — full MySQL dump (schema + data) for phpMyAdmin import
--- Generated 2026-11-24T03:00:29.893Z
+-- Generated 2026-11-25T12:32:52.538Z
 -- All DateTime values are UTC.
 -- ============================================================
 
@@ -30,6 +30,11 @@ CREATE TABLE `User` (
     `avatarKey` INTEGER NOT NULL DEFAULT 0,
     `avatarUrl` TEXT NULL,
     `allowNonContacts` BOOLEAN NOT NULL DEFAULT false,
+    `privacyLastSeen` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyProfilePic` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyAbout` TEXT NOT NULL DEFAULT 'everyone',
+    `privacyGroups` TEXT NOT NULL DEFAULT 'contacts',
+    `hidePhoneNumber` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `lastSeen` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
@@ -103,6 +108,8 @@ CREATE TABLE `Message` (
     `readAt` DATETIME(3) NULL,
     `deletedAt` DATETIME(3) NULL,
     `forwarded` BOOLEAN NOT NULL DEFAULT false,
+    `expiresAt` DATETIME(3) NULL,
+    `viewOnce` BOOLEAN NOT NULL DEFAULT false,
 
     INDEX `Message_conversationId_createdAt_idx`(`conversationId`, `createdAt`),
     PRIMARY KEY (`id`)
@@ -839,29 +846,6 @@ CREATE TABLE `BroadcastDelivery` (
 
 START TRANSACTION;
 
-INSERT INTO `User` (`id`, `phone`, `email`, `emailVerified`, `passwordHash`, `googleId`, `role`, `isOfficial`, `blocked`, `name`, `username`, `usernameChangedAt`, `about`, `avatarKey`, `avatarUrl`, `allowNonContacts`, `createdAt`, `lastSeen`) VALUES
-  ('cmwtzu3g50000n7xfg2r02vgc', '923332560178', 'fahadqazi1111@gmail.com', 1, 'scrypt:9bc7fb58a8237a126eff592fe0488d17:32986ca92a466816144cc732eedd83d00f6bf339b78b2a796d32ca0774140c8c', NULL, 'admin', 0, 0, 'Fahad Mazhar', 'fahadqazi', NULL, 'Available on CALL', 0, NULL, 0, '2026-11-24 01:05:54.678', '2026-11-24 02:01:00.645'),
-  ('cmwu0aszy0009n7xfhsw02ora', '0000000000', 'official@call.app', 0, NULL, NULL, 'user', 1, 0, 'CALL', 'official', NULL, 'The official CALL account. Messages from the CALL team are sent from here.', 0, NULL, 0, '2026-11-24 01:18:54.287', '2026-11-24 01:18:54.287');
-INSERT INTO `Otp` (`id`, `phone`, `code`, `expiresAt`, `consumed`, `createdAt`) VALUES
-  ('cmwu1wuqo001an7xfbs8gogte', '920000000002', '923885', '2026-11-24 02:09:02.591', 1, '2026-11-24 02:04:02.592'),
-  ('cmwu1x67l001bn7xfc20rl8qy', '923332560178', '800813', '2026-11-24 02:09:17.456', 1, '2026-11-24 02:04:17.457');
-INSERT INTO `Wallet` (`id`, `userId`, `available`, `reserved`, `totalReceived`, `totalEarned`, `totalWithdrawn`, `updatedAt`) VALUES
-  ('cmwtzu3hb0002n7xf986h3ysf', 'cmwtzu3g50000n7xfg2r02vgc', 0, 0, 0, 0, 0, '2026-11-24 01:05:54.719');
-INSERT INTO `CoinWallet` (`id`, `userId`, `coins`, `totalPurchased`, `totalConverted`, `totalSpent`, `totalReceived`, `updatedAt`) VALUES
-  ('cmwtzu48o0004n7xfo0qfvwrb', 'cmwtzu3g50000n7xfg2r02vgc', 0, 0, 0, 0, 0, '2026-11-24 01:05:55.705');
-INSERT INTO `VoiceRoom` (`id`, `hostId`, `title`, `description`, `coverUrl`, `isPaid`, `entryFee`, `status`, `createdAt`, `endedAt`) VALUES
-  ('cmwtzug490006n7xfq5s3o5pd', 'cmwtzu3g50000n7xfg2r02vgc', 'dd', '', NULL, 0, 0, 'ended', '2026-11-24 01:06:11.097', '2026-11-24 01:06:28.454'),
-  ('cmwu10v2j000bn7xfwvwifnut', 'cmwtzu3g50000n7xfg2r02vgc', 'TESTFLOW-1795484350013', '', NULL, 0, 0, 'ended', '2026-11-24 01:39:10.027', '2026-11-24 02:06:24.747'),
-  ('cmwu13hks000fn7xftns9yfaz', 'cmwtzu3g50000n7xfg2r02vgc', 'TESTFLOW-1795484472496', '', NULL, 0, 0, 'live', '2026-11-24 01:41:12.508', NULL);
-INSERT INTO `RoomParticipant` (`id`, `roomId`, `userId`, `role`, `muted`, `handRaised`, `stageInvite`, `invitedAt`, `blocked`, `entryPaid`, `joinedAt`, `leftAt`) VALUES
-  ('cmwtzug4b0008n7xf08t01dx9', 'cmwtzug490006n7xfq5s3o5pd', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 0, '2026-11-24 01:06:11.100', '2026-11-24 01:06:23.073'),
-  ('cmwu10v2k000dn7xf6r8uan66', 'cmwu10v2j000bn7xfwvwifnut', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 1, '2026-11-24 01:39:10.029', '2026-11-24 02:06:24.749'),
-  ('cmwu13hkt000hn7xfkqoq63i5', 'cmwu13hks000fn7xftns9yfaz', 'cmwtzu3g50000n7xfg2r02vgc', 'host', 0, 0, 0, NULL, 0, 0, '2026-11-24 01:41:12.509', NULL);
-INSERT INTO `AiConversation` (`id`, `userId`, `title`, `createdAt`, `updatedAt`) VALUES
-  ('cmwu1w4kh0013n7xfkpx6xu0j', 'cmwtzu3g50000n7xfg2r02vgc', 'hi', '2026-11-24 02:03:28.674', '2026-11-24 02:03:28.674'),
-  ('cmwu1w8ck0017n7xfn7kxtolj', 'cmwtzu3g50000n7xfg2r02vgc', 'hi', '2026-11-24 02:03:33.572', '2026-11-24 02:03:33.572');
-INSERT INTO `AiUsage` (`id`, `userId`, `day`, `textCount`, `imageCount`, `voiceCount`, `updatedAt`) VALUES
-  ('cmwu1w4kd0012n7xfh44amqay', 'cmwtzu3g50000n7xfg2r02vgc', '2026-11-24', 0, 0, 0, '2026-11-24 02:03:28.670');
 
 COMMIT;
 

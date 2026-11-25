@@ -80,6 +80,18 @@ export async function POST(req: Request) {
     const duration = typeof body.duration === 'number' ? Math.max(0, Math.round(body.duration)) : null
     const forwarded = body.forwarded === true
 
+    // disappearing messages (WhatsApp-style "View Once" / "24 hours")
+    const disappearing = ['off', '24h', 'once'].includes(body.disappearing) ? body.disappearing : 'off'
+    let expiresAt: Date | null = null
+    let viewOnce = false
+    if (disappearing === '24h') {
+      expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      viewOnce = false
+    } else if (disappearing === 'once') {
+      viewOnce = true
+      expiresAt = null
+    }
+
     const conv = existing ? { id: existing.id } : await getOrCreateConversation(me.id, to)
     const msg = await db.message.create({
       data: {
@@ -89,6 +101,8 @@ export async function POST(req: Request) {
         content,
         duration,
         forwarded,
+        expiresAt,
+        viewOnce,
       },
     })
     await db.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: msg.createdAt } })
@@ -125,6 +139,8 @@ export async function POST(req: Request) {
         deliveredAt: null,
         readAt: null,
         forwarded: msg.forwarded,
+        expiresAt: msg.expiresAt ? msg.expiresAt.toISOString() : null,
+        viewOnce: msg.viewOnce,
         mine: true,
       },
     })

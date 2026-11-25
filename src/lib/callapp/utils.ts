@@ -50,7 +50,7 @@ export function fmtDuration(sec: number): string {
   return `${m}:${String(r).padStart(2, '0')}`
 }
 
-export function lastSeenLabel(lastSeenIso?: string, online?: boolean): string {
+export function lastSeenLabel(lastSeenIso?: string | null, online?: boolean): string {
   if (online) return 'Online'
   if (!lastSeenIso) return 'Last seen recently'
   const d = new Date(lastSeenIso)

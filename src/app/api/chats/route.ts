@@ -48,6 +48,18 @@ export async function GET(req: Request) {
     else blockedMe.add(b.blockerId)
   }
 
+  /* ---------- privacy: batch-resolve which peers have me in their contacts ----------
+   * A peer's "contacts"-level privacy (last seen / photo / about) only grants
+   * access when MY phone is saved in THEIR contact book. One query for the
+   * whole chat list — no per-conversation DB round-trip. */
+  const contactOwners = peerIds.length
+    ? await db.contact.findMany({
+        where: { ownerId: { in: peerIds }, phone: me.phone },
+        select: { ownerId: true },
+      })
+    : []
+  const isContactOfPeer = new Set(contactOwners.map((c) => c.ownerId))
+
   const result: Array<{
     conversationId: string
     peer: ReturnType<typeof publicUser>
@@ -81,7 +93,7 @@ export async function GET(req: Request) {
     ])
     result.push({
       conversationId: conv.id,
-      peer: publicUser(peer),
+      peer: publicUser(peer, { id: me.id, isContact: isContactOfPeer.has(peer.id) }),
       lastMessage: lastMsg
         ? {
             id: lastMsg.id,
